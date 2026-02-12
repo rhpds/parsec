@@ -19,9 +19,13 @@ USER 0
 RUN dnf install -y --nodocs libpq && dnf clean all
 
 COPY --from=builder /opt/app-root/venv /opt/app-root/venv
-ENV PATH="/opt/app-root/venv/bin:$PATH" \
+ENV VIRTUAL_ENV="/opt/app-root/venv" \
+    PATH="/opt/app-root/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     PYTHONPATH="/app" \
     PYTHONUNBUFFERED=1
+
+# Remove S2I entrypoint — it sources profiles that override PATH
+ENTRYPOINT []
 
 WORKDIR /app
 

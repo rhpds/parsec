@@ -1,12 +1,18 @@
 """Claude tool-use orchestrator — the core agent loop."""
 
+from __future__ import annotations
+
 import json
 import logging
 import os
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import anthropic
+
+if TYPE_CHECKING:
+    from anthropic import AnthropicBedrock, AnthropicVertex
 
 from src.agent.streaming import (
     sse_done,
@@ -122,7 +128,7 @@ def _save_report(tool_input: dict) -> dict:
     }
 
 
-def _build_client(cfg) -> anthropic.Anthropic:
+def _build_client(cfg) -> anthropic.Anthropic | AnthropicVertex | AnthropicBedrock:
     """Build the appropriate Anthropic client based on config.
 
     Supports three backends:
@@ -316,7 +322,7 @@ async def run_agent(
                 model=model,
                 max_tokens=max_tokens,
                 system=system,
-                tools=TOOLS,
+                tools=TOOLS,  # type: ignore[arg-type]
                 messages=messages,
             )
         except anthropic.APIError as e:
