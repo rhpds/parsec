@@ -22,9 +22,3 @@ spec:
   failedBuildsHistoryLimit: 5
   triggers:
     - type: ConfigChange
-    - type: GitHub
-      github:
-        secret: "placeholder"
-    - type: Generic
-      generic:
-        secret: "placeholder"

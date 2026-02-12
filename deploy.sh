@@ -304,10 +304,15 @@ fi
 
 # Step 6: Patch BuildConfig webhook secret (inline, not secretReference)
 echo -e "${BLUE}Step 6: Configuring webhook...${NC}"
-oc set triggers bc/parsec --from-github -n ${NAMESPACE}
-oc set triggers bc/parsec --from-webhook -n ${NAMESPACE}
+WEBHOOK_SECRET=$(openssl rand -base64 20 | tr -d "=+/" | cut -c1-20)
+oc patch bc parsec -n ${NAMESPACE} --type=json -p "[
+  {\"op\": \"replace\", \"path\": \"/spec/triggers\", \"value\": [
+    {\"type\": \"ConfigChange\"},
+    {\"type\": \"GitHub\", \"github\": {\"secret\": \"${WEBHOOK_SECRET}\"}},
+    {\"type\": \"Generic\", \"generic\": {\"secret\": \"${WEBHOOK_SECRET}\"}}
+  ]}
+]"
 API_SERVER=$(oc whoami --show-server | sed 's|https://||')
-WEBHOOK_SECRET=$(oc get bc parsec -n ${NAMESPACE} -o jsonpath='{.spec.triggers[?(@.type=="GitHub")].github.secret}')
 WEBHOOK_URL="https://${API_SERVER}/apis/build.openshift.io/v1/namespaces/${NAMESPACE}/buildconfigs/parsec/webhooks/${WEBHOOK_SECRET}/github"
 echo -e "${GREEN}Webhook configured${NC}"
 echo ""
