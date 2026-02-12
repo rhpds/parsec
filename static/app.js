@@ -64,6 +64,7 @@ form.addEventListener("submit", async (e) => {
 
     let fullText = "";
     let currentToolEl = null;
+    let toolElements = {};   // Map tool name to element for finalization
     let streamStarted = false;
     let textChunks = [];     // Array of text segments between tool calls
     let currentChunk = "";   // Current text being accumulated
@@ -98,6 +99,14 @@ form.addEventListener("submit", async (e) => {
 
             case "tool_start": {
                 ensureStreamStarted();
+                // Finalize any previous tool that didn't get a result
+                if (currentToolEl) {
+                    var prevStatus = currentToolEl.querySelector(".tool-status");
+                    if (prevStatus && prevStatus.classList.contains("running")) {
+                        prevStatus.className = "tool-status done";
+                        prevStatus.textContent = "done";
+                    }
+                }
                 // Save current text chunk as intermediate thinking
                 if (currentChunk.trim()) {
                     textChunks.push(currentChunk);
@@ -108,6 +117,7 @@ form.addEventListener("submit", async (e) => {
                 if (liveEl) liveEl.remove();
 
                 currentToolEl = createToolCall(data.tool, data.input);
+                toolElements[data.tool + "_" + Object.keys(toolElements).length] = currentToolEl;
                 contentEl.appendChild(currentToolEl);
                 scrollToBottom();
                 break;
@@ -157,6 +167,12 @@ form.addEventListener("submit", async (e) => {
                 break;
 
             case "done": {
+                // Finalize any tools still showing "running"
+                contentEl.querySelectorAll(".tool-status.running").forEach(function(s) {
+                    s.className = "tool-status done";
+                    s.textContent = "done";
+                });
+
                 // Collect tool calls and intermediate thinking text
                 const toolCalls = contentEl.querySelectorAll(".tool-call");
                 if (toolCalls.length > 0 || textChunks.length > 0) {

@@ -249,10 +249,7 @@ that may not answer what the user actually wanted.
 - When presenting tabular data in chat, use markdown tables
 - Highlight suspicious patterns proactively
 - If a query returns no results, say so clearly and suggest alternatives
-- Whenever you present cost data that could be explored further in the
-  cost-monitor dashboard, include a link to it. The dashboard URL is provided
-  in `_dashboard_link` in cost-monitor API responses. If available, add a line
-  like: "View in [Cost Monitor Dashboard](url)" at the end of your answer.
-  Even when using direct AWS/Azure/GCP tools instead of cost-monitor, still
-  link to the dashboard if you have the URL, since the user can explore the
-  same date range there interactively.
+- When you get a `_dashboard_link` URL in a cost-monitor API response, include
+  it as: "View in [Cost Monitor Dashboard](url)" at the end of your answer.
+  ONLY use the URL from the `_dashboard_link` field — never make up or guess
+  a dashboard URL.
