@@ -22,9 +22,3 @@ spec:
   failedBuildsHistoryLimit: 5
   triggers:
     - type: ConfigChange
-    - type: GitHub
-      github:
-        secret: "REPLACE_WITH_WEBHOOK_SECRET"
-    - type: Generic
-      generic:
-        secret: "REPLACE_WITH_WEBHOOK_SECRET"

@@ -306,8 +306,8 @@ fi
 echo -e "${BLUE}Step 6: Configuring webhook...${NC}"
 WEBHOOK_SECRET=$(openssl rand -base64 20 | tr -d "=+/" | cut -c1-20)
 oc patch bc parsec -n ${NAMESPACE} --type=json -p "[
-  {\"op\": \"replace\", \"path\": \"/spec/triggers/1\", \"value\": {\"type\": \"GitHub\", \"github\": {\"secret\": \"${WEBHOOK_SECRET}\"}}},
-  {\"op\": \"replace\", \"path\": \"/spec/triggers/2\", \"value\": {\"type\": \"Generic\", \"generic\": {\"secret\": \"${WEBHOOK_SECRET}\"}}}
+  {\"op\": \"add\", \"path\": \"/spec/triggers/-\", \"value\": {\"type\": \"GitHub\", \"github\": {\"secret\": \"${WEBHOOK_SECRET}\"}}},
+  {\"op\": \"add\", \"path\": \"/spec/triggers/-\", \"value\": {\"type\": \"Generic\", \"generic\": {\"secret\": \"${WEBHOOK_SECRET}\"}}}
 ]"
 API_SERVER=$(oc whoami --show-server | sed 's|https://||')
 WEBHOOK_URL="https://${API_SERVER}/apis/build.openshift.io/v1/namespaces/${NAMESPACE}/buildconfigs/parsec/webhooks/${WEBHOOK_SECRET}/github"
