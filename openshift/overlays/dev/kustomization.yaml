@@ -37,9 +37,6 @@ patches:
       - op: replace
         path: /spec/source/git/ref
         value: main
-      - op: replace
-        path: /spec/output/to/name
-        value: "parsec:dev"
 
   # Update ClusterRoleBinding namespace
   - target:

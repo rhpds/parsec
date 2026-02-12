@@ -29,14 +29,3 @@ patches:
       - op: replace
         path: /spec/source/git/ref
         value: production
-      - op: replace
-        path: /spec/output/to/name
-        value: "parsec:v1.0.0"
-
-  - target:
-      kind: Deployment
-      name: parsec
-    patch: |
-      - op: replace
-        path: /spec/template/spec/containers/0/image
-        value: "parsec:v1.0.0"
