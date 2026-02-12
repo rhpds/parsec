@@ -51,7 +51,7 @@ async def execute_query(sql: str) -> dict:
 
     cfg = get_config()
     max_rows = cfg.provision_db.get("max_rows", 500)
-    pool = get_pool()
+    pool = await get_pool()
 
     try:
         async with pool.acquire() as conn:

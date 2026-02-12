@@ -24,6 +24,7 @@ async def init_pool() -> asyncpg.Pool:
         min_size=cfg.provision_db.get("min_pool_size", 2),
         max_size=cfg.provision_db.get("max_pool_size", 10),
         command_timeout=cfg.provision_db.get("statement_timeout_ms", 30000) / 1000,
+        timeout=10,
     )
     logger.info("Provision DB pool initialized")
     return _pool
@@ -38,8 +39,10 @@ async def close_pool() -> None:
         logger.info("Provision DB pool closed")
 
 
-def get_pool() -> asyncpg.Pool:
-    """Get the current connection pool."""
+async def get_pool() -> asyncpg.Pool:
+    """Get the current connection pool, initializing if needed."""
+    global _pool
     if _pool is None:
-        raise RuntimeError("DB pool not initialized — call init_pool() first")
+        logger.info("DB pool not initialized — attempting lazy connect")
+        await init_pool()
     return _pool

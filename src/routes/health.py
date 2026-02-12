@@ -17,7 +17,7 @@ async def health():
 async def readiness():
     """Readiness probe — checks DB connectivity."""
     try:
-        pool = get_pool()
+        pool = await get_pool()
         async with pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
         return {"status": "ready", "db": "connected"}
