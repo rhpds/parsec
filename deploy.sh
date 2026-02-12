@@ -299,6 +299,23 @@ oc apply -k "$OVERLAY_DIR"
 echo -e "${GREEN}Resources applied${NC}"
 echo ""
 
+# Patch BuildConfig with a real webhook secret (inline, not secretReference)
+echo -e "${BLUE}Configuring webhook...${NC}"
+WEBHOOK_SECRET=$(openssl rand -base64 20 | tr -d "=+/" | cut -c1-20)
+oc patch bc parsec -n ${NAMESPACE} --type=json -p "[
+  {\"op\": \"replace\", \"path\": \"/spec/triggers/1\", \"value\": {\"type\": \"GitHub\", \"github\": {\"secret\": \"${WEBHOOK_SECRET}\"}}},
+  {\"op\": \"replace\", \"path\": \"/spec/triggers/2\", \"value\": {\"type\": \"Generic\", \"generic\": {\"secret\": \"${WEBHOOK_SECRET}\"}}}
+]"
+WEBHOOK_URL="https://$(oc get infrastructure cluster -o jsonpath='{.status.apiServerURL}' 2>/dev/null | sed 's|https://||')/apis/build.openshift.io/v1/namespaces/${NAMESPACE}/buildconfigs/parsec/webhooks/${WEBHOOK_SECRET}/github"
+echo -e "${GREEN}Webhook secret configured${NC}"
+echo ""
+
+# Trigger initial build
+echo -e "${BLUE}Triggering initial build...${NC}"
+oc start-build parsec -n ${NAMESPACE}
+echo -e "${GREEN}Build started${NC}"
+echo ""
+
 # Wait for deployment
 wait_for_deployment "parsec" 300
 echo ""
@@ -330,8 +347,13 @@ echo -e "${BLUE}Parsec URL: https://${PARSEC_URL}${NC}"
 echo ""
 echo -e "${BLUE}Next steps:${NC}"
 echo -e "  1. Open https://${PARSEC_URL} (login with OpenShift credentials)"
-echo -e "  2. Update allowed users:"
+echo -e "  2. Add GitHub webhook for auto-builds:"
+echo -e "     URL: ${WEBHOOK_URL}"
+echo -e "     Content type: application/json"
+echo -e "     Secret: (leave blank)"
+echo -e "     Events: Just the push event"
+echo -e "  3. Update allowed users:"
 echo -e "     oc edit configmap parsec-allowed-users -n ${NAMESPACE}"
-echo -e "  3. View logs:"
+echo -e "  4. View logs:"
 echo -e "     oc logs -f deployment/parsec -n ${NAMESPACE}"
 echo -e "     oc logs -f deployment/oauth-proxy -n ${NAMESPACE}"

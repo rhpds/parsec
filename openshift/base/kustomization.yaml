@@ -14,6 +14,7 @@ resources:
   - deployment.yaml
   - service.yaml
   - route.yaml
+  - security/webhook-rolebinding.yaml
   - auth/oauth-rbac.yaml
   - auth/oauth-proxy.yaml
   - auth/oauth-routes.yaml

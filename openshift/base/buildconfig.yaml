@@ -24,9 +24,7 @@ spec:
     - type: ConfigChange
     - type: GitHub
       github:
-        secretReference:
-          name: parsec-webhook-secret
+        secret: "REPLACE_WITH_WEBHOOK_SECRET"
     - type: Generic
       generic:
-        secretReference:
-          name: parsec-webhook-secret
+        secret: "REPLACE_WITH_WEBHOOK_SECRET"
