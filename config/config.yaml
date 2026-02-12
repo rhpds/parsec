@@ -1,0 +1,42 @@
+app:
+  name: parsec
+  port: 8000
+  host: "0.0.0.0"
+  log_level: info
+
+anthropic:
+  # backend: "api" (direct), "vertex" (GCP Vertex AI), or "bedrock" (AWS Bedrock)
+  backend: "api"
+  model: "claude-sonnet-4-20250514"
+  max_tokens: 4096
+  max_tool_rounds: 10
+  # Vertex AI settings (when backend: "vertex")
+  # vertex_project_id: ""  # falls back to gcp.project_id
+  # vertex_region: "us-east5"
+  # Bedrock settings (when backend: "bedrock")
+  # bedrock_region: ""  # falls back to aws.region
+
+provision_db:
+  min_pool_size: 2
+  max_pool_size: 10
+  statement_timeout_ms: 30000
+  max_rows: 500
+
+aws:
+  profile: "athena"
+  region: "us-east-1"
+  batch_size: 100
+
+azure:
+  storage_account: ""
+  container: ""
+
+gcp:
+  project_id: ""
+  billing_dataset: ""
+  billing_account_id: ""
+
+auth:
+  # Comma-separated list of allowed email addresses or usernames
+  # When empty, all authenticated users are allowed
+  allowed_users: ""

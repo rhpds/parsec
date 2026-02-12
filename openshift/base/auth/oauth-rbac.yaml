@@ -1,0 +1,112 @@
+---
+# ServiceAccount for OAuth proxy
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: parsec-oauth
+  labels:
+    app: parsec
+    component: oauth
+  annotations:
+    serviceaccounts.openshift.io/oauth-redirectreference.primary: |
+      {
+        "kind": "OAuthRedirectReference",
+        "apiVersion": "v1",
+        "reference": {
+          "kind": "Route",
+          "name": "parsec-route"
+        }
+      }
+automountServiceAccountToken: true
+
+---
+# ClusterRole for OAuth proxy to access OpenShift OAuth
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: parsec-oauth
+  labels:
+    app: parsec
+    component: oauth
+rules:
+  - apiGroups: ["oauth.openshift.io"]
+    resources: ["oauthclients"]
+    verbs: ["get", "list"]
+  - apiGroups: ["user.openshift.io"]
+    resources: ["users"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["users"]
+    verbs: ["get"]
+  - apiGroups: ["user.openshift.io"]
+    resources: ["groups"]
+    verbs: ["get", "list"]
+
+---
+# ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: parsec-oauth
+  labels:
+    app: parsec
+    component: oauth
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: parsec-oauth
+subjects:
+  - kind: ServiceAccount
+    name: parsec-oauth
+    namespace: parsec
+
+---
+# Namespace-scoped role for config access
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: parsec-app-access
+  labels:
+    app: parsec
+    component: oauth
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+    resourceNames: ["parsec-allowed-users", "parsec-config"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+    resourceNames: ["oauth-proxy-secret"]
+
+---
+# RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: parsec-app-access
+  labels:
+    app: parsec
+    component: oauth
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: parsec-app-access
+subjects:
+  - kind: ServiceAccount
+    name: parsec-oauth
+    namespace: parsec
+
+---
+# ConfigMap for allowed users — edit this to control access
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: parsec-allowed-users
+  labels:
+    app: parsec
+    component: auth
+data:
+  # Comma-separated list of allowed email addresses.
+  # Empty string = all authenticated users allowed.
+  allowed-users: ""

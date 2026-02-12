@@ -1,0 +1,132 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: parsec
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: parsec
+      component: api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: parsec
+        component: api
+    spec:
+      serviceAccountName: parsec-oauth
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: parsec
+          image: parsec:latest
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          env:
+            - name: PARSEC_ANTHROPIC__BACKEND
+              value: "vertex"
+            - name: PARSEC_ANTHROPIC__VERTEX_PROJECT_ID
+              value: "itpc-gcp-product-all-claude"
+            - name: PARSEC_ANTHROPIC__VERTEX_REGION
+              value: "us-east5"
+            - name: PARSEC_ANTHROPIC__VERTEX_CREDENTIALS_PATH
+              value: "/app/gcp/service-account.json"
+            - name: PARSEC_PROVISION_DB__HOST
+              valueFrom:
+                secretKeyRef:
+                  name: parsec-secrets
+                  key: db-host
+            - name: PARSEC_PROVISION_DB__PORT
+              value: "5432"
+            - name: PARSEC_PROVISION_DB__DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: parsec-secrets
+                  key: db-name
+            - name: PARSEC_PROVISION_DB__USER
+              valueFrom:
+                secretKeyRef:
+                  name: parsec-secrets
+                  key: db-user
+            - name: PARSEC_PROVISION_DB__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: parsec-secrets
+                  key: db-password
+            - name: PARSEC_AWS__REGION
+              value: "us-east-1"
+            - name: PARSEC_AUTH__ALLOWED_USERS
+              valueFrom:
+                configMapKeyRef:
+                  name: parsec-allowed-users
+                  key: allowed-users
+                  optional: true
+          envFrom:
+            - secretRef:
+                name: parsec-cloud-credentials
+                optional: true
+          volumeMounts:
+            - name: config
+              mountPath: /app/config/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            - name: vertex-credentials
+              mountPath: /app/gcp
+              readOnly: true
+            - name: reports
+              mountPath: /app/reports
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/health/ready
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 12
+      volumes:
+        - name: config
+          configMap:
+            name: parsec-config
+        - name: vertex-credentials
+          secret:
+            secretName: vertex-credentials
+            defaultMode: 0400
+        - name: reports
+          emptyDir: {}

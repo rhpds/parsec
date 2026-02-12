@@ -1,0 +1,126 @@
+---
+# OAuth2 Proxy Deployment for SSO
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oauth-proxy
+  labels:
+    app: parsec
+    component: oauth-proxy
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: parsec-oauth-proxy
+      component: oauth-proxy
+  template:
+    metadata:
+      labels:
+        app: parsec-oauth-proxy
+        component: oauth-proxy
+    spec:
+      serviceAccountName: parsec-oauth
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: oauth-proxy
+          image: registry.redhat.io/openshift4/ose-oauth-proxy-rhel9:latest
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+            - containerPort: 8443
+              name: https
+              protocol: TCP
+          env:
+            - name: OAUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: oauth-proxy-secret
+                  key: client-id
+          args:
+            - -provider=openshift
+            - -http-address=:8080
+            - -https-address=
+            - -email-domain=*
+            - -upstream=http://parsec-service:8000/
+            - -client-id=$(OAUTH_CLIENT_ID)
+            - -client-secret-file=/etc/proxy/secrets/client-secret
+            - -cookie-secret-file=/etc/proxy/secrets/session_secret
+            - -openshift-service-account=parsec-oauth
+            - -openshift-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            - -skip-auth-regex=^/api/health
+            - -pass-user-headers=true
+          volumeMounts:
+            - name: oauth-proxy-secret
+              mountPath: /etc/proxy/secrets
+              readOnly: true
+            - name: oauth-serving-cert
+              mountPath: /etc/tls/private
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+          livenessProbe:
+            httpGet:
+              path: /oauth/healthz
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 10
+            timeoutSeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /oauth/healthz
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 5
+            timeoutSeconds: 3
+            periodSeconds: 5
+      volumes:
+        - name: oauth-proxy-secret
+          secret:
+            secretName: oauth-proxy-secret
+        - name: oauth-serving-cert
+          secret:
+            secretName: oauth-serving-cert
+
+---
+# OAuth Proxy Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: oauth-proxy-service
+  labels:
+    app: parsec
+    component: oauth-proxy
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: oauth-serving-cert
+spec:
+  type: ClusterIP
+  selector:
+    app: parsec-oauth-proxy
+    component: oauth-proxy
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+    - name: https
+      port: 8443
+      targetPort: 8443
+      protocol: TCP

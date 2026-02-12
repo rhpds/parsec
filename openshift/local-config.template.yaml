@@ -1,0 +1,61 @@
+# Parsec OpenShift Deployment Configuration Template
+# Copy to openshift/local/local-config.yaml (or local-config-dev.yaml) and fill in values.
+# The local directory is gitignored.
+
+deployment:
+  namespace: "parsec"
+  cluster_domain: "apps.your-cluster.example.com"
+  image_registry: "default-route-openshift-image-registry.apps.your-cluster.example.com"
+
+oauth:
+  enabled: true
+
+git:
+  repository: "https://github.com/rhpds/parsec.git"
+  branch: "main"
+
+secrets:
+  # Vertex AI credentials for Claude
+  vertex:
+    project_id: "itpc-gcp-product-all-claude"
+    region: "us-east5"
+    # Path to the SA key file (will be mounted as a secret)
+    service_account_file: "/path/to/rhdp-vertex-app-sa.json"
+
+  # Provision database (read-only user)
+  provision_db:
+    host: "REPLACE_WITH_DB_HOST"
+    port: "5432"
+    database: "REPLACE_WITH_DB_NAME"
+    user: "REPLACE_WITH_DB_USER"
+    password: "REPLACE_WITH_DB_PASSWORD"
+
+  # AWS credentials (for Cost Explorer)
+  aws:
+    access_key_id: "REPLACE_WITH_AWS_ACCESS_KEY"
+    secret_access_key: "REPLACE_WITH_AWS_SECRET_KEY"
+    region: "us-east-1"
+
+  # Azure credentials (for billing CSV access)
+  azure:
+    client_id: "REPLACE_WITH_AZURE_CLIENT_ID"
+    client_secret: "REPLACE_WITH_AZURE_CLIENT_SECRET"
+    tenant_id: "REPLACE_WITH_AZURE_TENANT_ID"
+    storage_account: "REPLACE_WITH_STORAGE_ACCOUNT"
+    container: "REPLACE_WITH_CONTAINER"
+
+  # GCP credentials (for BigQuery billing — separate from Vertex project)
+  gcp:
+    project_id: "REPLACE_WITH_GCP_PROJECT"
+    billing_dataset: "REPLACE_WITH_DATASET"
+    billing_account_id: "REPLACE_WITH_BILLING_ACCOUNT"
+    service_account_file: "/path/to/gcp-billing-sa.json"
+
+  # Webhook secrets for BuildConfig triggers
+  webhook:
+    github_secret: "generate-secure-webhook-secret"
+    generic_secret: "generate-secure-webhook-secret"
+
+# Comma-separated list of allowed user emails (empty = all authenticated users)
+auth:
+  allowed_users: ""

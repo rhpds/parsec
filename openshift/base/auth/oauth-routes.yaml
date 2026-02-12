@@ -1,0 +1,23 @@
+---
+# Main route — all traffic goes through OAuth proxy
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: parsec-route
+  labels:
+    app: parsec
+    component: frontend
+  annotations:
+    haproxy.router.openshift.io/timeout: 300s
+    haproxy.router.openshift.io/balance: roundrobin
+    haproxy.router.openshift.io/rate-limit-connections: "50"
+spec:
+  to:
+    kind: Service
+    name: oauth-proxy-service
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main, production]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install black ruff mypy bandit
+
+      - name: Black (formatting)
+        run: black --check --line-length=100 src/
+
+      - name: Ruff (linting)
+        run: ruff check src/
+
+      - name: MyPy (type checking)
+        run: mypy src/ --ignore-missing-imports
+
+      - name: Bandit (security)
+        run: bandit -r src/ -s B101 -f json -o bandit-report.json || true
+
+      - name: Upload security report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bandit-report
+          path: bandit-report.json
+
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: quality-gates
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -f dockerfiles/Dockerfile -t parsec:test .
+
+      - name: Verify image
+        run: docker run --rm parsec:test python -c "from src.config import get_config; print('OK')"
+
+  ci-status:
+    runs-on: ubuntu-latest
+    needs: [quality-gates, docker-build]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          if [ "${{ needs.quality-gates.result }}" != "success" ] || \
+             [ "${{ needs.docker-build.result }}" != "success" ]; then
+            echo "CI failed"
+            exit 1
+          fi
+          echo "CI passed"

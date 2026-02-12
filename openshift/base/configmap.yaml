@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: parsec-config
+data:
+  config.yaml: |
+    app:
+      name: parsec
+      port: 8000
+      host: "0.0.0.0"
+      log_level: info
+
+    anthropic:
+      model: "claude-sonnet-4-20250514"
+      max_tokens: 4096
+      max_tool_rounds: 10
+
+    provision_db:
+      min_pool_size: 2
+      max_pool_size: 10
+      statement_timeout_ms: 30000
+      max_rows: 500
+
+    aws:
+      region: "us-east-1"
+      batch_size: 100
+
+    auth:
+      allowed_users: ""

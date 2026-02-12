@@ -1,0 +1,23 @@
+---
+# Health check route (no auth, internal monitoring only)
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: parsec-health
+  labels:
+    app: parsec
+    component: monitoring
+  annotations:
+    haproxy.router.openshift.io/timeout: 10s
+    haproxy.router.openshift.io/ip_whitelist: "10.0.0.0/8 172.16.0.0/12"
+spec:
+  to:
+    kind: Service
+    name: parsec-service
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  path: /api/health

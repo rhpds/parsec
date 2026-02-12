@@ -1,0 +1,201 @@
+"""Tool: query_azure_costs — query Azure billing CSVs for cost data."""
+
+import csv
+import io
+import logging
+from datetime import datetime
+
+from src.connections.azure import get_container_client
+
+logger = logging.getLogger(__name__)
+
+
+async def query_azure_costs(
+    subscription_names: list[str],
+    start_date: str,
+    end_date: str,
+) -> dict:
+    """Query Azure billing CSVs for costs in specified subscriptions.
+
+    Args:
+        subscription_names: List of subscription names (e.g. pool-01-374).
+        start_date: Start date (YYYY-MM-DD).
+        end_date: End date (YYYY-MM-DD).
+
+    Returns:
+        Dict with results_by_subscription and total_cost.
+    """
+    container_client = get_container_client()
+    if container_client is None:
+        return {"error": "Azure blob storage not configured"}
+
+    try:
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError:
+        return {"error": "Dates must be YYYY-MM-DD format"}
+
+    if not subscription_names:
+        return {"error": "No subscription_names provided"}
+
+    sub_set = set(subscription_names)
+
+    try:
+        # List billing CSV blobs in the date range
+        blobs = _list_billing_blobs(container_client, start_dt, end_dt)
+        if not blobs:
+            return {
+                "subscription_names": subscription_names,
+                "period": {"start": start_date, "end": end_date},
+                "results": [],
+                "total_cost": 0.0,
+                "note": "No billing CSV blobs found for the date range",
+            }
+
+        # Parse each blob and collect costs
+        cost_by_sub: dict[str, dict] = {}
+        total_cost = 0.0
+
+        for blob_name in blobs:
+            rows = _download_and_parse_csv(container_client, blob_name, sub_set, start_dt, end_dt)
+            for row in rows:
+                sub_name = row["subscription_name"]
+                if sub_name not in cost_by_sub:
+                    cost_by_sub[sub_name] = {
+                        "subscription_name": sub_name,
+                        "services": {},
+                        "total": 0.0,
+                        "gpu_cost": 0.0,
+                    }
+
+                entry = cost_by_sub[sub_name]
+                service = row["meter_category"]
+                cost = row["cost"]
+
+                if service not in entry["services"]:
+                    entry["services"][service] = {"cost": 0.0, "meter_subcategories": {}}
+
+                entry["services"][service]["cost"] += cost
+                sub_cat = row.get("meter_subcategory", "")
+                if sub_cat:
+                    if sub_cat not in entry["services"][service]["meter_subcategories"]:
+                        entry["services"][service]["meter_subcategories"][sub_cat] = 0.0
+                    entry["services"][service]["meter_subcategories"][sub_cat] += cost
+
+                entry["total"] += cost
+                total_cost += cost
+
+                # Flag GPU VMs
+                if _is_gpu_vm(row.get("meter_subcategory", "")):
+                    entry["gpu_cost"] += cost
+
+        # Round
+        for sub in cost_by_sub.values():
+            sub["total"] = round(sub["total"], 2)
+            sub["gpu_cost"] = round(sub["gpu_cost"], 2)
+            for svc in sub["services"].values():
+                svc["cost"] = round(svc["cost"], 2)
+                svc["meter_subcategories"] = {
+                    k: round(v, 2) for k, v in svc["meter_subcategories"].items()
+                }
+
+        return {
+            "subscriptions_queried": len(subscription_names),
+            "period": {"start": start_date, "end": end_date},
+            "blobs_processed": len(blobs),
+            "results": list(cost_by_sub.values()),
+            "total_cost": round(total_cost, 2),
+        }
+
+    except Exception as e:
+        logger.exception("Azure billing query failed")
+        return {"error": f"Azure billing query failed: {e}"}
+
+
+def _list_billing_blobs(container_client, start_dt: datetime, end_dt: datetime) -> list[str]:
+    """List billing CSV blob names in the date range."""
+    blobs = []
+    for blob in container_client.list_blobs():
+        name = blob.name
+        # Only process part_1 CSV files (primary billing data)
+        if "part_1" not in name or not name.endswith(".csv"):
+            continue
+        # Filter by date from blob path (e.g. 20250101-20250131/)
+        try:
+            parts = name.split("/")
+            for part in parts:
+                if len(part) == 17 and "-" in part:  # YYYYMMDD-YYYYMMDD
+                    blob_start = datetime.strptime(part[:8], "%Y%m%d")
+                    blob_end = datetime.strptime(part[9:17], "%Y%m%d")
+                    if blob_end >= start_dt and blob_start <= end_dt:
+                        blobs.append(name)
+                    break
+        except (ValueError, IndexError):
+            # Include blobs we can't parse dates from
+            blobs.append(name)
+    return blobs
+
+
+def _download_and_parse_csv(
+    container_client,
+    blob_name: str,
+    subscription_names: set[str],
+    start_dt: datetime,
+    end_dt: datetime,
+) -> list[dict]:
+    """Download a billing CSV and extract rows for target subscriptions."""
+    blob_client = container_client.get_blob_client(blob_name)
+    data = blob_client.download_blob().readall().decode("utf-8-sig")
+
+    reader = csv.DictReader(io.StringIO(data))
+    rows = []
+
+    for row in reader:
+        sub_name = row.get("SubscriptionName", row.get("subscriptionName", ""))
+        if sub_name not in subscription_names:
+            continue
+
+        # Parse date
+        date_str = row.get("Date", row.get("date", row.get("UsageDateTime", "")))
+        if not date_str:
+            continue
+
+        try:
+            # Handle multiple date formats
+            for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%Y %H:%M:%S"):
+                try:
+                    row_date = datetime.strptime(date_str.split(" ")[0] if " " in date_str else date_str, fmt)
+                    break
+                except ValueError:
+                    continue
+            else:
+                continue
+
+            if row_date < start_dt or row_date > end_dt:
+                continue
+        except (ValueError, IndexError):
+            continue
+
+        cost_str = row.get("CostInBillingCurrency", row.get("costInBillingCurrency", row.get("Cost", "0")))
+        try:
+            cost = float(cost_str)
+        except (ValueError, TypeError):
+            cost = 0.0
+
+        rows.append({
+            "subscription_name": sub_name,
+            "date": row_date.strftime("%Y-%m-%d"),
+            "meter_category": row.get("MeterCategory", row.get("meterCategory", "")),
+            "meter_subcategory": row.get("MeterSubCategory", row.get("meterSubCategory", "")),
+            "cost": cost,
+        })
+
+    return rows
+
+
+def _is_gpu_vm(meter_subcategory: str) -> bool:
+    """Check if a meter subcategory indicates a GPU VM."""
+    if not meter_subcategory:
+        return False
+    upper = meter_subcategory.upper()
+    return any(prefix in upper for prefix in ("NC", "ND", "NV"))

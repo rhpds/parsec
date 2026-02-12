@@ -1,0 +1,51 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: parsec-dev
+
+resources:
+  - ../../base
+
+patches:
+  # Dev: 1 replica, lower resources, build from main
+  - target:
+      kind: Deployment
+      name: parsec
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "128Mi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "256Mi"
+
+  - target:
+      kind: Deployment
+      name: oauth-proxy
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+
+  - target:
+      kind: BuildConfig
+      name: parsec
+    patch: |
+      - op: replace
+        path: /spec/source/git/ref
+        value: main
+      - op: replace
+        path: /spec/output/to/name
+        value: "parsec:dev"
+
+  # Update ClusterRoleBinding namespace
+  - target:
+      kind: ClusterRoleBinding
+      name: parsec-oauth
+    patch: |
+      - op: replace
+        path: /subjects/0/namespace
+        value: parsec-dev

@@ -1,0 +1,13 @@
+services:
+  parsec:
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config/config.local.yaml:/app/config/config.local.yaml:ro
+      - ./reports:/app/reports
+    environment:
+      - PARSEC_ANTHROPIC__API_KEY=${ANTHROPIC_API_KEY:-}
+    restart: unless-stopped
