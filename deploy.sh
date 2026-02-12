@@ -225,7 +225,26 @@ generate_oauth_secrets() {
         --from-literal=session_secret="$cookie_secret" \
         --dry-run=client -o yaml | oc apply -f -
 
-    echo -e "${GREEN}OAuth secrets generated for client: ${oauth_client_name}${NC}"
+    # Create the OAuthClient (cluster-scoped) with redirect URI
+    local redirect_uri="https://parsec-route-${NAMESPACE}.${CLUSTER_DOMAIN}/oauth/callback"
+
+    cat <<OAUTH_EOF | oc apply -f -
+apiVersion: oauth.openshift.io/v1
+kind: OAuthClient
+metadata:
+  name: ${oauth_client_name}
+  labels:
+    app: parsec
+    component: oauth
+secret: ${oauth_client_secret}
+redirectURIs:
+- "${redirect_uri}"
+grantMethod: auto
+respondWithChallenges: false
+OAUTH_EOF
+
+    echo -e "${GREEN}OAuth client created: ${oauth_client_name}${NC}"
+    echo -e "${GREEN}  Redirect URI: ${redirect_uri}${NC}"
 }
 
 setup_oauth_client() {

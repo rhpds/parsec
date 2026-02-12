@@ -11,7 +11,7 @@ data:
       log_level: info
 
     anthropic:
-      model: "claude-sonnet-4-20250514"
+      model: "claude-sonnet-4@20250514"
       max_tokens: 4096
       max_tool_rounds: 10
 
