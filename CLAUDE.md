@@ -113,3 +113,34 @@ Required secrets: `parsec-secrets` (API key, DB creds), `oauth-proxy-secret` (cl
 ## Report Generation
 
 Users can ask for reports in the chat ("generate a report of findings"). Claude uses the `generate_report` tool to produce `.md` or `.adoc` files, saved to `/app/reports/` with a download link in the UI.
+
+## Development Notes
+
+### Branching
+
+- `main` — development branch, deploys to `parsec-dev` namespace
+- `production` — stable branch, deploys to `parsec` namespace
+- Always create feature branches off `main` for changes
+- PRs target `main` and must pass CI (quality-gates + docker-build)
+
+### CI Pipeline
+
+Quality gates: black (formatting), ruff (linting), mypy (type checking), bandit (security).
+Docker build: multi-stage UBI 9 image with verify step.
+Both must pass before merge.
+
+### Key Technical Decisions
+
+- **Dockerfile**: Uses `VIRTUAL_ENV` env var and `ENTRYPOINT []` to override the ubi9/python-311 S2I base image's bash profiles that prepend `/opt/app-root/bin` to PATH. Without this, `python` resolves to the base image's interpreter instead of the venv.
+- **Claude backend**: Supports direct API, Vertex AI, and AWS Bedrock. Production uses Vertex AI (`claude-sonnet-4@20250514`).
+- **Cost-monitor `breakdown`/`drilldown` endpoints are AWS-only** — for Azure/GCP breakdowns, use `query_azure_costs` or `query_gcp_costs` directly.
+- **Azure `gpu_cost` auto-detection**: The `query_azure_costs` tool automatically detects NC/ND/NV series VMs and reports a separate `gpu_cost` field per subscription.
+- **Lazy DB init**: The provision DB pool retries on first query if startup initialization failed. Health readiness probe does NOT trigger DB init.
+- **GitHub auth**: Use the `rhjcd` profile for push access to `rhpds/parsec` (`gh auth switch --user rhjcd`).
+
+### Open PRs
+
+- PR #1: Agent instructions improvements + mypy fixes + Dockerfile fix
+- PR #2: docs/ directory with TODO backlog (depends on PR #1)
+
+See `docs/TODO.md` for the full project backlog.
