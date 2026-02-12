@@ -164,7 +164,9 @@ def _download_and_parse_csv(
             # Handle multiple date formats
             for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%Y %H:%M:%S"):
                 try:
-                    row_date = datetime.strptime(date_str.split(" ")[0] if " " in date_str else date_str, fmt)
+                    row_date = datetime.strptime(
+                        date_str.split(" ")[0] if " " in date_str else date_str, fmt
+                    )
                     break
                 except ValueError:
                     continue
@@ -176,19 +178,23 @@ def _download_and_parse_csv(
         except (ValueError, IndexError):
             continue
 
-        cost_str = row.get("CostInBillingCurrency", row.get("costInBillingCurrency", row.get("Cost", "0")))
+        cost_str = row.get(
+            "CostInBillingCurrency", row.get("costInBillingCurrency", row.get("Cost", "0"))
+        )
         try:
             cost = float(cost_str)
         except (ValueError, TypeError):
             cost = 0.0
 
-        rows.append({
-            "subscription_name": sub_name,
-            "date": row_date.strftime("%Y-%m-%d"),
-            "meter_category": row.get("MeterCategory", row.get("meterCategory", "")),
-            "meter_subcategory": row.get("MeterSubCategory", row.get("meterSubCategory", "")),
-            "cost": cost,
-        })
+        rows.append(
+            {
+                "subscription_name": sub_name,
+                "date": row_date.strftime("%Y-%m-%d"),
+                "meter_category": row.get("MeterCategory", row.get("meterCategory", "")),
+                "meter_subcategory": row.get("MeterSubCategory", row.get("meterSubCategory", "")),
+                "cost": cost,
+            }
+        )
 
     return rows
 
@@ -198,4 +204,4 @@ def _is_gpu_vm(meter_subcategory: str) -> bool:
     if not meter_subcategory:
         return False
     upper = meter_subcategory.upper()
-    return any(prefix in upper for prefix in ("NC", "ND", "NV"))
+    return any(series in upper for series in ("NC", "ND", "NV"))  # noqa: typos:ignore

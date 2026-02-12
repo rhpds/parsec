@@ -108,7 +108,7 @@ oc apply -k openshift/overlays/dev/
 oc apply -k openshift/overlays/prod/
 ```
 
-Required secrets: `parsec-secrets` (API key, DB creds), `oauth-proxy-secret` (client-id, client-secret, session_secret).
+Required secrets: `parsec-secrets` (API key, DB creds), `oauth-proxy-secret` (client-id, client-secret, session_secret).  <!-- pragma: allowlist secret -->
 
 ## Report Generation
 

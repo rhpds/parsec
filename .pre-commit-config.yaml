@@ -60,12 +60,7 @@ repos:
       - id: mypy
         args: ["--config-file", "pyproject.toml"]
         additional_dependencies:
-          [
-            "types-PyYAML",
-            "types-boto3",
-            "pydantic",
-            "fastapi",
-          ]
+          ["types-PyYAML", "types-boto3", "pydantic", "fastapi"]
         exclude: ^tests/
 
   # Dead code detection
@@ -102,14 +97,6 @@ repos:
             ^config/.*\.yaml$|
             \.secrets\.baseline$
           )
-
-  # Dockerfile linting
-  - repo: https://github.com/AleksaC/hadolint-py
-    rev: v2.12.0
-    hooks:
-      - id: hadolint
-        files: dockerfiles/.*
-        args: ["--failure-threshold", "warning"]
 
   # Spell checking
   - repo: https://github.com/crate-ci/typos

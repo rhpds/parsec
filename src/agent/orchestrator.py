@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from collections.abc import AsyncGenerator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import anthropic
 
@@ -102,7 +102,7 @@ def _save_report(tool_input: dict) -> dict:
 
     ext = ".adoc" if fmt == "asciidoc" else ".md"
     if not filename:
-        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date_str = datetime.now(UTC).strftime("%Y-%m-%d")
         filename = f"investigation_report_{date_str}"
 
     full_filename = f"{filename}{ext}"
@@ -138,7 +138,9 @@ def _build_client(cfg) -> anthropic.Anthropic:
         project_id = cfg.anthropic.get("vertex_project_id", "") or cfg.gcp.get("project_id", "")
         region = cfg.anthropic.get("vertex_region", "us-east5")
         if not project_id:
-            raise ValueError("anthropic.vertex_project_id or gcp.project_id required for Vertex backend")
+            raise ValueError(
+                "anthropic.vertex_project_id or gcp.project_id required for Vertex backend"
+            )
 
         # Use explicit SA credentials if provided, otherwise fall back to ADC
         creds_path = cfg.anthropic.get("vertex_credentials_path", "")
@@ -151,7 +153,12 @@ def _build_client(cfg) -> anthropic.Anthropic:
                 scopes=["https://www.googleapis.com/auth/cloud-platform"],
             )
             kwargs["credentials"] = credentials
-            logger.info("Using Vertex AI backend (project=%s, region=%s, sa=%s)", project_id, region, creds_path)
+            logger.info(
+                "Using Vertex AI backend (project=%s, region=%s, sa=%s)",
+                project_id,
+                region,
+                creds_path,
+            )
         else:
             logger.info("Using Vertex AI backend (project=%s, region=%s, ADC)", project_id, region)
 
@@ -207,7 +214,9 @@ def _trim_history(history: list, max_tokens: int = 150000) -> list:
                                 if "rows" in result_data:
                                     result_data["rows"] = result_data["rows"][:5]
                                     result_data["_truncated_for_context"] = True
-                                if "results" in result_data and isinstance(result_data["results"], list):
+                                if "results" in result_data and isinstance(
+                                    result_data["results"], list
+                                ):
                                     result_data["results"] = result_data["results"][:5]
                                     result_data["_truncated_for_context"] = True
                                 block["content"] = json.dumps(result_data)
@@ -270,7 +279,9 @@ def _serialize_messages(messages: list) -> list:
     return result
 
 
-async def run_agent(question: str, conversation_history: list | None = None) -> AsyncGenerator[str, None]:
+async def run_agent(
+    question: str, conversation_history: list | None = None
+) -> AsyncGenerator[str, None]:
     """Run the Claude tool-use loop and yield SSE events.
 
     Args:
@@ -293,13 +304,13 @@ async def run_agent(question: str, conversation_history: list | None = None) -> 
         return
 
     # Inject today's date so Claude knows the current date
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     system = f"{SYSTEM_PROMPT}\n\nToday's date is {today}."
 
     messages = _trim_history(conversation_history or [])
     messages.append({"role": "user", "content": question})
 
-    for round_num in range(max_rounds):
+    for _round in range(max_rounds):
         try:
             response = client.messages.create(
                 model=model,
@@ -354,11 +365,13 @@ async def run_agent(question: str, conversation_history: list | None = None) -> 
             elif tool_name == "render_chart" and "error" not in result:
                 yield sse_event("chart", result)
 
-            tool_results.append({
-                "type": "tool_result",
-                "tool_use_id": tool_block.id,
-                "content": json.dumps(result),
-            })
+            tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_block.id,
+                    "content": json.dumps(result),
+                }
+            )
 
         # Add tool results and loop back for Claude's next response
         messages.append({"role": "user", "content": tool_results})

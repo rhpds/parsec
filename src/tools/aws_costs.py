@@ -45,7 +45,9 @@ async def query_aws_costs(
 
     group_by_upper = group_by.upper()
     if group_by_upper not in ("SERVICE", "INSTANCE_TYPE", "LINKED_ACCOUNT"):
-        return {"error": f"Invalid group_by: {group_by}. Must be SERVICE, INSTANCE_TYPE, or LINKED_ACCOUNT"}
+        return {
+            "error": f"Invalid group_by: {group_by}. Must be SERVICE, INSTANCE_TYPE, or LINKED_ACCOUNT"
+        }
 
     ce = get_ce_client()
     cfg = get_config()
@@ -54,7 +56,11 @@ async def query_aws_costs(
     all_results = []
 
     # If no account IDs, do a single org-wide query
-    batches = [valid_ids[i : i + batch_size] for i in range(0, len(valid_ids), batch_size)] if valid_ids else [None]
+    batches: list[list[str] | None] = (
+        [valid_ids[i : i + batch_size] for i in range(0, len(valid_ids), batch_size)]
+        if valid_ids
+        else [None]
+    )
 
     for batch in batches:
         group_by_dims = [{"Type": "DIMENSION", "Key": group_by_upper}]
@@ -138,7 +144,9 @@ async def query_aws_costs(
                 entry["items"][dimension_value] = {"cost": 0.0, "daily": []}
 
             entry["items"][dimension_value]["cost"] += amount
-            entry["items"][dimension_value]["daily"].append({"date": date, "cost": round(amount, 4)})
+            entry["items"][dimension_value]["daily"].append(
+                {"date": date, "cost": round(amount, 4)}
+            )
             entry["total"] += amount
             total_cost += amount
 

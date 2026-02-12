@@ -17,10 +17,7 @@ async def init_pool() -> asyncpg.Pool:
     cfg = get_config()
     db = cfg.provision_db
 
-    dsn = (
-        f"postgresql://{db.user}:{db.password}"
-        f"@{db.host}:{db.get('port', 5432)}/{db.database}"
-    )
+    dsn = f"postgresql://{db.user}:{db.password}" f"@{db.host}:{db.get('port', 5432)}/{db.database}"
 
     _pool = await asyncpg.create_pool(
         dsn,

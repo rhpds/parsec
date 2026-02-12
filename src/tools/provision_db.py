@@ -94,7 +94,7 @@ def _serialize(value):
     """Convert DB values to JSON-safe types."""
     if value is None:
         return None
-    if isinstance(value, (int, float, str, bool)):
+    if isinstance(value, int | float | str | bool):
         return value
     # datetime, date, UUID, etc.
     return str(value)

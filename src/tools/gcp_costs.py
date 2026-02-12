@@ -99,13 +99,15 @@ async def query_gcp_costs(
 
             cost_by_group[key] = cost_by_group.get(key, 0.0) + cost
 
-            rows.append({
-                "date": row.usage_date,
-                "service": row.service_name,
-                "project": row.project_id,
-                "cost": round(cost, 4),
-                "currency": row.currency,
-            })
+            rows.append(
+                {
+                    "date": row.usage_date,
+                    "service": row.service_name,
+                    "project": row.project_id,
+                    "cost": round(cost, 4),
+                    "currency": row.currency,
+                }
+            )
 
         # Sort breakdown by cost descending
         breakdown = [

@@ -1,0 +1,4 @@
+[default.extend-words]
+# Azure GPU VM series names — not typos
+ND = "ND"
+nd = "nd"

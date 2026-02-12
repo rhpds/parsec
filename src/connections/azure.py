@@ -36,7 +36,9 @@ def init_azure() -> None:
         credential = DefaultAzureCredential()
 
     _container_client = ContainerClient(account_url, container, credential=credential)
-    logger.info("Azure blob client initialized (account=%s, container=%s)", storage_account, container)
+    logger.info(
+        "Azure blob client initialized (account=%s, container=%s)", storage_account, container
+    )
 
 
 def get_container_client() -> ContainerClient | None:

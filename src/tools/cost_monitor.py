@@ -12,9 +12,7 @@ logger = logging.getLogger(__name__)
 def _get_base_url() -> str:
     """Get the cost-monitor API base URL."""
     cfg = get_config()
-    return cfg.get("cost_monitor", {}).get(
-        "api_url", "http://cost-data-service:8000"
-    )
+    return cfg.get("cost_monitor", {}).get("api_url", "http://cost-data-service:8000")
 
 
 def _get_dashboard_url() -> str:
@@ -76,7 +74,9 @@ async def query_cost_monitor(
         url = f"{base_url}/api/v1/providers"
 
     else:
-        return {"error": f"Unknown endpoint: {endpoint}. Use summary, breakdown, drilldown, or providers."}
+        return {
+            "error": f"Unknown endpoint: {endpoint}. Use summary, breakdown, drilldown, or providers."
+        }
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -98,9 +98,13 @@ async def query_cost_monitor(
             return data
 
     except httpx.ConnectError:
-        return {"error": "Cannot reach cost-monitor service. It may not be running or accessible from this environment."}
+        return {
+            "error": "Cannot reach cost-monitor service. It may not be running or accessible from this environment."
+        }
     except httpx.HTTPStatusError as e:
-        return {"error": f"cost-monitor API returned {e.response.status_code}: {e.response.text[:500]}"}
+        return {
+            "error": f"cost-monitor API returned {e.response.status_code}: {e.response.text[:500]}"
+        }
     except Exception as e:
         logger.exception("cost-monitor query failed")
         return {"error": f"cost-monitor query failed: {e}"}

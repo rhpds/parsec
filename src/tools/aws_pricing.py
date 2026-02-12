@@ -112,20 +112,22 @@ async def query_aws_pricing(
                         break
 
             if hourly_price is not None:
-                results.append({
-                    "instance_type": attrs.get("instanceType", instance_type),
-                    "vcpu": attrs.get("vcpu", ""),
-                    "memory": attrs.get("memory", ""),
-                    "gpu": attrs.get("gpu", ""),
-                    "gpu_memory": attrs.get("gpuMemory", ""),
-                    "storage": attrs.get("storage", ""),
-                    "network": attrs.get("networkPerformance", ""),
-                    "hourly_price_usd": hourly_price,
-                    "daily_price_usd": round(hourly_price * 24, 2),
-                    "monthly_price_usd": round(hourly_price * 730, 2),
-                    "os": os_type,
-                    "region": region,
-                })
+                results.append(
+                    {
+                        "instance_type": attrs.get("instanceType", instance_type),
+                        "vcpu": attrs.get("vcpu", ""),
+                        "memory": attrs.get("memory", ""),
+                        "gpu": attrs.get("gpu", ""),
+                        "gpu_memory": attrs.get("gpuMemory", ""),
+                        "storage": attrs.get("storage", ""),
+                        "network": attrs.get("networkPerformance", ""),
+                        "hourly_price_usd": hourly_price,
+                        "daily_price_usd": round(hourly_price * 24, 2),
+                        "monthly_price_usd": round(hourly_price * 730, 2),
+                        "os": os_type,
+                        "region": region,
+                    }
+                )
 
         if not results:
             return {

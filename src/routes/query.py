@@ -28,7 +28,11 @@ def _log_identity_debug(request: Request) -> None:
     identity_headers = {}
     for header_name, header_value in request.headers.items():
         lower = header_name.lower()
-        if lower.startswith("x-forwarded-") or lower.startswith("x-auth-") or lower.startswith("x-remote-"):
+        if (
+            lower.startswith("x-forwarded-")
+            or lower.startswith("x-auth-")
+            or lower.startswith("x-remote-")
+        ):
             identity_headers[header_name] = header_value
 
     if identity_headers:
@@ -57,7 +61,9 @@ def _check_user_allowed(request: Request, user: str | None) -> None:
         return
     if not user:
         logger.warning("Access denied: no user identity in request headers")
-        raise HTTPException(status_code=403, detail="Authentication required — no user identity found in request")
+        raise HTTPException(
+            status_code=403, detail="Authentication required — no user identity found in request"
+        )
     if user.lower() not in allowed:
         logger.warning("Access denied for user '%s' — not in allowed_users list", user)
         logger.warning("  Allowed users: %s", ", ".join(sorted(allowed)))
@@ -87,7 +93,10 @@ async def query(
 
     logger.info(
         "Query from user=%s preferred_username=%s groups=%s: %s",
-        user, x_forwarded_preferred_username, x_forwarded_groups, body.question[:200],
+        user,
+        x_forwarded_preferred_username,
+        x_forwarded_groups,
+        body.question[:200],
     )
 
     async def event_stream():

@@ -225,7 +225,10 @@ TOOLS = [
                     "items": {
                         "type": "object",
                         "properties": {
-                            "label": {"type": "string", "description": "Dataset label (legend entry)."},
+                            "label": {
+                                "type": "string",
+                                "description": "Dataset label (legend entry).",
+                            },
                             "data": {
                                 "type": "array",
                                 "items": {"type": "number"},
