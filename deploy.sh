@@ -50,7 +50,6 @@ fi
 # Load config
 NAMESPACE=$(yq eval '.deployment.namespace' "$CONFIG_FILE")
 CLUSTER_DOMAIN=$(yq eval '.deployment.cluster_domain' "$CONFIG_FILE")
-IMAGE_REGISTRY=$(yq eval '.deployment.image_registry' "$CONFIG_FILE")
 GIT_REPOSITORY=$(yq eval '.git.repository' "$CONFIG_FILE")
 GIT_BRANCH=$(yq eval '.git.branch' "$CONFIG_FILE")
 OAUTH_ENABLED=$(yq eval '.oauth.enabled // true' "$CONFIG_FILE")
@@ -72,15 +71,6 @@ fi
 echo -e "${GREEN}Logged in as: $(oc whoami)${NC}"
 echo ""
 
-# Detect sed
-if command -v gsed &> /dev/null; then
-    SED_CMD="gsed -i"
-elif [[ "$OSTYPE" == "darwin"* ]]; then
-    SED_CMD="sed -i ''"
-else
-    SED_CMD="sed -i"
-fi
-
 # Determine overlay
 if [ "${ENVIRONMENT}" = "dev" ]; then
     OVERLAY_DIR="openshift/overlays/dev"
@@ -98,6 +88,35 @@ wait_for_deployment() {
         echo -e "${RED}Deployment ${name} failed${NC}"
         return 1
     fi
+}
+
+wait_for_build() {
+    local build_name=$1
+    local timeout=${2:-300}
+    echo -e "${YELLOW}Waiting for build ${build_name}...${NC}"
+    local elapsed=0
+    while [ $elapsed -lt $timeout ]; do
+        local phase=$(oc get build ${build_name} -n ${NAMESPACE} -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+        case $phase in
+            Complete)
+                echo -e "${GREEN}Build ${build_name} complete${NC}"
+                return 0
+                ;;
+            Failed|Error|Cancelled)
+                echo -e "${RED}Build ${build_name} failed: ${phase}${NC}"
+                return 1
+                ;;
+            *)
+                sleep 10
+                elapsed=$((elapsed + 10))
+                if [ $((elapsed % 30)) -eq 0 ]; then
+                    echo -e "${YELLOW}  Build ${phase}... (${elapsed}s)${NC}"
+                fi
+                ;;
+        esac
+    done
+    echo -e "${RED}Build timed out after ${timeout}s${NC}"
+    return 1
 }
 
 create_secrets() {
@@ -179,29 +198,6 @@ create_secrets() {
 
     echo -e "${GREEN}parsec-allowed-users configmap created${NC}"
 
-    # Patch parsec-config configmap with cost-monitor dashboard URL
-    local cm_dashboard_url=$(yq eval '.cost_monitor.dashboard_url // ""' "$CONFIG_FILE")
-    if [ -n "$cm_dashboard_url" ]; then
-        echo -e "${BLUE}Setting cost-monitor dashboard URL...${NC}"
-        # Read existing config, inject cost_monitor.dashboard_url
-        local existing_config=$(oc get configmap parsec-config -n ${NAMESPACE} -o jsonpath='{.data.config\.yaml}' 2>/dev/null || echo "")
-        if [ -n "$existing_config" ]; then
-            local updated_config=$(echo "$existing_config" | yq eval ".cost_monitor.dashboard_url = \"${cm_dashboard_url}\"" -)
-            oc create configmap parsec-config -n ${NAMESPACE} \
-                --from-literal=config.yaml="$updated_config" \
-                --dry-run=client -o yaml | oc apply -f -
-            echo -e "${GREEN}cost-monitor dashboard URL set: ${cm_dashboard_url}${NC}"
-        fi
-    fi
-
-    # Webhook secrets
-    local gh_secret=$(yq eval '.secrets.webhook.github_secret' "$CONFIG_FILE")
-    local generic_secret=$(yq eval '.secrets.webhook.generic_secret' "$CONFIG_FILE")
-
-    oc create secret generic parsec-webhook-secret -n ${NAMESPACE} \
-        --from-literal=WebHookSecretKey="$gh_secret" \
-        --dry-run=client -o yaml | oc apply -f -
-
     echo -e "${GREEN}All secrets created${NC}"
 }
 
@@ -247,41 +243,6 @@ OAUTH_EOF
     echo -e "${GREEN}  Redirect URI: ${redirect_uri}${NC}"
 }
 
-setup_oauth_client() {
-    echo -e "${BLUE}Setting up OAuth client...${NC}"
-
-    local oauth_client_name="parsec-oauth-client"
-    if [ "${ENVIRONMENT}" = "dev" ]; then
-        oauth_client_name="parsec-oauth-client-dev"
-    fi
-
-    # Clean up failed OAuth proxy pods
-    oc delete pods -l component=oauth-proxy --field-selector=status.phase=Failed -n ${NAMESPACE} --ignore-not-found=true 2>/dev/null
-
-    local max_attempts=30
-    local attempt=0
-
-    echo -e "${YELLOW}Waiting for OAuth client...${NC}"
-    while [ $attempt -lt $max_attempts ]; do
-        if oc get oauthclient "$oauth_client_name" &> /dev/null; then
-            echo -e "${GREEN}OAuth client found: $oauth_client_name${NC}"
-            break
-        fi
-        attempt=$((attempt + 1))
-        if [ $((attempt % 5)) -eq 0 ]; then
-            echo -e "${YELLOW}  Still waiting... ($attempt/$max_attempts)${NC}"
-        fi
-        sleep 3
-    done
-
-    if [ $attempt -ge $max_attempts ]; then
-        echo -e "${RED}Failed to find OAuth client${NC}"
-        return 1
-    fi
-
-    echo -e "${GREEN}OAuth client configured${NC}"
-}
-
 # --- Main deployment flow ---
 
 if [ "${DRY_RUN}" = "true" ]; then
@@ -292,8 +253,8 @@ if [ "${DRY_RUN}" = "true" ]; then
     exit 0
 fi
 
-# Create namespace
-echo -e "${BLUE}Creating namespace...${NC}"
+# Step 1: Create namespace
+echo -e "${BLUE}Step 1: Creating namespace...${NC}"
 if oc get namespace ${NAMESPACE} &> /dev/null; then
     echo -e "${YELLOW}Namespace ${NAMESPACE} already exists${NC}"
 else
@@ -302,75 +263,97 @@ else
 fi
 echo ""
 
-# Create secrets
+# Step 2: Create secrets (before kustomize apply so pods can start)
+echo -e "${BLUE}Step 2: Creating secrets...${NC}"
 create_secrets
 echo ""
 
-# OAuth setup
+# Step 3: OAuth setup (before kustomize so OAuthClient exists when proxy starts)
 if [ "${OAUTH_ENABLED}" = "true" ]; then
+    echo -e "${BLUE}Step 3: Setting up OAuth...${NC}"
     generate_oauth_secrets
     echo ""
 fi
 
-# Apply kustomize overlay
-echo -e "${BLUE}Deploying Parsec...${NC}"
+# Step 4: Apply kustomize overlay (creates deployments, services, routes, etc.)
+echo -e "${BLUE}Step 4: Applying kustomize overlay...${NC}"
 oc apply -k "$OVERLAY_DIR"
 echo -e "${GREEN}Resources applied${NC}"
 echo ""
 
-# Patch BuildConfig with a real webhook secret (inline, not secretReference)
-echo -e "${BLUE}Configuring webhook...${NC}"
+# Step 5: Patch configmap with cost-monitor dashboard URL (now that configmap exists)
+local_cm_dashboard_url=$(yq eval '.cost_monitor.dashboard_url // ""' "$CONFIG_FILE")
+if [ -n "$local_cm_dashboard_url" ]; then
+    echo -e "${BLUE}Step 5: Setting cost-monitor dashboard URL...${NC}"
+    existing_config=$(oc get configmap parsec-config -n ${NAMESPACE} -o jsonpath='{.data.config\.yaml}' 2>/dev/null || echo "")
+    if [ -n "$existing_config" ]; then
+        updated_config=$(echo "$existing_config" | yq eval ".cost_monitor.dashboard_url = \"${local_cm_dashboard_url}\"" -)
+        oc create configmap parsec-config -n ${NAMESPACE} \
+            --from-literal=config.yaml="$updated_config" \
+            --dry-run=client -o yaml | oc apply -f -
+        echo -e "${GREEN}Dashboard URL set: ${local_cm_dashboard_url}${NC}"
+    fi
+    echo ""
+fi
+
+# Step 6: Patch BuildConfig webhook secret (inline, not secretReference)
+echo -e "${BLUE}Step 6: Configuring webhook...${NC}"
 WEBHOOK_SECRET=$(openssl rand -base64 20 | tr -d "=+/" | cut -c1-20)
 oc patch bc parsec -n ${NAMESPACE} --type=json -p "[
   {\"op\": \"replace\", \"path\": \"/spec/triggers/1\", \"value\": {\"type\": \"GitHub\", \"github\": {\"secret\": \"${WEBHOOK_SECRET}\"}}},
   {\"op\": \"replace\", \"path\": \"/spec/triggers/2\", \"value\": {\"type\": \"Generic\", \"generic\": {\"secret\": \"${WEBHOOK_SECRET}\"}}}
 ]"
-WEBHOOK_URL="https://$(oc get infrastructure cluster -o jsonpath='{.status.apiServerURL}' 2>/dev/null | sed 's|https://||')/apis/build.openshift.io/v1/namespaces/${NAMESPACE}/buildconfigs/parsec/webhooks/${WEBHOOK_SECRET}/github"
-echo -e "${GREEN}Webhook secret configured${NC}"
+API_SERVER=$(oc whoami --show-server | sed 's|https://||')
+WEBHOOK_URL="https://${API_SERVER}/apis/build.openshift.io/v1/namespaces/${NAMESPACE}/buildconfigs/parsec/webhooks/${WEBHOOK_SECRET}/github"
+echo -e "${GREEN}Webhook configured${NC}"
 echo ""
 
-# Trigger initial build
-echo -e "${BLUE}Triggering initial build...${NC}"
-oc start-build parsec -n ${NAMESPACE}
-echo -e "${GREEN}Build started${NC}"
+# Step 7: Trigger build and wait for it to complete
+echo -e "${BLUE}Step 7: Building image...${NC}"
+BUILD_NAME=$(oc start-build parsec -n ${NAMESPACE} -o name | sed 's|build.build.openshift.io/||')
+if ! wait_for_build "$BUILD_NAME" 600; then
+    echo -e "${RED}Build failed. Check logs: oc logs build/${BUILD_NAME} -n ${NAMESPACE}${NC}"
+    exit 1
+fi
 echo ""
 
-# Wait for deployment
+# Step 8: Wait for deployment (now that image exists)
+echo -e "${BLUE}Step 8: Waiting for deployment...${NC}"
+# Restart to pick up the new image
+oc rollout restart deployment/parsec -n ${NAMESPACE}
 wait_for_deployment "parsec" 300
 echo ""
 
-# OAuth client setup
+# Step 9: Wait for OAuth proxy
 if [ "${OAUTH_ENABLED}" = "true" ]; then
-    if ! setup_oauth_client; then
-        echo -e "${RED}OAuth client setup failed${NC}"
-        exit 1
-    fi
-    echo ""
+    echo -e "${BLUE}Step 9: Waiting for OAuth proxy...${NC}"
     wait_for_deployment "oauth-proxy" 300
     echo ""
 fi
 
 # Status
 echo -e "${BLUE}Deployment Status:${NC}"
-oc get pods -n ${NAMESPACE}
+oc get pods -n ${NAMESPACE} --no-headers | grep -v build
 echo ""
 echo -e "${BLUE}Routes:${NC}"
 oc get routes -n ${NAMESPACE}
 echo ""
 
 # URLs
-PARSEC_URL=$(oc get route parsec-route -n ${NAMESPACE} -o jsonpath='{.spec.host}' 2>/dev/null || echo "parsec-${NAMESPACE}.${CLUSTER_DOMAIN}")
+PARSEC_URL=$(oc get route parsec-route -n ${NAMESPACE} -o jsonpath='{.spec.host}' 2>/dev/null || echo "parsec-route-${NAMESPACE}.${CLUSTER_DOMAIN}")
 echo -e "${GREEN}Deployment complete!${NC}"
 echo ""
-echo -e "${BLUE}Parsec URL: https://${PARSEC_URL}${NC}"
+echo -e "${BLUE}Parsec URL:${NC} https://${PARSEC_URL}"
+echo ""
+echo -e "${BLUE}GitHub Webhook:${NC}"
+echo -e "  URL: ${WEBHOOK_URL}"
+echo -e "  Content type: application/json"
+echo -e "  Secret: (leave blank)"
+echo -e "  Events: Just the push event"
 echo ""
 echo -e "${BLUE}Next steps:${NC}"
 echo -e "  1. Open https://${PARSEC_URL} (login with OpenShift credentials)"
-echo -e "  2. Add GitHub webhook for auto-builds:"
-echo -e "     URL: ${WEBHOOK_URL}"
-echo -e "     Content type: application/json"
-echo -e "     Secret: (leave blank)"
-echo -e "     Events: Just the push event"
+echo -e "  2. Add the GitHub webhook above for auto-builds on push"
 echo -e "  3. Update allowed users:"
 echo -e "     oc edit configmap parsec-allowed-users -n ${NAMESPACE}"
 echo -e "  4. View logs:"
