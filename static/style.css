@@ -39,22 +39,17 @@ html, body {
 
 header {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 12px;
-    padding: 16px 20px;
+    padding: 12px 20px;
     border-bottom: 1px solid var(--border);
 }
 
-header h1 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--accent);
-    letter-spacing: 0.5px;
-}
-
-header .subtitle {
-    font-size: 13px;
-    color: var(--text-muted);
+header .header-logo {
+    height: 44px;
+    max-height: 44px;
+    width: auto;
+    border-radius: 8px;
 }
 
 header .header-link {
