@@ -222,7 +222,7 @@ generate_oauth_secrets() {
         --dry-run=client -o yaml | oc apply -f -
 
     # Create the OAuthClient (cluster-scoped) with redirect URI
-    local redirect_uri="https://parsec-route-${NAMESPACE}.${CLUSTER_DOMAIN}/oauth/callback"
+    local redirect_uri="https://${NAMESPACE}.${CLUSTER_DOMAIN}/oauth/callback"
 
     cat <<OAUTH_EOF | oc apply -f -
 apiVersion: oauth.openshift.io/v1
@@ -279,6 +279,12 @@ fi
 echo -e "${BLUE}Step 4: Applying kustomize overlay...${NC}"
 oc apply -k "$OVERLAY_DIR"
 echo -e "${GREEN}Resources applied${NC}"
+
+# Patch route host to be clean: parsec-dev.apps... or parsec.apps... instead of parsec-route-parsec-dev.apps...
+ROUTE_HOST="${NAMESPACE}.${CLUSTER_DOMAIN}"
+echo -e "${BLUE}Setting route host: ${ROUTE_HOST}${NC}"
+oc patch route parsec-route -n ${NAMESPACE} --type=json -p "[{\"op\": \"add\", \"path\": \"/spec/host\", \"value\": \"${ROUTE_HOST}\"}]"
+echo -e "${GREEN}Route host set${NC}"
 echo ""
 
 # Step 5: Patch configmap with cost-monitor dashboard URL (now that configmap exists)
@@ -340,7 +346,7 @@ oc get routes -n ${NAMESPACE}
 echo ""
 
 # URLs
-PARSEC_URL=$(oc get route parsec-route -n ${NAMESPACE} -o jsonpath='{.spec.host}' 2>/dev/null || echo "parsec-route-${NAMESPACE}.${CLUSTER_DOMAIN}")
+PARSEC_URL="${NAMESPACE}.${CLUSTER_DOMAIN}"
 echo -e "${GREEN}Deployment complete!${NC}"
 echo ""
 echo -e "${BLUE}Parsec URL:${NC} https://${PARSEC_URL}"
