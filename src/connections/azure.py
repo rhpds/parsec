@@ -30,6 +30,7 @@ def init_azure() -> None:
     client_secret = az.get("client_secret", "")
     tenant_id = az.get("tenant_id", "")
 
+    credential: ClientSecretCredential | DefaultAzureCredential
     if client_id and client_secret and tenant_id:
         credential = ClientSecretCredential(tenant_id, client_id, client_secret)
     else:

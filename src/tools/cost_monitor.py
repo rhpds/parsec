@@ -81,7 +81,7 @@ async def query_cost_monitor(
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             # Build params as list of tuples so providers repeat correctly
-            param_tuples = list(params.items())
+            param_tuples: list[tuple[str, str | int | float | bool | None]] = list(params.items())
             for p in provider_list:
                 param_tuples.append(("providers", p))
             response = await client.get(url, params=param_tuples)
