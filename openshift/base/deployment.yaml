@@ -46,7 +46,7 @@ spec:
                   name: parsec-secrets
                   key: db-host
             - name: PARSEC_PROVISION_DB__PORT
-              value: "5432"
+              value: "54327"
             - name: PARSEC_PROVISION_DB__DATABASE
               valueFrom:
                 secretKeyRef:
@@ -64,6 +64,8 @@ spec:
                   key: db-password
             - name: PARSEC_AWS__REGION
               value: "us-east-1"
+            - name: PARSEC_GCP__CREDENTIALS_PATH
+              value: "/app/gcp-billing/service-account.json"
             - name: PARSEC_AUTH__ALLOWED_USERS
               valueFrom:
                 configMapKeyRef:
@@ -81,6 +83,9 @@ spec:
               readOnly: true
             - name: vertex-credentials
               mountPath: /app/gcp
+              readOnly: true
+            - name: gcp-billing-credentials
+              mountPath: /app/gcp-billing
               readOnly: true
             - name: reports
               mountPath: /app/reports
@@ -128,5 +133,10 @@ spec:
           secret:
             secretName: vertex-credentials
             defaultMode: 0400
+        - name: gcp-billing-credentials
+          secret:
+            secretName: gcp-billing-credentials
+            defaultMode: 0400
+            optional: true
         - name: reports
           emptyDir: {}

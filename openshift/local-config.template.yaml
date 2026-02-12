@@ -25,7 +25,7 @@ secrets:
   # Provision database (read-only user)
   provision_db:
     host: "REPLACE_WITH_DB_HOST"
-    port: "5432"
+    port: "54327"
     database: "REPLACE_WITH_DB_NAME"
     user: "REPLACE_WITH_DB_USER"
     password: "REPLACE_WITH_DB_PASSWORD"

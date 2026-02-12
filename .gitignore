@@ -18,6 +18,10 @@ venv/
 
 reports/
 
+.claude/
+.mcp.json
+.playwright-credentials.yaml
+
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
