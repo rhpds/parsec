@@ -119,6 +119,128 @@ TOOLS = [
         },
     },
     {
+        "name": "query_aws_pricing",
+        "description": (
+            "Look up on-demand pricing for an AWS EC2 instance type. "
+            "Returns hourly, daily, and monthly costs along with instance specs "
+            "(vCPU, memory, GPU, storage, network)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "instance_type": {
+                    "type": "string",
+                    "description": "EC2 instance type (e.g. g4dn.xlarge, m5.large, p3.2xlarge).",
+                },
+                "region": {
+                    "type": "string",
+                    "description": "AWS region code (e.g. us-east-1). Default: us-east-1.",
+                },
+                "os_type": {
+                    "type": "string",
+                    "enum": ["Linux", "Windows", "RHEL", "SUSE"],
+                    "description": "Operating system. Default: Linux.",
+                },
+            },
+            "required": ["instance_type"],
+        },
+    },
+    {
+        "name": "query_cost_monitor",
+        "description": (
+            "Query the cost-monitor dashboard API for aggregated, cached cost data. "
+            "Faster than raw Cost Explorer queries and includes cross-provider summaries. "
+            "Use this for broad cost overviews, account breakdowns, and drilldowns. "
+            "Available endpoints: summary (overall costs), breakdown (top accounts or "
+            "instance types), drilldown (details for a specific account), providers "
+            "(sync status)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "endpoint": {
+                    "type": "string",
+                    "enum": ["summary", "breakdown", "drilldown", "providers"],
+                    "description": "API endpoint to query.",
+                },
+                "start_date": {
+                    "type": "string",
+                    "description": "Start date in YYYY-MM-DD format.",
+                },
+                "end_date": {
+                    "type": "string",
+                    "description": "End date in YYYY-MM-DD format.",
+                },
+                "providers": {
+                    "type": "string",
+                    "description": "Comma-separated provider filter (e.g. 'aws', 'aws,azure').",
+                },
+                "group_by": {
+                    "type": "string",
+                    "enum": ["LINKED_ACCOUNT", "INSTANCE_TYPE"],
+                    "description": "For breakdown: how to group results.",
+                },
+                "top_n": {
+                    "type": "integer",
+                    "description": "For breakdown: number of top results. Default: 25.",
+                },
+                "drilldown_type": {
+                    "type": "string",
+                    "enum": ["account_services", "instance_details"],
+                    "description": "For drilldown: type of drill-down.",
+                },
+                "selected_key": {
+                    "type": "string",
+                    "description": "For drilldown: the account ID or instance type to drill into.",
+                },
+            },
+            "required": ["endpoint", "start_date", "end_date"],
+        },
+    },
+    {
+        "name": "render_chart",
+        "description": (
+            "Render a chart in the chat UI. Use this to visualize cost data, "
+            "trends, breakdowns, or comparisons. The chart is rendered client-side."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chart_type": {
+                    "type": "string",
+                    "enum": ["bar", "line", "pie", "doughnut"],
+                    "description": "Type of chart to render.",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Chart title.",
+                },
+                "labels": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Labels for each data point (x-axis for bar/line, segments for pie).",
+                },
+                "datasets": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string", "description": "Dataset label (legend entry)."},
+                            "data": {
+                                "type": "array",
+                                "items": {"type": "number"},
+                                "description": "Data values corresponding to labels.",
+                            },
+                        },
+                        "required": ["label", "data"],
+                    },
+                    "description": "One or more datasets to plot.",
+                },
+            },
+            "required": ["chart_type", "title", "labels", "datasets"],
+        },
+    },
+    {
         "name": "generate_report",
         "description": (
             "Generate a formatted investigation report (Markdown or AsciiDoc) from the findings "

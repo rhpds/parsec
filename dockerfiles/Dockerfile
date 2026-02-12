@@ -28,6 +28,7 @@ WORKDIR /app
 COPY src/ src/
 COPY static/ static/
 COPY config/config.yaml config/config.yaml
+COPY config/agent_instructions.md config/agent_instructions.md
 
 RUN mkdir -p /app/reports && \
     chgrp -R 0 /app && \

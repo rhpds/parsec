@@ -13,14 +13,13 @@ spec:
     type: Docker
     dockerStrategy:
       dockerfilePath: dockerfiles/Dockerfile
-      from:
-        kind: ImageStreamTag
-        name: python-311:latest
-        namespace: openshift
   output:
     to:
       kind: ImageStreamTag
       name: parsec:latest
+  runPolicy: Serial
+  successfulBuildsHistoryLimit: 5
+  failedBuildsHistoryLimit: 5
   triggers:
     - type: ConfigChange
     - type: GitHub
@@ -31,4 +30,3 @@ spec:
       generic:
         secretReference:
           name: parsec-webhook-secret
-    - type: ImageChange

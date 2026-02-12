@@ -57,5 +57,9 @@ secrets:
     generic_secret: "generate-secure-webhook-secret"
 
 # Comma-separated list of allowed user emails (empty = all authenticated users)
+cost_monitor:
+  # Dashboard URL for linking (auto-detect from route, or set manually)
+  dashboard_url: "https://dashboard-route-cost-monitor.apps.YOUR_CLUSTER_DOMAIN"
+
 auth:
   allowed_users: ""

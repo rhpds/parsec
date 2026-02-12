@@ -7,6 +7,43 @@ const sendBtn = document.getElementById("send-btn");
 
 let conversationHistory = [];
 
+// Open all markdown links in new tabs
+var renderer = new marked.Renderer();
+renderer.link = function(href, title, text) {
+    // marked v12+ passes an object as first arg
+    if (typeof href === "object") {
+        text = href.text;
+        title = href.title;
+        href = href.href;
+    }
+    var titleAttr = title ? ' title="' + title + '"' : "";
+    return '<a href="' + href + '"' + titleAttr + ' target="_blank" rel="noopener">' + text + "</a>";
+};
+marked.setOptions({ renderer: renderer });
+
+// Show welcome message on load
+(function showWelcome() {
+    const el = addMessage("assistant", "");
+    const contentEl = el.querySelector(".content");
+    const textEl = document.createElement("div");
+    textEl.className = "md-text";
+    textEl.innerHTML = marked.parse(
+        "**Hi, I'm Parsec** — a natural language investigation assistant for RHDP cloud costs.\n\n" +
+        "I can help you with things like:\n" +
+        "- \"Who are the top GPU users this week?\"\n" +
+        "- \"How much did we spend on AWS yesterday?\"\n" +
+        "- \"Show me external users with 50+ provisions since December\"\n" +
+        "- \"How much does a g4dn.xlarge cost?\"\n" +
+        "- \"Chart the top 10 AWS services by cost this month\"\n" +
+        "- \"Generate a report of suspicious activity\"\n\n" +
+        "I'm still learning! My instructions are in " +
+        "[`config/agent_instructions.md`](https://github.com/rhpds/parsec/blob/main/config/agent_instructions.md) " +
+        "in the [parsec repo](https://github.com/rhpds/parsec) " +
+        "— PRs welcome \uD83D\uDE01"
+    );
+    contentEl.appendChild(textEl);
+})();
+
 form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const question = input.value.trim();
@@ -26,9 +63,10 @@ form.addEventListener("submit", async (e) => {
     contentEl.appendChild(statusEl);
 
     let fullText = "";
-    let accText = "";
     let currentToolEl = null;
     let streamStarted = false;
+    let textChunks = [];     // Array of text segments between tool calls
+    let currentChunk = "";   // Current text being accumulated
 
     function ensureStreamStarted() {
         if (!streamStarted) {
@@ -37,14 +75,15 @@ form.addEventListener("submit", async (e) => {
         }
     }
 
-    function renderText() {
-        let textEl = contentEl.querySelector(".md-text");
+    function renderCurrentText() {
+        // Render the current chunk into a text element
+        let textEl = contentEl.querySelector(".md-text-live");
         if (!textEl) {
             textEl = document.createElement("div");
-            textEl.className = "md-text";
+            textEl.className = "md-text-live";
             contentEl.appendChild(textEl);
         }
-        textEl.innerHTML = marked.parse(accText);
+        textEl.innerHTML = marked.parse(currentChunk);
     }
 
     function processEvent(eventType, data) {
@@ -52,13 +91,22 @@ form.addEventListener("submit", async (e) => {
             case "text":
                 ensureStreamStarted();
                 fullText += data.content;
-                accText += data.content;
-                renderText();
+                currentChunk += data.content;
+                renderCurrentText();
                 scrollToBottom();
                 break;
 
             case "tool_start": {
                 ensureStreamStarted();
+                // Save current text chunk as intermediate thinking
+                if (currentChunk.trim()) {
+                    textChunks.push(currentChunk);
+                }
+                currentChunk = "";
+                // Remove the live text element — it'll be collapsed later
+                const liveEl = contentEl.querySelector(".md-text-live");
+                if (liveEl) liveEl.remove();
+
                 currentToolEl = createToolCall(data.tool, data.input);
                 contentEl.appendChild(currentToolEl);
                 scrollToBottom();
@@ -70,6 +118,14 @@ form.addEventListener("submit", async (e) => {
                     finalizeToolCall(currentToolEl, data.tool, data.result);
                     currentToolEl = null;
                 }
+                scrollToBottom();
+                break;
+            }
+
+            case "chart": {
+                ensureStreamStarted();
+                const chartEl = renderChart(data);
+                contentEl.appendChild(chartEl);
                 scrollToBottom();
                 break;
             }
@@ -95,8 +151,62 @@ form.addEventListener("submit", async (e) => {
                 break;
             }
 
-            case "done":
+            case "history":
+                // Store full message history (includes tool calls/results)
+                conversationHistory = data.messages;
                 break;
+
+            case "done": {
+                // Collect tool calls and intermediate thinking text
+                const toolCalls = contentEl.querySelectorAll(".tool-call");
+                if (toolCalls.length > 0 || textChunks.length > 0) {
+                    const wrapper = document.createElement("details");
+                    wrapper.className = "tool-calls-summary";
+                    const summary = document.createElement("summary");
+                    const qCount = toolCalls.length;
+                    const label = qCount === 1 ? "1 query executed" : qCount + " queries executed";
+                    summary.textContent = label;
+                    wrapper.appendChild(summary);
+                    const inner = document.createElement("div");
+                    inner.className = "tool-calls-inner";
+
+                    // Interleave thinking text and tool calls
+                    // The thinking chunks were saved before each tool_start
+                    let chunkIdx = 0;
+                    const allToolCalls = Array.from(toolCalls);
+                    allToolCalls.forEach(tc => {
+                        if (chunkIdx < textChunks.length) {
+                            const thinkEl = document.createElement("div");
+                            thinkEl.className = "thinking-text";
+                            thinkEl.innerHTML = marked.parse(textChunks[chunkIdx]);
+                            inner.appendChild(thinkEl);
+                            chunkIdx++;
+                        }
+                        inner.appendChild(tc);
+                    });
+                    // Any remaining thinking chunks
+                    while (chunkIdx < textChunks.length) {
+                        const thinkEl = document.createElement("div");
+                        thinkEl.className = "thinking-text";
+                        thinkEl.innerHTML = marked.parse(textChunks[chunkIdx]);
+                        inner.appendChild(thinkEl);
+                        chunkIdx++;
+                    }
+
+                    wrapper.appendChild(inner);
+                    // Insert at the top of content
+                    contentEl.insertBefore(wrapper, contentEl.firstChild);
+                }
+
+                // Render the final answer (currentChunk is the text after the last tool call)
+                const liveEl = contentEl.querySelector(".md-text-live");
+                if (liveEl) {
+                    liveEl.className = "md-text";
+                }
+
+                scrollToBottom();
+                break;
+            }
         }
     }
 
@@ -150,10 +260,8 @@ form.addEventListener("submit", async (e) => {
         contentEl.appendChild(errorEl);
     }
 
-    conversationHistory.push({ role: "user", content: question });
-    if (fullText) {
-        conversationHistory.push({ role: "assistant", content: fullText });
-    }
+    // History is updated via the "history" SSE event from the server,
+    // which includes the full message array with tool calls and results.
 
     sendBtn.disabled = false;
     input.focus();
@@ -228,6 +336,121 @@ function finalizeToolCall(toolEl, toolName, result) {
 
     const body = toolEl.querySelector(".tool-body");
     body.textContent += "\n\n--- Result ---\n" + JSON.stringify(result, null, 2);
+}
+
+const CHART_COLORS = [
+    "#7aa2f7", "#9ece6a", "#e0af68", "#f7768e", "#bb9af7",
+    "#7dcfff", "#73daca", "#ff9e64", "#c0caf5", "#a9b1d6",
+];
+
+function renderChart(data) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "chart-container";
+    const canvas = document.createElement("canvas");
+    wrapper.appendChild(canvas);
+
+    const datasets = (data.datasets || []).map(function(ds, i) {
+        var colors = CHART_COLORS[i % CHART_COLORS.length];
+        var config = {
+            label: ds.label,
+            data: ds.data,
+        };
+
+        if (data.chart_type === "pie" || data.chart_type === "doughnut") {
+            config.backgroundColor = ds.data.map(function(_, j) {
+                return CHART_COLORS[j % CHART_COLORS.length];
+            });
+            config.borderColor = "#1a1b26";
+            config.borderWidth = 2;
+        } else {
+            config.backgroundColor = colors + "99";
+            config.borderColor = colors;
+            config.borderWidth = 2;
+        }
+
+        return config;
+    });
+
+    // Auto-detect if values span multiple orders of magnitude → use log scale
+    var allValues = datasets.flatMap(function(ds) { return ds.data; }).filter(function(v) { return v > 0; });
+    var useLog = false;
+    if (allValues.length >= 2) {
+        var maxVal = Math.max.apply(null, allValues);
+        var minVal = Math.min.apply(null, allValues);
+        if (minVal > 0 && maxVal / minVal > 100) {
+            useLog = true;
+        }
+    }
+
+    var chartInstance = new Chart(canvas, {
+        type: data.chart_type,
+        data: {
+            labels: data.labels,
+            datasets: datasets,
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                title: {
+                    display: true,
+                    text: data.title + (useLog ? " (log scale)" : ""),
+                    color: "#c0caf5",
+                    font: { size: 14 },
+                },
+                legend: {
+                    labels: { color: "#a9b1d6", font: { size: 11 } },
+                },
+            },
+            scales: (data.chart_type === "pie" || data.chart_type === "doughnut") ? {} : {
+                x: {
+                    ticks: { color: "#565f89", font: { size: 11 } },
+                    grid: { color: "#3b4261" },
+                },
+                y: {
+                    type: useLog ? "logarithmic" : "linear",
+                    ticks: { color: "#565f89", font: { size: 11 } },
+                    grid: { color: "#3b4261" },
+                },
+            },
+        },
+    });
+
+    // Export buttons
+    var exportBar = document.createElement("div");
+    exportBar.className = "chart-export-bar";
+
+    var pngBtn = document.createElement("button");
+    pngBtn.className = "chart-export-btn";
+    pngBtn.textContent = "Export PNG";
+    pngBtn.addEventListener("click", function() {
+        var link = document.createElement("a");
+        link.download = (data.title || "chart").replace(/[^a-z0-9]/gi, "_") + ".png";
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+    });
+
+    var csvBtn = document.createElement("button");
+    csvBtn.className = "chart-export-btn";
+    csvBtn.textContent = "Export CSV";
+    csvBtn.addEventListener("click", function() {
+        var rows = ["Label," + data.datasets.map(function(ds) { return ds.label; }).join(",")];
+        data.labels.forEach(function(label, i) {
+            var vals = data.datasets.map(function(ds) { return ds.data[i]; });
+            rows.push(label + "," + vals.join(","));
+        });
+        var blob = new Blob([rows.join("\n")], { type: "text/csv" });
+        var link = document.createElement("a");
+        link.download = (data.title || "chart").replace(/[^a-z0-9]/gi, "_") + ".csv";
+        link.href = URL.createObjectURL(blob);
+        link.click();
+    });
+
+    exportBar.appendChild(pngBtn);
+    exportBar.appendChild(csvBtn);
+    wrapper.appendChild(exportBar);
+
+    return wrapper;
 }
 
 function scrollToBottom() {

@@ -25,5 +25,9 @@ data:
       region: "us-east-1"
       batch_size: 100
 
+    cost_monitor:
+      api_url: "http://cost-data-service.cost-monitor.svc:8000"
+      dashboard_url: ""
+
     auth:
       allowed_users: ""

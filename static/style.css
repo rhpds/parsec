@@ -133,6 +133,16 @@ main#chat {
     font-weight: 600;
 }
 
+.message.assistant .content a {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-color: var(--accent-dim);
+}
+
+.message.assistant .content a:hover {
+    color: #89b4fa;
+}
+
 .message.assistant .content code {
     background: var(--bg);
     padding: 2px 6px;
@@ -210,6 +220,80 @@ main#chat {
     overflow-y: auto;
     white-space: pre-wrap;
     word-break: break-word;
+}
+
+/* Collapsed tool calls summary */
+.tool-calls-summary {
+    margin: 8px 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.tool-calls-summary > summary {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--success);
+    background: var(--bg-tool);
+    user-select: none;
+}
+
+.tool-calls-summary > summary:hover {
+    color: var(--text);
+}
+
+.tool-calls-summary .tool-calls-inner {
+    padding: 4px;
+}
+
+.tool-calls-summary .tool-call {
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+}
+
+.tool-calls-summary .thinking-text {
+    padding: 8px 12px;
+    font-size: 13px;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border);
+}
+
+/* Charts */
+.chart-container {
+    margin: 12px 0;
+    padding: 16px;
+    background: var(--bg);
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    max-width: 100%;
+}
+
+.chart-container canvas {
+    max-height: 350px;
+}
+
+.chart-export-bar {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+    justify-content: flex-end;
+}
+
+.chart-export-btn {
+    padding: 4px 10px;
+    font-size: 11px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.chart-export-btn:hover {
+    color: var(--text);
+    border-color: var(--accent);
 }
 
 /* Report download */

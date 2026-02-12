@@ -7,7 +7,7 @@ app:
 anthropic:
   # backend: "api" (direct), "vertex" (GCP Vertex AI), or "bedrock" (AWS Bedrock)
   backend: "api"
-  model: "claude-sonnet-4-20250514"
+  model: "claude-sonnet-4@20250514"
   max_tokens: 4096
   max_tool_rounds: 10
   # Vertex AI settings (when backend: "vertex")
@@ -35,6 +35,12 @@ gcp:
   project_id: ""
   billing_dataset: ""
   billing_account_id: ""
+
+cost_monitor:
+  # Internal API URL (cross-namespace within OpenShift cluster)
+  api_url: "http://cost-data-service.cost-monitor.svc:8000"
+  # User-facing dashboard URL (for linking)
+  dashboard_url: ""
 
 auth:
   # Comma-separated list of allowed email addresses or usernames

@@ -1,7 +1,7 @@
 """Tool: query_aws_costs — query AWS Cost Explorer for cost data."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from src.config import get_config
 from src.connections.aws import get_ce_client
@@ -26,20 +26,22 @@ async def query_aws_costs(
     Returns:
         Dict with results_by_account and total_cost.
     """
-    # Validate dates
+    # Validate and adjust dates
     try:
-        datetime.strptime(start_date, "%Y-%m-%d")
-        datetime.strptime(end_date, "%Y-%m-%d")
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
     except ValueError:
         return {"error": "Dates must be YYYY-MM-DD format"}
 
-    if not account_ids:
-        return {"error": "No account_ids provided"}
+    # CE end_date is exclusive — if same day or end <= start, bump end by 1 day
+    if end_dt <= start_dt:
+        end_dt = start_dt + timedelta(days=1)
 
-    # Validate account IDs
+    start_date = start_dt.strftime("%Y-%m-%d")
+    end_date = end_dt.strftime("%Y-%m-%d")
+
+    # Validate account IDs (empty list = org-wide query)
     valid_ids = [aid for aid in account_ids if len(aid) == 12 and aid.isdigit()]
-    if not valid_ids:
-        return {"error": "No valid 12-digit account IDs provided"}
 
     group_by_upper = group_by.upper()
     if group_by_upper not in ("SERVICE", "INSTANCE_TYPE", "LINKED_ACCOUNT"):
@@ -51,27 +53,29 @@ async def query_aws_costs(
 
     all_results = []
 
-    # Batch accounts to avoid CE limits
-    for i in range(0, len(valid_ids), batch_size):
-        batch = valid_ids[i : i + batch_size]
+    # If no account IDs, do a single org-wide query
+    batches = [valid_ids[i : i + batch_size] for i in range(0, len(valid_ids), batch_size)] if valid_ids else [None]
 
+    for batch in batches:
         group_by_dims = [{"Type": "DIMENSION", "Key": group_by_upper}]
-        if group_by_upper != "LINKED_ACCOUNT":
+        if group_by_upper != "LINKED_ACCOUNT" and batch:
             group_by_dims.append({"Type": "DIMENSION", "Key": "LINKED_ACCOUNT"})
 
         try:
             kwargs = {
                 "TimePeriod": {"Start": start_date, "End": end_date},
                 "Granularity": "DAILY",
-                "Filter": {
+                "GroupBy": group_by_dims,
+                "Metrics": ["UnblendedCost"],
+            }
+
+            if batch:
+                kwargs["Filter"] = {
                     "Dimensions": {
                         "Key": "LINKED_ACCOUNT",
                         "Values": batch,
                     }
-                },
-                "GroupBy": group_by_dims,
-                "Metrics": ["UnblendedCost"],
-            }
+                }
 
             results_by_time = []
             while True:
@@ -86,8 +90,23 @@ async def query_aws_costs(
             all_results.extend(results_by_time)
 
         except Exception as e:
-            logger.exception("AWS CE query failed for batch starting at %d", i)
-            return {"error": f"AWS Cost Explorer query failed: {e}"}
+            error_msg = str(e)
+            # If account filter causes "historical data" error, retry without it
+            if "historical data" in error_msg and batch:
+                logger.warning("CE historical data error with account filter — retrying org-wide")
+                try:
+                    kwargs.pop("Filter", None)
+                    kwargs.pop("NextPageToken", None)
+                    # Simplify GroupBy to just the primary dimension (remove LINKED_ACCOUNT)
+                    kwargs["GroupBy"] = [{"Type": "DIMENSION", "Key": group_by_upper}]
+                    response = ce.get_cost_and_usage(**kwargs)
+                    all_results.extend(response.get("ResultsByTime", []))
+                except Exception as retry_e:
+                    logger.exception("AWS CE retry also failed")
+                    return {"error": f"AWS Cost Explorer query failed: {retry_e}"}
+            else:
+                logger.exception("AWS CE query failed for batch")
+                return {"error": f"AWS Cost Explorer query failed: {e}"}
 
     # Aggregate results
     cost_by_account: dict[str, dict] = {}
@@ -99,7 +118,12 @@ async def query_aws_costs(
             keys = group["Keys"]
             amount = float(group["Metrics"]["UnblendedCost"]["Amount"])
 
-            if group_by_upper == "LINKED_ACCOUNT":
+            # When filtering by account, keys = [dimension, account_id]
+            # When org-wide (no filter), keys = [dimension] only
+            if len(keys) == 1:
+                dimension_value = keys[0]
+                account_id = "org-wide"
+            elif group_by_upper == "LINKED_ACCOUNT":
                 account_id = keys[0]
                 dimension_value = keys[0]
             else:

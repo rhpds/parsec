@@ -179,6 +179,21 @@ create_secrets() {
 
     echo -e "${GREEN}parsec-allowed-users configmap created${NC}"
 
+    # Patch parsec-config configmap with cost-monitor dashboard URL
+    local cm_dashboard_url=$(yq eval '.cost_monitor.dashboard_url // ""' "$CONFIG_FILE")
+    if [ -n "$cm_dashboard_url" ]; then
+        echo -e "${BLUE}Setting cost-monitor dashboard URL...${NC}"
+        # Read existing config, inject cost_monitor.dashboard_url
+        local existing_config=$(oc get configmap parsec-config -n ${NAMESPACE} -o jsonpath='{.data.config\.yaml}' 2>/dev/null || echo "")
+        if [ -n "$existing_config" ]; then
+            local updated_config=$(echo "$existing_config" | yq eval ".cost_monitor.dashboard_url = \"${cm_dashboard_url}\"" -)
+            oc create configmap parsec-config -n ${NAMESPACE} \
+                --from-literal=config.yaml="$updated_config" \
+                --dry-run=client -o yaml | oc apply -f -
+            echo -e "${GREEN}cost-monitor dashboard URL set: ${cm_dashboard_url}${NC}"
+        fi
+    fi
+
     # Webhook secrets
     local gh_secret=$(yq eval '.secrets.webhook.github_secret' "$CONFIG_FILE")
     local generic_secret=$(yq eval '.secrets.webhook.generic_secret' "$CONFIG_FILE")

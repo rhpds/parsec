@@ -6,6 +6,7 @@
     <title>Parsec</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <div id="app">
@@ -19,11 +20,15 @@
         <footer>
             <form id="query-form">
                 <input
-                    type="text"
+                    type="search"
                     id="question"
                     placeholder="Ask a question — e.g. &quot;show me external users with 50+ provisions since December&quot;"
                     autocomplete="off"
                     autofocus
+                    data-lpignore="true"
+                    data-1p-ignore
+                    data-form-type="other"
+                    data-keeper-lock="true"
                 >
                 <button type="submit" id="send-btn">Send</button>
             </form>

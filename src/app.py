@@ -28,13 +28,22 @@ async def lifespan(app: FastAPI):
     cfg = get_config()
     logger.info("Parsec starting up (model=%s)", cfg.anthropic.get("model", "unknown"))
 
-    # Initialize connections
-    await init_pool()
-    init_aws()
-    init_azure()
-    init_gcp()
+    # Initialize connections — non-fatal so the app starts even if a backend is unreachable
+    for name, init_fn in [
+        ("Provision DB", init_pool),
+        ("AWS", init_aws),
+        ("Azure", init_azure),
+        ("GCP", init_gcp),
+    ]:
+        try:
+            result = init_fn()
+            if hasattr(result, "__await__"):
+                await result
+            logger.info("%s initialized", name)
+        except Exception:
+            logger.exception("%s initialization failed — will retry on first query", name)
 
-    logger.info("All connections initialized")
+    logger.info("Startup complete")
     yield
 
     # Shutdown

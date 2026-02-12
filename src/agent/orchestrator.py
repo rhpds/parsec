@@ -11,6 +11,7 @@ import anthropic
 from src.agent.streaming import (
     sse_done,
     sse_error,
+    sse_event,
     sse_report,
     sse_text,
     sse_tool_result,
@@ -20,7 +21,9 @@ from src.agent.system_prompt import SYSTEM_PROMPT
 from src.agent.tool_definitions import TOOLS
 from src.config import get_config
 from src.tools.aws_costs import query_aws_costs
+from src.tools.aws_pricing import query_aws_pricing
 from src.tools.azure_costs import query_azure_costs
+from src.tools.cost_monitor import query_cost_monitor
 from src.tools.gcp_costs import query_gcp_costs
 from src.tools.provision_db import execute_query
 
@@ -59,6 +62,29 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
             filter_services=tool_input.get("filter_services"),
             filter_projects=tool_input.get("filter_projects"),
         )
+
+    elif tool_name == "query_aws_pricing":
+        return await query_aws_pricing(
+            instance_type=tool_input["instance_type"],
+            region=tool_input.get("region", "us-east-1"),
+            os_type=tool_input.get("os_type", "Linux"),
+        )
+
+    elif tool_name == "query_cost_monitor":
+        return await query_cost_monitor(
+            endpoint=tool_input["endpoint"],
+            start_date=tool_input["start_date"],
+            end_date=tool_input["end_date"],
+            providers=tool_input.get("providers", ""),
+            group_by=tool_input.get("group_by", ""),
+            top_n=tool_input.get("top_n", 25),
+            drilldown_type=tool_input.get("drilldown_type", ""),
+            selected_key=tool_input.get("selected_key", ""),
+        )
+
+    elif tool_name == "render_chart":
+        # Charts are rendered client-side — just return the input as-is
+        return tool_input
 
     elif tool_name == "generate_report":
         return _save_report(tool_input)
@@ -114,13 +140,22 @@ def _build_client(cfg) -> anthropic.Anthropic:
         if not project_id:
             raise ValueError("anthropic.vertex_project_id or gcp.project_id required for Vertex backend")
 
-        # Set credentials path if provided (SA key file for OpenShift / CI)
+        # Use explicit SA credentials if provided, otherwise fall back to ADC
         creds_path = cfg.anthropic.get("vertex_credentials_path", "")
-        if creds_path:
-            os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", creds_path)
+        kwargs = {"project_id": project_id, "region": region}
+        if creds_path and os.path.isfile(creds_path):
+            from google.oauth2 import service_account
 
-        logger.info("Using Vertex AI backend (project=%s, region=%s)", project_id, region)
-        return AnthropicVertex(project_id=project_id, region=region)
+            credentials = service_account.Credentials.from_service_account_file(
+                creds_path,
+                scopes=["https://www.googleapis.com/auth/cloud-platform"],
+            )
+            kwargs["credentials"] = credentials
+            logger.info("Using Vertex AI backend (project=%s, region=%s, sa=%s)", project_id, region, creds_path)
+        else:
+            logger.info("Using Vertex AI backend (project=%s, region=%s, ADC)", project_id, region)
+
+        return AnthropicVertex(**kwargs)
 
     elif backend == "bedrock":
         from anthropic import AnthropicBedrock
@@ -135,6 +170,104 @@ def _build_client(cfg) -> anthropic.Anthropic:
             raise ValueError("ANTHROPIC_API_KEY not configured")
         logger.info("Using direct Anthropic API backend")
         return anthropic.Anthropic(api_key=api_key)
+
+
+def _estimate_tokens(obj) -> int:
+    """Rough token estimate: ~4 chars per token."""
+    return len(json.dumps(obj, default=str)) // 4
+
+
+def _trim_history(history: list, max_tokens: int = 150000) -> list:
+    """Trim conversation history to fit within token limits.
+
+    Keeps the most recent turns. Truncates large tool results in older turns.
+    """
+    if not history:
+        return []
+
+    messages = list(history)
+
+    # If under limit, return as-is
+    if _estimate_tokens(messages) <= max_tokens:
+        return messages
+
+    # First pass: truncate large tool_result content in older messages
+    for msg in messages[:-4]:  # Keep last 2 turns (4 messages) intact
+        content = msg.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    result_str = block.get("content", "")
+                    if isinstance(result_str, str) and len(result_str) > 2000:
+                        # Truncate but keep enough for context
+                        try:
+                            result_data = json.loads(result_str)
+                            if isinstance(result_data, dict):
+                                # Keep summary fields, drop row data
+                                if "rows" in result_data:
+                                    result_data["rows"] = result_data["rows"][:5]
+                                    result_data["_truncated_for_context"] = True
+                                if "results" in result_data and isinstance(result_data["results"], list):
+                                    result_data["results"] = result_data["results"][:5]
+                                    result_data["_truncated_for_context"] = True
+                                block["content"] = json.dumps(result_data)
+                        except (json.JSONDecodeError, TypeError):
+                            block["content"] = result_str[:2000] + "... [truncated]"
+
+    # If still over, drop oldest turns
+    while len(messages) > 2 and _estimate_tokens(messages) > max_tokens:
+        # Remove oldest user+assistant pair
+        messages.pop(0)
+        if messages and messages[0].get("role") == "assistant":
+            messages.pop(0)
+        # Also remove any orphaned tool_result
+        if messages and messages[0].get("role") == "user":
+            content = messages[0].get("content")
+            if isinstance(content, list) and all(
+                isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+            ):
+                messages.pop(0)
+
+    return messages
+
+
+def _serialize_messages(messages: list) -> list:
+    """Serialize the messages array to JSON-safe dicts.
+
+    Claude API content blocks are SDK objects — convert them to dicts
+    so the frontend can store and resend them.
+    """
+    result = []
+    for msg in messages:
+        role = msg["role"]
+        content = msg["content"]
+
+        if isinstance(content, str):
+            result.append({"role": role, "content": content})
+        elif isinstance(content, list):
+            serialized_content = []
+            for block in content:
+                if isinstance(block, dict):
+                    serialized_content.append(block)
+                elif hasattr(block, "model_dump"):
+                    serialized_content.append(block.model_dump())
+                elif hasattr(block, "to_dict"):
+                    serialized_content.append(block.to_dict())
+                else:
+                    serialized_content.append({"type": "text", "text": str(block)})
+            result.append({"role": role, "content": serialized_content})
+        else:
+            # SDK content object list (from response.content)
+            try:
+                serialized_content = [
+                    b.model_dump() if hasattr(b, "model_dump") else {"type": "text", "text": str(b)}
+                    for b in content
+                ]
+                result.append({"role": role, "content": serialized_content})
+            except TypeError:
+                result.append({"role": role, "content": str(content)})
+
+    return result
 
 
 async def run_agent(question: str, conversation_history: list | None = None) -> AsyncGenerator[str, None]:
@@ -159,7 +292,11 @@ async def run_agent(question: str, conversation_history: list | None = None) -> 
         yield sse_done()
         return
 
-    messages = list(conversation_history or [])
+    # Inject today's date so Claude knows the current date
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    system = f"{SYSTEM_PROMPT}\n\nToday's date is {today}."
+
+    messages = _trim_history(conversation_history or [])
     messages.append({"role": "user", "content": question})
 
     for round_num in range(max_rounds):
@@ -167,7 +304,7 @@ async def run_agent(question: str, conversation_history: list | None = None) -> 
             response = client.messages.create(
                 model=model,
                 max_tokens=max_tokens,
-                system=SYSTEM_PROMPT,
+                system=system,
                 tools=TOOLS,
                 messages=messages,
             )
@@ -189,8 +326,9 @@ async def run_agent(question: str, conversation_history: list | None = None) -> 
             elif block.type == "tool_use":
                 tool_use_blocks.append(block)
 
-        # If no tool calls, we're done
+        # If no tool calls, we're done — send the full history for multi-turn
         if not tool_use_blocks:
+            yield sse_event("history", {"messages": _serialize_messages(messages)})
             yield sse_done()
             return
 
@@ -209,10 +347,12 @@ async def run_agent(question: str, conversation_history: list | None = None) -> 
 
             yield sse_tool_result(tool_name, result)
 
-            # If this was a report generation, also send the report event
+            # Special SSE events for certain tools
             if tool_name == "generate_report" and "error" not in result:
                 download_url = f"/api/reports/{result['filename']}"
                 yield sse_report(result["filename"], result["format"], download_url)
+            elif tool_name == "render_chart" and "error" not in result:
+                yield sse_event("chart", result)
 
             tool_results.append({
                 "type": "tool_result",
@@ -225,4 +365,5 @@ async def run_agent(question: str, conversation_history: list | None = None) -> 
 
     # If we exhausted max rounds
     yield sse_text("\n\n_Reached maximum tool call rounds. Please refine your question._")
+    yield sse_event("history", {"messages": _serialize_messages(messages)})
     yield sse_done()
