@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from src.connections.postgres import get_pool
+import src.connections.postgres as pg
 
 router = APIRouter(prefix="/api", tags=["health"])
 
@@ -15,10 +15,11 @@ async def health():
 
 @router.get("/health/ready")
 async def readiness():
-    """Readiness probe — checks DB connectivity."""
+    """Readiness probe — checks DB if pool exists, doesn't trigger init."""
+    if pg._pool is None:
+        return {"status": "ready", "db": "not_connected_yet"}
     try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
+        async with pg._pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
         return {"status": "ready", "db": "connected"}
     except Exception as e:
