@@ -198,6 +198,63 @@ TOOLS = [
         },
     },
     {
+        "name": "query_aws_capacity_manager",
+        "description": (
+            "Query AWS EC2 Capacity Manager for On-Demand Capacity Reservation (ODCR) "
+            "metrics from the payer account. Use this to find unused or underutilized "
+            "capacity reservations, estimate wasted spend, and list ODCR inventory. "
+            "Runs against the payer account in us-east-1 with cross-account visibility."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "metric": {
+                    "type": "string",
+                    "enum": ["utilization", "unused_cost", "inventory"],
+                    "description": (
+                        "Metric preset to query. "
+                        "'utilization' = avg utilization, total vs unused capacity, cost. "
+                        "'unused_cost' = unused estimated cost breakdown. "
+                        "'inventory' = list all ODCRs with details."
+                    ),
+                },
+                "group_by": {
+                    "type": "string",
+                    "enum": [
+                        "instance-type",
+                        "instance-family",
+                        "account-id",
+                        "resource-region",
+                        "availability-zone-id",
+                        "reservation-id",
+                        "reservation-state",
+                        "tenancy",
+                        "instance-platform",
+                    ],
+                    "description": "Dimension to group results by. Default varies by metric.",
+                },
+                "instance_type": {
+                    "type": "string",
+                    "description": "Filter to a specific EC2 instance type (e.g. g4dn.xlarge).",
+                },
+                "account_id": {
+                    "type": "string",
+                    "description": "Filter to a specific 12-digit AWS account ID.",
+                },
+                "reservation_state": {
+                    "type": "string",
+                    "enum": ["active", "expired", "cancelled", "pending", "failed"],
+                    "description": "Filter by reservation state. Default: active.",
+                },
+                "hours": {
+                    "type": "integer",
+                    "description": "Hours of history to query. Default: 168 (7 days). Max: 2160 (90 days).",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "render_chart",
         "description": (
             "Render a chart in the chat UI. Use this to visualize cost data, "

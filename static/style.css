@@ -410,6 +410,23 @@ footer {
     margin: 8px 0;
 }
 
+.status-indicator {
+    color: var(--text-dim);
+    font-size: 0.85em;
+    padding: 8px 0;
+    margin: 4px 0;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.status-indicator::before {
+    content: "⏳ ";
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
     width: 6px;

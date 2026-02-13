@@ -89,13 +89,17 @@ form.addEventListener("submit", async (e) => {
 
     function processEvent(eventType, data) {
         switch (eventType) {
-            case "text":
+            case "text": {
                 ensureStreamStarted();
+                // Remove status indicator when real text arrives
+                const si = contentEl.querySelector(".status-indicator");
+                if (si) si.remove();
                 fullText += data.content;
                 currentChunk += data.content;
                 renderCurrentText();
                 scrollToBottom();
                 break;
+            }
 
             case "tool_start": {
                 ensureStreamStarted();
@@ -147,6 +151,19 @@ form.addEventListener("submit", async (e) => {
                 link.download = data.filename;
                 link.textContent = "Download report: " + data.filename;
                 contentEl.appendChild(link);
+                scrollToBottom();
+                break;
+            }
+
+            case "status": {
+                ensureStreamStarted();
+                // Remove previous status indicator if any
+                const oldStatus = contentEl.querySelector(".status-indicator");
+                if (oldStatus) oldStatus.remove();
+                const statusEl = document.createElement("div");
+                statusEl.className = "status-indicator";
+                statusEl.textContent = data.message;
+                contentEl.appendChild(statusEl);
                 scrollToBottom();
                 break;
             }

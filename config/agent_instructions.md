@@ -12,6 +12,7 @@ provisioning activity and cloud costs by querying real data sources.
 6. **query_cost_monitor** — Query the cost-monitor dashboard API for cached, aggregated data
 7. **render_chart** — Render a chart (bar, line, pie, doughnut) in the chat UI
 8. **generate_report** — Generate a formatted Markdown or AsciiDoc report
+9. **query_aws_capacity_manager** — Query ODCR metrics from the payer account Capacity Manager
 
 ## Provision Database Schema
 
@@ -176,6 +177,55 @@ the tool multiple times in the same turn.
 - Compare expected cost vs actual CE data to spot anomalies
 - Identify how expensive a flagged instance type is
 - Provide context when reporting abuse ("this instance costs $X/hour")
+
+## AWS Capacity Manager (ODCRs)
+
+Use `query_aws_capacity_manager` to investigate On-Demand Capacity Reservations
+from the payer account. The Capacity Manager is set up in us-east-1 with
+Organizations access, giving cross-account visibility into all ODCRs.
+
+**Understanding RHDP ODCRs:** The provisioning system creates short-lived
+(transient) ODCRs during sandbox setup — typically lasting 1-2 hours. This is
+normal and expected. The tool automatically filters these out (< 24 hours
+active) so you only see persistent ODCRs that represent real waste. Historical
+analysis (Nov 2025 – Feb 2026) shows 87,000+ ODCRs were all transient except
+one stale p5.4xlarge that persisted for 8 days before cleanup. The Capacity
+Manager GUI may show low utilization (e.g. 33%) — this reflects the brief
+startup window before instances fill the reservation, not waste.
+
+**When to use which metric preset:**
+- `utilization` — First call for ODCR investigations. Shows avg utilization,
+  total vs unused capacity, and estimated costs grouped by account (default).
+  Transient accounts (< 24h of data) are excluded automatically.
+- `unused_cost` — Drill into waste. Shows unused estimated cost by account.
+- `inventory` — List persistent ODCRs (24+ hours active) with utilization and
+  cost per reservation. Transient ODCRs are excluded with a count and cost
+  summary so you know what was filtered.
+
+**Key investigation patterns:**
+- Start with `utilization` to check if any persistent ODCR waste exists
+- If `transient_excluded` is high but persistent results are zero, that's healthy
+  — the platform is creating and cleaning up ODCRs correctly
+- If persistent ODCRs exist, follow up with `group_by="instance-type"` and
+  `inventory` to identify specific reservations to cancel
+- Cross-reference account IDs with the provision DB to identify responsible teams
+- Watch for expensive GPU instance types (p5, g6, g5) — even brief persistence
+  is costly at $5-98/hr
+- Costs shown are estimated based on on-demand pricing (no discount adjustments)
+- Capacity Manager data is available from Nov 15, 2025 onward
+
+**ODCR waste report workflow:** ODCR data is too detailed for chat. When a user
+asks about ODCR waste or unused reservations, always generate a report file:
+1. Call `utilization` (grouped by account-id) — worst accounts by waste
+2. Call `utilization` with `group_by="instance-type"` — which types are over-reserved
+3. Call `inventory` — individual reservation IDs with utilization and cost
+4. Cross-reference the top account IDs with the provision DB to find team/owner info
+5. Use `generate_report` to produce a structured report with:
+   - Executive summary (persistent waste vs transient activity)
+   - If persistent waste exists: account table, instance type breakdown, reservation inventory
+   - If no persistent waste: confirm healthy status, note transient volume, flag any
+     near-threshold ODCRs (e.g. 20+ hours) for monitoring
+6. In chat, show only the executive summary and link to the full report
 
 ## Abuse Indicators
 

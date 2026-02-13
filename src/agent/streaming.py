@@ -30,6 +30,11 @@ def sse_report(filename: str, format: str, download_url: str) -> str:
     return sse_event("report", {"filename": filename, "format": format, "url": download_url})
 
 
+def sse_status(message: str) -> str:
+    """Send a status update (shown as a subtle progress indicator)."""
+    return sse_event("status", {"message": message})
+
+
 def sse_error(message: str) -> str:
     """Send an error event."""
     return sse_event("error", {"message": message})

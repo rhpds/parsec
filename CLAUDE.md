@@ -16,6 +16,7 @@ src/
   tools/
     provision_db.py          # Raw SQL against provision DB (read-only)
     aws_costs.py             # AWS Cost Explorer queries
+    aws_capacity_manager.py  # ODCR metrics from EC2 Capacity Manager
     azure_costs.py           # Azure billing CSV queries
     gcp_costs.py             # GCP BigQuery billing queries
   connections/
@@ -38,9 +39,15 @@ config/
 cp config/config.local.yaml.template config/config.local.yaml
 # Fill in DB creds, ANTHROPIC_API_KEY, cloud credentials, allowed_users
 
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn src.app:app --host 0.0.0.0 --port 8000
 ```
+
+**Important:** Always activate the venv first (`source .venv/bin/activate`).
+The system Python does not have project dependencies installed. If you skip
+activation, run directly with `.venv/bin/python -m uvicorn src.app:app --host 0.0.0.0 --port 8000`.
 
 Or with Docker:
 
@@ -136,6 +143,7 @@ Both must pass before merge.
 - **Cost-monitor `breakdown`/`drilldown` endpoints are AWS-only** — for Azure/GCP breakdowns, use `query_azure_costs` or `query_gcp_costs` directly.
 - **Azure `gpu_cost` auto-detection**: The `query_azure_costs` tool automatically detects NC/ND/NV series VMs and reports a separate `gpu_cost` field per subscription.
 - **Lazy DB init**: The provision DB pool retries on first query if startup initialization failed. Health readiness probe does NOT trigger DB init.
+- **AWS Capacity Manager (ODCRs)**: Uses `get_capacity_manager_metric_data` API from the payer account in us-east-1 with Organizations access. The `get_capacity_manager_metric_dimensions` API does not reliably return results, so inventory uses metric data grouped by `reservation-id` instead. RHDP ODCRs are transient (1-2 hours during provisioning) — the tool filters out ODCRs with < 24 hours of activity. Historical analysis (Nov 2025 – Feb 2026, 87k+ ODCRs) confirmed zero persistent waste. The Capacity Manager GUI's low utilization % reflects the brief startup window, not real waste.
 - **GitHub auth**: Use the `rhjcd` profile for push access to `rhpds/parsec` (`gh auth switch --user rhjcd`).
 
 See `docs/TODO.md` for the full project backlog.

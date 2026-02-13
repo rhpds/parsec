@@ -19,6 +19,7 @@ from src.agent.streaming import (
     sse_error,
     sse_event,
     sse_report,
+    sse_status,
     sse_text,
     sse_tool_result,
     sse_tool_start,
@@ -26,6 +27,7 @@ from src.agent.streaming import (
 from src.agent.system_prompt import SYSTEM_PROMPT
 from src.agent.tool_definitions import TOOLS
 from src.config import get_config
+from src.tools.aws_capacity_manager import query_aws_capacity_manager
 from src.tools.aws_costs import query_aws_costs
 from src.tools.aws_pricing import query_aws_pricing
 from src.tools.azure_costs import query_azure_costs
@@ -86,6 +88,16 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
             top_n=tool_input.get("top_n", 25),
             drilldown_type=tool_input.get("drilldown_type", ""),
             selected_key=tool_input.get("selected_key", ""),
+        )
+
+    elif tool_name == "query_aws_capacity_manager":
+        return await query_aws_capacity_manager(
+            metric=tool_input.get("metric", "utilization"),
+            group_by=tool_input.get("group_by"),
+            instance_type=tool_input.get("instance_type"),
+            account_id=tool_input.get("account_id"),
+            reservation_state=tool_input.get("reservation_state", "active"),
+            hours=tool_input.get("hours", 168),
         )
 
     elif tool_name == "render_chart":
@@ -381,6 +393,7 @@ async def run_agent(
 
         # Add tool results and loop back for Claude's next response
         messages.append({"role": "user", "content": tool_results})
+        yield sse_status("Analyzing results...")
 
     # If we exhausted max rounds
     yield sse_text("\n\n_Reached maximum tool call rounds. Please refine your question._")
