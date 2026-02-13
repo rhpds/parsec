@@ -129,6 +129,10 @@ Users can ask for reports in the chat ("generate a report of findings"). Claude 
 - `production` — stable branch, deploys to `parsec` namespace
 - Always create feature branches off `main` for changes
 - PRs target `main` and must pass CI (quality-gates + docker-build)
+- **Pushes to `main` and `production` auto-trigger OpenShift builds** via GitHub webhooks.
+  Do NOT manually trigger builds with `oc start-build`. If webhooks stop working, check
+  that the GitHub webhook secrets match the BuildConfig trigger secrets (they get out of
+  sync when `deploy.sh` regenerates them).
 
 ### CI Pipeline
 
@@ -138,12 +142,12 @@ Both must pass before merge.
 
 ### Key Technical Decisions
 
-- **Dockerfile**: Uses `VIRTUAL_ENV` env var and `ENTRYPOINT []` to override the ubi9/python-311 S2I base image's bash profiles that prepend `/opt/app-root/bin` to PATH. Without this, `python` resolves to the base image's interpreter instead of the venv.
+- **Dockerfile**: Uses `VIRTUAL_ENV` env var, explicit `PATH`, and `ENTRYPOINT []` to override the ubi9/python-311 S2I base image. CMD must use `python -m uvicorn` (not bare `uvicorn`) because OpenShift/CRI-O does not follow the venv script shebang when `ENTRYPOINT []` is set — the script gets interpreted by `/bin/sh` instead. The `python -m` approach bypasses the script entirely.
 - **Claude backend**: Supports direct API, Vertex AI, and AWS Bedrock. Production uses Vertex AI (`claude-sonnet-4@20250514`).
 - **Cost-monitor `breakdown`/`drilldown` endpoints are AWS-only** — for Azure/GCP breakdowns, use `query_azure_costs` or `query_gcp_costs` directly.
 - **Azure `gpu_cost` auto-detection**: The `query_azure_costs` tool automatically detects NC/ND/NV series VMs and reports a separate `gpu_cost` field per subscription.
 - **Lazy DB init**: The provision DB pool retries on first query if startup initialization failed. Health readiness probe does NOT trigger DB init.
 - **AWS Capacity Manager (ODCRs)**: Uses `get_capacity_manager_metric_data` API from the payer account in us-east-1 with Organizations access. The `get_capacity_manager_metric_dimensions` API does not reliably return results, so inventory uses metric data grouped by `reservation-id` instead. RHDP ODCRs are transient (1-2 hours during provisioning) — the tool filters out ODCRs with < 24 hours of activity. Historical analysis (Nov 2025 – Feb 2026, 87k+ ODCRs) confirmed zero persistent waste. The Capacity Manager GUI's low utilization % reflects the brief startup window, not real waste.
-- **GitHub auth**: Use the `rhjcd` profile for push access to `rhpds/parsec` (`gh auth switch --user rhjcd`).
+- **GitHub auth**: Use the `rut31337` profile for push access to `rhpds/parsec` (`gh auth switch --user rut31337`).
 
 See `docs/TODO.md` for the full project backlog.
