@@ -138,4 +138,14 @@ Both must pass before merge.
 - **Lazy DB init**: The provision DB pool retries on first query if startup initialization failed. Health readiness probe does NOT trigger DB init.
 - **GitHub auth**: Use the `rhjcd` profile for push access to `rhpds/parsec` (`gh auth switch --user rhjcd`).
 
+### Session Context (2026-02-12)
+
+- **Current branch**: `add-docs-todo-v2` (off `main`)
+- **PR #1** (improve-agent-instructions): Merged — agent instructions + mypy fixes + Dockerfile fix
+- **PR #3** (add-docs-todo-v2): Open, CI green, awaiting review — replaces closed PR #2
+  - Adds docs/TODO.md, docs/NOTES.md, moves CONTRIBUTING.md to docs/, adds Development Notes to CLAUDE.md
+  - Dropped `.mcp.json` from PR (now gitignored on main), removed stale "Open PRs" references
+- **Old branch `add-docs-todo`**: Deleted from remote (PR #2 was closed without merge)
+- **Next steps**: Merge PR #3 when approved, then pick up items from `docs/TODO.md` backlog
+
 See `docs/TODO.md` for the full project backlog.
