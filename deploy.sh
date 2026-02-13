@@ -302,16 +302,19 @@ if [ -n "$local_cm_dashboard_url" ]; then
     echo ""
 fi
 
-# Step 6: Patch BuildConfig webhook secret (inline, not secretReference)
+# Step 6: Configure webhook — reuse existing secret to avoid breaking GitHub webhooks
 echo -e "${BLUE}Step 6: Configuring webhook...${NC}"
-WEBHOOK_SECRET=$(openssl rand -base64 20 | tr -d "=+/" | cut -c1-20)
-oc patch bc parsec -n ${NAMESPACE} --type=json -p "[
-  {\"op\": \"replace\", \"path\": \"/spec/triggers\", \"value\": [
-    {\"type\": \"ConfigChange\"},
-    {\"type\": \"GitHub\", \"github\": {\"secret\": \"${WEBHOOK_SECRET}\"}},
-    {\"type\": \"Generic\", \"generic\": {\"secret\": \"${WEBHOOK_SECRET}\"}}
-  ]}
-]"
+EXISTING_SECRET=$(oc get bc parsec -n ${NAMESPACE} -o jsonpath='{.spec.triggers[?(@.type=="GitHub")].github.secret}' 2>/dev/null | awk '{print $NF}')  # pragma: allowlist secret
+if [ -n "$EXISTING_SECRET" ] && [ "$EXISTING_SECRET" != "placeholder" ]; then  # pragma: allowlist secret
+    WEBHOOK_SECRET="$EXISTING_SECRET"
+    echo -e "${GREEN}Reusing existing webhook secret${NC}"
+else
+    WEBHOOK_SECRET=$(openssl rand -base64 20 | tr -d "=+/" | cut -c1-20)
+    oc set triggers bc parsec -n ${NAMESPACE} --remove-all
+    oc set triggers bc parsec -n ${NAMESPACE} --from-config
+    oc set triggers bc parsec -n ${NAMESPACE} --from-github --secret="$WEBHOOK_SECRET"
+    echo -e "${GREEN}New webhook secret generated${NC}"
+fi
 API_SERVER=$(oc whoami --show-server | sed 's|https://||')
 WEBHOOK_URL="https://${API_SERVER}/apis/build.openshift.io/v1/namespaces/${NAMESPACE}/buildconfigs/parsec/webhooks/${WEBHOOK_SECRET}/github"
 echo -e "${GREEN}Webhook configured${NC}"
