@@ -20,7 +20,7 @@ RUN dnf install -y --nodocs libpq && dnf clean all
 
 COPY --from=builder /opt/app-root/venv /opt/app-root/venv
 ENV VIRTUAL_ENV="/opt/app-root/venv" \
-    PATH="/opt/app-root/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    PATH="/opt/app-root/venv/bin:/opt/app-root/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     PYTHONPATH="/app" \
     PYTHONUNBUFFERED=1
 
