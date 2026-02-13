@@ -20,12 +20,9 @@ RUN dnf install -y --nodocs libpq && dnf clean all
 
 COPY --from=builder /opt/app-root/venv /opt/app-root/venv
 ENV VIRTUAL_ENV="/opt/app-root/venv" \
-    PATH="/opt/app-root/venv/bin:/opt/app-root/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    PATH="/opt/app-root/venv/bin:$PATH" \
     PYTHONPATH="/app" \
     PYTHONUNBUFFERED=1
-
-# Remove S2I entrypoint — it sources profiles that override PATH
-ENTRYPOINT []
 
 WORKDIR /app
 
@@ -45,4 +42,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"
 
-CMD ["python", "-m", "uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "8000"]

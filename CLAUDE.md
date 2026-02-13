@@ -142,12 +142,12 @@ Both must pass before merge.
 
 ### Key Technical Decisions
 
-- **Dockerfile**: Uses `VIRTUAL_ENV` env var, explicit `PATH`, and `ENTRYPOINT []` to override the ubi9/python-311 S2I base image. CMD must use `python -m uvicorn` (not bare `uvicorn`) because OpenShift/CRI-O does not follow the venv script shebang when `ENTRYPOINT []` is set — the script gets interpreted by `/bin/sh` instead. The `python -m` approach bypasses the script entirely.
+- **Dockerfile**: Prepends the venv to PATH with `$PATH` inheritance. Do NOT use `ENTRYPOINT []` — CRI-O on OpenShift requires the S2I base image's `container-entrypoint` (which does `exec "$@"`) to properly exec the CMD. Without it, executables get interpreted as shell scripts causing `null: command not found`. Do NOT hardcode PATH either — use `$PATH` to inherit the base image paths.
 - **Claude backend**: Supports direct API, Vertex AI, and AWS Bedrock. Production uses Vertex AI (`claude-sonnet-4@20250514`).
 - **Cost-monitor `breakdown`/`drilldown` endpoints are AWS-only** — for Azure/GCP breakdowns, use `query_azure_costs` or `query_gcp_costs` directly.
 - **Azure `gpu_cost` auto-detection**: The `query_azure_costs` tool automatically detects NC/ND/NV series VMs and reports a separate `gpu_cost` field per subscription.
 - **Lazy DB init**: The provision DB pool retries on first query if startup initialization failed. Health readiness probe does NOT trigger DB init.
 - **AWS Capacity Manager (ODCRs)**: Uses `get_capacity_manager_metric_data` API from the payer account in us-east-1 with Organizations access. The `get_capacity_manager_metric_dimensions` API does not reliably return results, so inventory uses metric data grouped by `reservation-id` instead. RHDP ODCRs are transient (1-2 hours during provisioning) — the tool filters out ODCRs with < 24 hours of activity. Historical analysis (Nov 2025 – Feb 2026, 87k+ ODCRs) confirmed zero persistent waste. The Capacity Manager GUI's low utilization % reflects the brief startup window, not real waste.
-- **GitHub auth**: Use the `rut31337` profile for push access to `rhpds/parsec` (`gh auth switch --user rut31337`).
+- **GitHub auth**: Push access to `rhpds/parsec` requires a GitHub account with write permissions. Use `gh auth status` to check the current profile.
 
 See `docs/TODO.md` for the full project backlog.
