@@ -79,6 +79,21 @@ Set allowed users (comma-separated emails) in:
 
 Empty value = all authenticated users allowed.
 
+## Cost-Monitor Integration
+
+[Cost-monitor](https://github.com/rhpds/cost-monitor) is a multi-cloud cost monitoring dashboard that collects, stores, and visualizes AWS/Azure/GCP billing data.
+
+- **Parsec queries cost-monitor**: The `query_cost_monitor` tool calls the cost-data-service API for aggregated cost summaries, AWS breakdowns, and drilldowns. Configured via `cost_monitor.api_url` in `config.yaml`.
+- **Cost-monitor links to Parsec**: The cost-monitor dashboard has a "Parsec AI Explorer" button that links back to the Parsec chat UI for natural language investigation.
+- **Shared cluster**: Both apps deploy to the same OpenShift cluster (`parsec-dev`/`parsec` and `cost-monitor-dev`/`cost-monitor` namespaces).
+- **Shared auth**: Both use the same group-based authorization pattern (OAuth proxy + app-level OpenShift group checks).
+
+For local development, port-forward the cost-data-service:
+```bash
+oc port-forward svc/cost-data-service 8001:8000 -n cost-monitor-dev
+```
+Then set `cost_monitor.api_url: "http://localhost:8001"` in `config/config.local.yaml`.
+
 ## Security
 
 - **Provision DB**: Read-only PostgreSQL user, SELECT-only SQL validation, 30s statement timeout, 500-row limit

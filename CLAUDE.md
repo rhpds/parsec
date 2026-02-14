@@ -106,6 +106,41 @@ WHERE u.email NOT LIKE '%@redhat.com'
   - The UI calls `GET /api/auth/check` on page load. Unauthorized users see an access-denied page instead of the chat interface. In local dev without a proxy, the check falls through gracefully and the chat UI loads normally.
 - **Local dev**: Set `auth.allowed_groups` and/or `auth.allowed_users` in `config.local.yaml` (both empty = all users allowed).
 
+## Cost-Monitor Integration
+
+Cost-monitor (`rhpds/cost-monitor`) is a multi-cloud cost monitoring dashboard that collects, stores, and visualizes AWS/Azure/GCP billing data. Parsec integrates with it as a data source for cost investigation.
+
+### How They Connect
+
+```
+User ──▶ Parsec chat UI ──▶ Claude agent ──▶ cost-monitor data service API
+                                                (http://cost-data-service.cost-monitor.svc:8000)
+User ──▶ Cost-monitor dashboard (Dash/Plotly) ──▶ "Parsec AI Explorer" link ──▶ Parsec
+```
+
+- **Parsec → cost-monitor**: The `query_cost_monitor` tool (`src/tools/cost_monitor.py`) calls the cost-data-service REST API for aggregated cost data. This is a server-to-server call within the OpenShift cluster — no auth on the internal service. Configured via `cost_monitor.api_url` in `config.yaml`.
+- **Cost-monitor → Parsec**: The cost-monitor dashboard has a "Parsec AI Explorer" button that links back to the parsec chat UI for natural language investigation.
+- **Shared cluster**: Both apps deploy to the same OpenShift cluster. Dev namespaces: `parsec-dev` and `cost-monitor-dev`. Prod namespaces: `parsec` and `cost-monitor`.
+- **Shared auth pattern**: Both apps use the same group-based authorization — OAuth proxy for SSO, app-level group checks via the Kubernetes API, same `rhpds-admins` group. Each has its own local-users group (`parsec-local-users`, `cost-monitor-local-users`).
+- **Shared repo org**: Both repos live under `github.com/rhpds/`.
+
+### Available Cost-Monitor Endpoints
+
+| `endpoint` param | API path | Purpose |
+|---|---|---|
+| `summary` | `/api/v1/costs/summary` | Aggregated costs by provider and date range |
+| `breakdown` | `/api/v1/costs/aws/breakdown` | AWS costs grouped by account or instance type |
+| `drilldown` | `/api/v1/costs/aws/drilldown` | Drill into specific AWS account or instance type |
+| `providers` | `/api/v1/providers` | List available cloud providers |
+
+### Local Dev
+
+For local development, port-forward the cost-data-service and set `cost_monitor.api_url` to `http://localhost:8001`:
+
+```bash
+oc port-forward svc/cost-data-service 8001:8000 -n cost-monitor-dev
+```
+
 ## Abuse Indicators
 
 - **AWS GPU**: g4dn.*, g5.*, g6.*, p3.*, p4.*, p5.*
