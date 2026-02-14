@@ -5,6 +5,7 @@ namespace: parsec-dev
 
 resources:
   - ../../base
+  - clusterrolebinding.yaml
 
 patches:
   # Dev: 1 replica, lower resources, build from main
@@ -37,12 +38,3 @@ patches:
       - op: replace
         path: /spec/source/git/ref
         value: main
-
-  # Update ClusterRoleBinding namespace
-  - target:
-      kind: ClusterRoleBinding
-      name: parsec-oauth
-    patch: |
-      - op: replace
-        path: /subjects/0/namespace
-        value: parsec-dev

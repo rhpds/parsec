@@ -153,9 +153,10 @@ Both must pass before merge.
 is rejected and the reformatted file is left staged. Re-run `git add` and `git commit`
 with the same message — do NOT amend the previous commit (the failed commit never happened).
 
-**Do NOT manually trigger builds** with `oc start-build`. Pushes to `main` and `production`
-auto-trigger builds via GitHub webhooks. After pushing, monitor the build with
-`oc get builds -n <namespace>` and wait for it to complete.
+**Do NOT manually trigger builds** with `oc start-build` or rollouts with `oc rollout restart`.
+Pushes to `main` and `production` auto-trigger builds via GitHub webhooks. When the build
+completes, the new image is pushed to the ImageStream, and the deployment's `image.openshift.io/triggers`
+annotation auto-triggers a rollout. Monitor with `oc get builds -n <namespace>`.
 
 ### Key Technical Decisions
 
@@ -166,5 +167,6 @@ auto-trigger builds via GitHub webhooks. After pushing, monitor the build with
 - **Lazy DB init**: The provision DB pool retries on first query if startup initialization failed. Health readiness probe does NOT trigger DB init.
 - **AWS Capacity Manager (ODCRs)**: Uses `get_capacity_manager_metric_data` API from the payer account in us-east-1 with Organizations access. The `get_capacity_manager_metric_dimensions` API does not reliably return results, so inventory uses metric data grouped by `reservation-id` instead. RHDP ODCRs are transient (1-2 hours during provisioning) — the tool filters out ODCRs with < 24 hours of activity. Historical analysis (Nov 2025 – Feb 2026, 87k+ ODCRs) confirmed zero persistent waste. The Capacity Manager GUI's low utilization % reflects the brief startup window, not real waste.
 - **GitHub auth**: Push access to `rhpds/parsec` requires a GitHub account with write permissions. Use `gh auth status` to check the current profile.
+- **ClusterRoleBindings**: Each environment has its own CRB (`parsec-oauth-dev`, `parsec-oauth-prod`) defined in the overlay, not the base. This avoids conflicts when applying overlays independently.
 
 See `docs/TODO.md` for the full project backlog.

@@ -5,6 +5,7 @@ namespace: parsec
 
 resources:
   - ../../base
+  - clusterrolebinding.yaml
 
 patches:
   # Prod: 2 replicas, higher resources, build from production branch

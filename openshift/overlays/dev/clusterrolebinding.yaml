@@ -1,0 +1,15 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: parsec-oauth-dev
+  labels:
+    app: parsec
+    component: oauth
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: parsec-oauth
+subjects:
+  - kind: ServiceAccount
+    name: parsec-oauth
+    namespace: parsec-dev
