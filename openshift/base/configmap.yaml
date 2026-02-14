@@ -30,4 +30,5 @@ data:
       dashboard_url: ""
 
     auth:
+      allowed_groups: "rhpds-admins,parsec-local-users"
       allowed_users: ""

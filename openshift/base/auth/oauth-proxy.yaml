@@ -53,8 +53,6 @@ spec:
             - -openshift-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
             - -skip-auth-regex=^/api/health
             - -pass-user-headers=true
-            - -openshift-group=rhpds-admins
-            - -openshift-group=parsec-local-users
           volumeMounts:
             - name: oauth-proxy-secret
               mountPath: /etc/proxy/secrets

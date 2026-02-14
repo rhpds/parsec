@@ -43,6 +43,10 @@ cost_monitor:
   dashboard_url: ""
 
 auth:
-  # Comma-separated list of allowed email addresses or usernames
-  # When empty, all authenticated users are allowed
+  # Comma-separated list of allowed OpenShift groups (from X-Forwarded-Groups)
+  # When set, only users in these groups (or in allowed_users) can access Parsec
+  # When empty, group check is skipped and allowed_users is used instead
+  allowed_groups: "rhpds-admins,parsec-local-users"
+  # Comma-separated list of allowed email addresses or usernames (fallback)
+  # When empty and allowed_groups is also empty, all authenticated users are allowed
   allowed_users: ""

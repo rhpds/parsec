@@ -92,15 +92,17 @@ WHERE u.email NOT LIKE '%@redhat.com'
 
 ## Auth
 
-- **OpenShift**: OAuth proxy sidecar handles SSO with group-based access control.
-  - The proxy restricts access to members of `rhpds-admins` or `parsec-local-users` OpenShift groups (`--openshift-group` flags in `openshift/base/auth/oauth-proxy.yaml`).
-  - `parsec-local-users` is a cluster-scoped OpenShift group for non-SSO test accounts (e.g. `rhpds-test-user1`). It must be created manually on a fresh cluster:
+- **OpenShift**: OAuth proxy handles SSO authentication only. Authorization is enforced at the app level via `X-Forwarded-Groups`.
+  - `auth.allowed_groups` in `config.yaml` lists allowed OpenShift groups (comma-separated). Default: `rhpds-admins,parsec-local-users`.
+  - `parsec-local-users` is a cluster-scoped OpenShift group for non-SSO test accounts. It must be created manually on a fresh cluster:
     ```bash
-    oc adm groups new parsec-local-users rhpds-test-user1
-    oc adm groups add-users parsec-local-users <additional-user>
+    oc adm groups new parsec-local-users
+    oc adm groups add-users parsec-local-users <user>
     ```
-  - The `parsec-allowed-users` ConfigMap provides an optional secondary email whitelist at the app level. When empty (default), all users who pass the proxy group check are allowed.
-- **Local dev**: Set `auth.allowed_users` in `config.local.yaml` (empty = all users allowed).
+    Note: SSO users have long OpenShift usernames (e.g. `demo-platform-ops+rhdp-test-user1@redhat.com`). Use `oc get users` to find the exact name.
+  - `auth.allowed_users` provides an optional email whitelist fallback. Users matching either groups or email list are allowed.
+  - The `--openshift-group` flag on `ose-oauth-proxy` does NOT reliably enforce group membership. Do not use it — enforce groups at the app level instead.
+- **Local dev**: Set `auth.allowed_groups` and/or `auth.allowed_users` in `config.local.yaml` (both empty = all users allowed).
 - The OAuth proxy passes `X-Forwarded-Email` / `X-Forwarded-User` / `X-Forwarded-Groups` headers to the app.
 
 ## Abuse Indicators
@@ -146,6 +148,14 @@ Users can ask for reports in the chat ("generate a report of findings"). Claude 
 Quality gates: black (formatting), ruff (linting), mypy (type checking), bandit (security).
 Docker build: multi-stage UBI 9 image with verify step.
 Both must pass before merge.
+
+**Pre-commit hooks** run locally on `git commit`. If `black` reformats a file, the commit
+is rejected and the reformatted file is left staged. Re-run `git add` and `git commit`
+with the same message — do NOT amend the previous commit (the failed commit never happened).
+
+**Do NOT manually trigger builds** with `oc start-build`. Pushes to `main` and `production`
+auto-trigger builds via GitHub webhooks. After pushing, monitor the build with
+`oc get builds -n <namespace>` and wait for it to complete.
 
 ### Key Technical Decisions
 
