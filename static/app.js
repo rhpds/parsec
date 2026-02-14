@@ -21,8 +21,29 @@ renderer.link = function(href, title, text) {
 };
 marked.setOptions({ renderer: renderer });
 
-// Show welcome message on load
-(function showWelcome() {
+// Auth check and welcome message on load
+(async function checkAuthAndShowWelcome() {
+    try {
+        const resp = await fetch("/api/auth/check");
+        if (resp.status === 403) {
+            // User is authenticated but not authorized
+            const err = await resp.json().catch(() => ({}));
+            document.getElementById("query-form").style.display = "none";
+            const el = document.createElement("div");
+            el.className = "access-denied";
+            el.innerHTML =
+                "<h2>Access Denied</h2>" +
+                "<p>" + (err.detail || "You are not authorized to use Parsec.") + "</p>" +
+                "<p>If you believe this is an error, contact an RHDP administrator " +
+                "to be added to an authorized group.</p>";
+            messagesEl.appendChild(el);
+            return;
+        }
+    } catch (e) {
+        // Network error or no proxy (local dev) — proceed normally
+    }
+
+    // Authorized (or local dev with no proxy) — show welcome
     const el = addMessage("assistant", "");
     const contentEl = el.querySelector(".content");
     const textEl = document.createElement("div");

@@ -427,6 +427,25 @@ footer {
     50% { opacity: 1; }
 }
 
+/* Access denied */
+.access-denied {
+    text-align: center;
+    padding: 48px 24px;
+    color: var(--text-muted);
+}
+
+.access-denied h2 {
+    color: var(--error);
+    font-size: 20px;
+    margin-bottom: 12px;
+}
+
+.access-denied p {
+    margin: 8px 0;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
     width: 6px;

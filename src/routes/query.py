@@ -166,6 +166,18 @@ async def _check_user_allowed(request: Request, user: str | None) -> None:
         )
 
 
+@router.get("/auth/check")
+async def auth_check(
+    request: Request,
+    x_forwarded_user: str | None = Header(None),
+    x_forwarded_email: str | None = Header(None),
+):
+    """Check if the current user is authorized to use Parsec."""
+    user = x_forwarded_email or x_forwarded_user
+    await _check_user_allowed(request, user)
+    return {"authorized": True, "user": user}
+
+
 @router.post("/query")
 async def query(
     body: QueryRequest,

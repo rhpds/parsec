@@ -25,7 +25,7 @@ src/
     azure.py                 # Azure blob client
     gcp.py                   # BigQuery client
   routes/
-    query.py                 # POST /api/query (SSE), GET /api/reports/{filename}
+    query.py                 # GET /api/auth/check, POST /api/query (SSE), GET /api/reports/{filename}
     health.py                # GET /api/health, /api/health/ready
 static/                      # Chat UI (plain HTML/CSS/JS, no build step)
 config/
@@ -93,7 +93,7 @@ WHERE u.email NOT LIKE '%@redhat.com'
 ## Auth
 
 - **OpenShift**: OAuth proxy handles SSO authentication only (passes `X-Forwarded-Email` / `X-Forwarded-User`). Authorization is enforced at the app level by querying OpenShift groups via the Kubernetes API.
-  - The app queries `user.openshift.io/v1/groups` using the service account token (same pattern as Babylon's catalog API). Results are cached for 60 seconds.
+  - The app queries `user.openshift.io/v1/groups` using the service account token (same pattern as Babylon's catalog API). Results are cached for 60 seconds. This requires the `parsec-oauth` ClusterRole (defined in `openshift/base/auth/oauth-rbac.yaml`) which grants `get`/`list` on `user.openshift.io/groups` and `get` on `user.openshift.io/users`. Without these RBAC permissions, group-based authorization will silently fail (no groups resolved).
   - `auth.allowed_groups` in `config.yaml` lists allowed OpenShift groups (comma-separated). Default: `rhpds-admins,parsec-local-users`.
   - `parsec-local-users` is a cluster-scoped OpenShift group for non-SSO test accounts. It must be created manually on a fresh cluster:
     ```bash
@@ -103,6 +103,7 @@ WHERE u.email NOT LIKE '%@redhat.com'
     Note: SSO users have long OpenShift usernames (e.g. `demo-platform-ops+rhdp-test-user1@redhat.com`). Use `oc get users` to find the exact name.
   - `auth.allowed_users` provides an optional email whitelist fallback. Users matching either groups or email list are allowed.
   - The `--openshift-group` flag on `ose-oauth-proxy` does NOT reliably enforce group membership, and the proxy does NOT forward `X-Forwarded-Groups`. Do not use either — query groups from the API instead.
+  - The UI calls `GET /api/auth/check` on page load. Unauthorized users see an access-denied page instead of the chat interface. In local dev without a proxy, the check falls through gracefully and the chat UI loads normally.
 - **Local dev**: Set `auth.allowed_groups` and/or `auth.allowed_users` in `config.local.yaml` (both empty = all users allowed).
 
 ## Abuse Indicators
