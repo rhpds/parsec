@@ -22,3 +22,7 @@ spec:
   failedBuildsHistoryLimit: 5
   triggers:
     - type: ConfigChange
+    - type: GitHub
+      github:
+        secretReference:
+          name: parsec-webhook-secret
