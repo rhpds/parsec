@@ -2,7 +2,10 @@
 
 import logging
 import os
+import ssl
+import time
 
+import httpx
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
@@ -13,6 +16,53 @@ from src.config import get_config
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["query"])
+
+# --- OpenShift group resolution (like Babylon catalog API) ---
+_SA_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+_SA_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+_K8S_API = "https://kubernetes.default.svc"
+
+_groups_cache: list[dict] = []
+_groups_cache_time: float = 0
+_GROUPS_CACHE_TTL = 60  # seconds
+
+
+async def _fetch_openshift_groups() -> list[dict]:
+    """Fetch all OpenShift groups from the API, cached for 60s."""
+    global _groups_cache, _groups_cache_time
+    if _groups_cache and time.time() - _groups_cache_time < _GROUPS_CACHE_TTL:
+        return _groups_cache
+
+    if not os.path.exists(_SA_TOKEN_PATH):
+        logger.debug("Not running in OpenShift — skipping group lookup")
+        return []
+
+    try:
+        with open(_SA_TOKEN_PATH) as f:
+            token = f.read().strip()
+
+        ssl_ctx = ssl.create_default_context(cafile=_SA_CA_PATH)
+        async with httpx.AsyncClient(verify=ssl_ctx) as client:
+            resp = await client.get(
+                f"{_K8S_API}/apis/user.openshift.io/v1/groups",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            _groups_cache = data.get("items", [])
+            _groups_cache_time = time.time()
+            logger.debug("Fetched %d OpenShift groups", len(_groups_cache))
+            return _groups_cache
+    except Exception:
+        logger.warning("Failed to fetch OpenShift groups", exc_info=True)
+        return _groups_cache  # return stale cache on error
+
+
+async def _get_user_groups(user: str) -> set[str]:
+    """Get the OpenShift groups a user belongs to."""
+    groups = await _fetch_openshift_groups()
+    return {g["metadata"]["name"].lower() for g in groups if user in g.get("users", [])}
 
 
 class QueryRequest(BaseModel):
@@ -48,23 +98,23 @@ def _log_identity_debug(request: Request) -> None:
         logger.info("=== SSO DEBUG: No identity headers found in request ===")
 
 
-def _check_user_allowed(request: Request, user: str | None, groups: str | None) -> None:
+async def _check_user_allowed(request: Request, user: str | None) -> None:
     """Check if the user is allowed via group membership or email whitelist.
 
-    Access is granted if the user belongs to any allowed group (checked first),
-    OR if the user is in the allowed_users email list. If neither is configured,
-    all authenticated users are allowed.
+    Groups are resolved by querying the OpenShift API (like Babylon),
+    not from proxy headers. Access is granted if the user belongs to any
+    allowed group OR is in the allowed_users email list.
     """
     _log_identity_debug(request)
 
     cfg = get_config()
 
-    # Check group membership first
+    # Check group membership first (queried from OpenShift API)
     allowed_groups_str = cfg.auth.get("allowed_groups", "")
-    if allowed_groups_str:
+    if allowed_groups_str and user:
         allowed_groups = {g.strip().lower() for g in allowed_groups_str.split(",") if g.strip()}
-        if allowed_groups and groups:
-            user_groups = {g.strip().lower() for g in groups.split(",") if g.strip()}
+        if allowed_groups:
+            user_groups = await _get_user_groups(user)
             if user_groups & allowed_groups:
                 return  # User is in an allowed group
 
@@ -72,23 +122,25 @@ def _check_user_allowed(request: Request, user: str | None, groups: str | None) 
         allowed_str = cfg.auth.get("allowed_users", "")
         if allowed_str:
             allowed = {u.strip().lower() for u in allowed_str.split(",") if u.strip()}
-            if allowed and user and user.lower() in allowed:
+            if allowed and user.lower() in allowed:
                 return  # User is in the email whitelist
 
         # Neither group nor email matched
-        if not user:
-            logger.warning("Access denied: no user identity in request headers")
-            raise HTTPException(
-                status_code=403,
-                detail="Authentication required — no user identity found in request",
-            )
+        user_groups_str = ", ".join(sorted(user_groups)) if user_groups else "(none)"
         logger.warning("Access denied for user '%s' — not in allowed groups or users", user)
         logger.warning("  Allowed groups: %s", ", ".join(sorted(allowed_groups)))
-        logger.warning("  User groups: %s", groups or "(none)")
+        logger.warning("  User groups: %s", user_groups_str)
         raise HTTPException(
             status_code=403,
             detail=f"Access denied: user '{user}' is not in an allowed group. "
             f"Contact an administrator to request access.",
+        )
+
+    if not user and allowed_groups_str:
+        logger.warning("Access denied: no user identity in request headers")
+        raise HTTPException(
+            status_code=403,
+            detail="Authentication required — no user identity found in request",
         )
 
     # No group restriction — fall back to email-only check
@@ -120,22 +172,20 @@ async def query(
     request: Request,
     x_forwarded_user: str | None = Header(None),
     x_forwarded_email: str | None = Header(None),
-    x_forwarded_groups: str | None = Header(None),
     x_forwarded_preferred_username: str | None = Header(None),
 ):
     """Stream an agent response as SSE events.
 
-    The OAuth proxy sets X-Forwarded-User, X-Forwarded-Email,
-    X-Forwarded-Groups, and X-Forwarded-Preferred-Username headers.
+    The OAuth proxy sets X-Forwarded-User and X-Forwarded-Email headers.
+    Group membership is resolved by querying the OpenShift API directly.
     """
     user = x_forwarded_email or x_forwarded_user
-    _check_user_allowed(request, user, x_forwarded_groups)
+    await _check_user_allowed(request, user)
 
     logger.info(
-        "Query from user=%s preferred_username=%s groups=%s: %s",
+        "Query from user=%s preferred_username=%s: %s",
         user,
         x_forwarded_preferred_username,
-        x_forwarded_groups,
         body.question[:200],
     )
 
@@ -160,11 +210,10 @@ async def download_report(
     request: Request,
     x_forwarded_user: str | None = Header(None),
     x_forwarded_email: str | None = Header(None),
-    x_forwarded_groups: str | None = Header(None),
 ):
     """Download a generated report file."""
     user = x_forwarded_email or x_forwarded_user
-    _check_user_allowed(request, user, x_forwarded_groups)
+    await _check_user_allowed(request, user)
 
     # Sanitize filename to prevent path traversal
     safe_name = os.path.basename(filename)

@@ -92,7 +92,8 @@ WHERE u.email NOT LIKE '%@redhat.com'
 
 ## Auth
 
-- **OpenShift**: OAuth proxy handles SSO authentication only. Authorization is enforced at the app level via `X-Forwarded-Groups`.
+- **OpenShift**: OAuth proxy handles SSO authentication only (passes `X-Forwarded-Email` / `X-Forwarded-User`). Authorization is enforced at the app level by querying OpenShift groups via the Kubernetes API.
+  - The app queries `user.openshift.io/v1/groups` using the service account token (same pattern as Babylon's catalog API). Results are cached for 60 seconds.
   - `auth.allowed_groups` in `config.yaml` lists allowed OpenShift groups (comma-separated). Default: `rhpds-admins,parsec-local-users`.
   - `parsec-local-users` is a cluster-scoped OpenShift group for non-SSO test accounts. It must be created manually on a fresh cluster:
     ```bash
@@ -101,9 +102,8 @@ WHERE u.email NOT LIKE '%@redhat.com'
     ```
     Note: SSO users have long OpenShift usernames (e.g. `demo-platform-ops+rhdp-test-user1@redhat.com`). Use `oc get users` to find the exact name.
   - `auth.allowed_users` provides an optional email whitelist fallback. Users matching either groups or email list are allowed.
-  - The `--openshift-group` flag on `ose-oauth-proxy` does NOT reliably enforce group membership. Do not use it — enforce groups at the app level instead.
+  - The `--openshift-group` flag on `ose-oauth-proxy` does NOT reliably enforce group membership, and the proxy does NOT forward `X-Forwarded-Groups`. Do not use either — query groups from the API instead.
 - **Local dev**: Set `auth.allowed_groups` and/or `auth.allowed_users` in `config.local.yaml` (both empty = all users allowed).
-- The OAuth proxy passes `X-Forwarded-Email` / `X-Forwarded-User` / `X-Forwarded-Groups` headers to the app.
 
 ## Abuse Indicators
 
