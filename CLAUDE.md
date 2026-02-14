@@ -92,9 +92,16 @@ WHERE u.email NOT LIKE '%@redhat.com'
 
 ## Auth
 
-- **OpenShift**: OAuth proxy sidecar handles SSO. User lockdown via `parsec-allowed-users` ConfigMap.
+- **OpenShift**: OAuth proxy sidecar handles SSO with group-based access control.
+  - The proxy restricts access to members of `rhpds-admins` or `parsec-local-users` OpenShift groups (`--openshift-group` flags in `openshift/base/auth/oauth-proxy.yaml`).
+  - `parsec-local-users` is a cluster-scoped OpenShift group for non-SSO test accounts (e.g. `rhpds-test-user1`). It must be created manually on a fresh cluster:
+    ```bash
+    oc adm groups new parsec-local-users rhpds-test-user1
+    oc adm groups add-users parsec-local-users <additional-user>
+    ```
+  - The `parsec-allowed-users` ConfigMap provides an optional secondary email whitelist at the app level. When empty (default), all users who pass the proxy group check are allowed.
 - **Local dev**: Set `auth.allowed_users` in `config.local.yaml` (empty = all users allowed).
-- The OAuth proxy passes `X-Forwarded-Email` / `X-Forwarded-User` headers to the app.
+- The OAuth proxy passes `X-Forwarded-Email` / `X-Forwarded-User` / `X-Forwarded-Groups` headers to the app.
 
 ## Abuse Indicators
 
