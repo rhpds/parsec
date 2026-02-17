@@ -4,7 +4,7 @@ metadata:
   name: parsec
   annotations:
     image.openshift.io/triggers: >-
-      [{"from":{"kind":"ImageStreamTag","name":"parsec:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"parsec\")].image"}]
+      [{"from":{"kind":"ImageStreamTag","name":"parsec:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"parsec\")].image"},{"from":{"kind":"ImageStreamTag","name":"parsec:latest"},"fieldPath":"spec.template.spec.initContainers[?(@.name==\"seed-pricing\")].image"},{"from":{"kind":"ImageStreamTag","name":"parsec:latest"},"fieldPath":"spec.template.spec.initContainers[?(@.name==\"seed-azure-billing\")].image"}]
 spec:
   replicas: 1
   selector:
