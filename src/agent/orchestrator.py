@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -56,7 +57,8 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
         )
 
     elif tool_name == "query_azure_costs":
-        return await query_azure_costs(
+        return await asyncio.to_thread(
+            query_azure_costs,
             start_date=tool_input["start_date"],
             end_date=tool_input["end_date"],
             subscription_names=tool_input.get("subscription_names"),
@@ -372,7 +374,13 @@ async def run_agent(
 
             yield sse_tool_start(tool_name, tool_input)
 
-            result = await _execute_tool(tool_name, tool_input)
+            # Run tool with periodic keepalive events to prevent proxy timeout
+            task = asyncio.create_task(_execute_tool(tool_name, tool_input))
+            while not task.done():
+                done, _ = await asyncio.wait({task}, timeout=30)
+                if not done:
+                    yield sse_status(f"Processing {tool_name}...")
+            result = task.result()
 
             yield sse_tool_result(tool_name, result)
 

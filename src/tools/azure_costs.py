@@ -10,12 +10,15 @@ from src.connections.azure import get_container_client
 logger = logging.getLogger(__name__)
 
 
-async def query_azure_costs(
+def query_azure_costs(
     start_date: str,
     end_date: str,
     subscription_names: list[str] | None = None,
 ) -> dict:
     """Query Azure billing CSVs for costs in specified subscriptions.
+
+    This is a sync function (Azure SDK uses blocking I/O). The orchestrator
+    runs it via asyncio.to_thread to avoid blocking the event loop.
 
     Args:
         start_date: Start date (YYYY-MM-DD).
