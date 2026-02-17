@@ -19,3 +19,4 @@ resources:
   - auth/oauth-proxy.yaml
   - auth/oauth-routes.yaml
   - pricing-cronjob.yaml
+  - azure-billing-cronjob.yaml

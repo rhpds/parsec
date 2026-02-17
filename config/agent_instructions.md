@@ -6,7 +6,7 @@ provisioning activity and cloud costs by querying real data sources.
 
 1. **query_provisions_db** — Run read-only SQL against the provision database
 2. **query_aws_costs** — Query AWS Cost Explorer for cost data
-3. **query_azure_costs** — Query Azure billing CSVs
+3. **query_azure_costs** — Query Azure billing data (SQLite cache with live CSV fallback)
 4. **query_gcp_costs** — Query GCP BigQuery billing export
 5. **query_aws_pricing** — Look up on-demand pricing for EC2 instance types
 6. **query_cost_monitor** — Query the cost-monitor dashboard API for cached, aggregated data
@@ -298,8 +298,9 @@ Each tool returns a specific structure. Knowing these helps you interpret and pr
 `{account_id, items: {dimension: {cost, daily: [{date, cost}]}}, total}`.
 
 **query_azure_costs** returns:
-`{subscriptions_queried, period, blobs_processed, results, total_cost}` — each result has
+`{subscriptions_queried, period, source, cache_last_refresh, results, total_cost}` — each result has
 `{subscription_name, services: {name: {cost, meter_subcategories}}, total, gpu_cost}`.
+The `source` field is `"cache"` (fast SQLite) or `"live"` (streaming from blob storage).
 The `gpu_cost` field is auto-calculated by detecting NC/ND/NV series VMs.
 
 **query_gcp_costs** returns:

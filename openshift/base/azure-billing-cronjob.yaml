@@ -1,33 +1,21 @@
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: parsec-pricing-cache
-spec:
-  storageClassName: ocs-storagecluster-cephfs
-  accessModes:
-    - ReadWriteMany
-  resources:
-    requests:
-      storage: 1Gi
----
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: parsec-pricing-refresh
+  name: parsec-azure-billing-refresh
 spec:
-  schedule: "0 3 * * 1"  # Every Monday at 03:00 UTC
+  schedule: "0 4 * * *"  # Daily at 04:00 UTC
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
-      activeDeadlineSeconds: 7200  # 2 hour timeout
+      activeDeadlineSeconds: 14400  # 4 hour timeout
       backoffLimit: 2
       template:
         metadata:
           labels:
             app: parsec
-            component: pricing-refresh
+            component: azure-billing-refresh
         spec:
           securityContext:
             runAsNonRoot: true
@@ -36,17 +24,20 @@ spec:
           containers:
             - name: refresh
               image: parsec:latest
-              command: ["python3", "scripts/refresh_pricing.py"]
+              command: ["python3", "scripts/refresh_azure_billing.py"]
+              envFrom:
+                - secretRef:
+                    name: parsec-cloud-credentials
               volumeMounts:
                 - name: pricing-cache
                   mountPath: /app/data
               resources:
                 requests:
-                  memory: "512Mi"
+                  memory: "256Mi"
                   cpu: "100m"
                 limits:
-                  memory: "3Gi"
-                  cpu: "1"
+                  memory: "1Gi"
+                  cpu: "500m"
               securityContext:
                 allowPrivilegeEscalation: false
                 runAsNonRoot: true

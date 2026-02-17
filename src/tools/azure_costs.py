@@ -1,7 +1,9 @@
-"""Tool: query_azure_costs — query Azure billing CSVs for cost data."""
+"""Tool: query_azure_costs — query Azure billing data from SQLite cache or live CSVs."""
 
 import csv
 import logging
+import os
+import sqlite3
 from collections.abc import Iterator
 from datetime import datetime
 
@@ -9,29 +11,152 @@ from src.connections.azure import get_container_client
 
 logger = logging.getLogger(__name__)
 
+_cache_mtime: float = 0.0
+_CACHE_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "data",
+    "azure_billing.db",
+)
 
-def query_azure_costs(
+
+def _get_cache_path() -> str | None:
+    """Return the cache DB path if the file exists, else None."""
+    if os.path.exists(_CACHE_FILE):
+        return _CACHE_FILE
+    return None
+
+
+def _get_cache_metadata(db_path: str) -> dict[str, str]:
+    """Read cache metadata (last_refresh, schema_version)."""
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        cursor = conn.execute("SELECT key, value FROM cache_metadata")
+        metadata = {row[0]: row[1] for row in cursor.fetchall()}
+        conn.close()
+        return metadata
+    except Exception:
+        return {}
+
+
+def _query_from_cache(
+    db_path: str,
+    start_date: str,
+    end_date: str,
+    subscription_names: list[str] | None = None,
+    meter_filter: str | None = None,
+) -> dict | None:
+    """Query the SQLite billing cache. Returns result dict or None on failure."""
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except Exception:
+        logger.warning("Failed to open billing cache at %s", db_path)
+        return None
+
+    try:
+        # Check if the cache has any data
+        cursor = conn.execute("SELECT COUNT(*) FROM billing_rows")
+        if cursor.fetchone()[0] == 0:
+            conn.close()
+            return None
+
+        # Build query
+        where_clauses = ["date >= ?", "date <= ?"]
+        params: list[str] = [start_date, end_date]
+
+        if subscription_names:
+            placeholders = ",".join("?" for _ in subscription_names)
+            where_clauses.append(f"subscription_name IN ({placeholders})")
+            params.extend(subscription_names)
+
+        if meter_filter:
+            where_clauses.append("(meter_category LIKE ? OR meter_subcategory LIKE ?)")
+            like_param = f"%{meter_filter}%"
+            params.extend([like_param, like_param])
+
+        where_sql = " AND ".join(where_clauses)
+
+        query = f"""
+            SELECT subscription_name, meter_category, meter_subcategory, SUM(cost)
+            FROM billing_rows
+            WHERE {where_sql}
+            GROUP BY subscription_name, meter_category, meter_subcategory
+        """  # nosec B608
+
+        cursor = conn.execute(query, params)
+        rows = cursor.fetchall()
+        conn.close()
+
+        # Build result structure (same format as live path)
+        cost_by_sub: dict[str, dict] = {}
+        total_cost = 0.0
+
+        for sub_name, meter_category, meter_subcategory, cost in rows:
+            if sub_name not in cost_by_sub:
+                cost_by_sub[sub_name] = {
+                    "subscription_name": sub_name,
+                    "services": {},
+                    "total": 0.0,
+                    "gpu_cost": 0.0,
+                }
+
+            entry = cost_by_sub[sub_name]
+
+            if meter_category not in entry["services"]:
+                entry["services"][meter_category] = {
+                    "cost": 0.0,
+                    "meter_subcategories": {},
+                }
+
+            entry["services"][meter_category]["cost"] += cost
+            if meter_subcategory:
+                subcats = entry["services"][meter_category]["meter_subcategories"]
+                if meter_subcategory not in subcats:
+                    subcats[meter_subcategory] = 0.0
+                subcats[meter_subcategory] += cost
+
+            entry["total"] += cost
+            total_cost += cost
+
+            if _is_gpu_vm(meter_subcategory):
+                entry["gpu_cost"] += cost
+
+        # Round
+        for sub in cost_by_sub.values():
+            sub["total"] = round(sub["total"], 2)
+            sub["gpu_cost"] = round(sub["gpu_cost"], 2)
+            for svc in sub["services"].values():
+                svc["cost"] = round(svc["cost"], 2)
+                svc["meter_subcategories"] = {
+                    k: round(v, 2) for k, v in svc["meter_subcategories"].items()
+                }
+
+        metadata = _get_cache_metadata(db_path)
+
+        result: dict = {
+            "subscriptions_queried": len(subscription_names) if subscription_names else "all",
+            "period": {"start": start_date, "end": end_date},
+            "source": "cache",
+            "cache_last_refresh": metadata.get("last_refresh", "unknown"),
+            "results": list(cost_by_sub.values()),
+            "total_cost": round(total_cost, 2),
+        }
+        if meter_filter:
+            result["meter_filter"] = meter_filter
+        return result
+
+    except Exception:
+        logger.exception("SQLite cache query failed")
+        conn.close()
+        return None
+
+
+def _query_from_blobs(
     start_date: str,
     end_date: str,
     subscription_names: list[str] | None = None,
     meter_filter: str | None = None,
 ) -> dict:
-    """Query Azure billing CSVs for costs in specified subscriptions.
-
-    This is a sync function (Azure SDK uses blocking I/O). The orchestrator
-    runs it via asyncio.to_thread to avoid blocking the event loop.
-
-    Args:
-        start_date: Start date (YYYY-MM-DD).
-        end_date: End date (YYYY-MM-DD).
-        subscription_names: Optional list of subscription names (e.g. pool-01-374).
-            If empty or None, queries all subscriptions (requires meter_filter).
-        meter_filter: Case-insensitive search string matched against MeterCategory
-            and MeterSubCategory. Required when subscription_names is omitted.
-
-    Returns:
-        Dict with results_by_subscription and total_cost.
-    """
+    """Query Azure billing CSVs from live blob storage (original path)."""
     container_client = get_container_client()
     if container_client is None:
         return {"error": "Azure blob storage not configured"}
@@ -39,7 +164,7 @@ def query_azure_costs(
     if not subscription_names and not meter_filter:
         return {
             "error": (
-                "meter_filter is required when querying all subscriptions. "
+                "meter_filter is required when querying all subscriptions without cache. "
                 "Provide a search term to filter by MeterCategory or MeterSubCategory "
                 "(e.g. 'Page Blob', 'Virtual Machines', 'NC Series')."
             )
@@ -54,77 +179,118 @@ def query_azure_costs(
     sub_set = set(subscription_names) if subscription_names else None
     meter_filter_upper = meter_filter.upper() if meter_filter else None
 
-    try:
-        # List billing CSV blobs in the date range
-        blobs = _list_billing_blobs(container_client, start_dt, end_dt)
-        if not blobs:
-            return {
-                "subscription_names": subscription_names or "all",
-                "period": {"start": start_date, "end": end_date},
-                "results": [],
-                "total_cost": 0.0,
-                "note": "No billing CSV blobs found for the date range",
-            }
+    # List billing CSV blobs in the date range
+    blobs = _list_billing_blobs(container_client, start_dt, end_dt)
+    if not blobs:
+        return {
+            "subscriptions_queried": subscription_names or "all",
+            "period": {"start": start_date, "end": end_date},
+            "source": "live",
+            "results": [],
+            "total_cost": 0.0,
+            "note": "No billing CSV blobs found for the date range",
+        }
 
-        # Parse each blob and collect costs
-        cost_by_sub: dict[str, dict] = {}
-        total_cost = 0.0
+    # Parse each blob and collect costs
+    cost_by_sub: dict[str, dict] = {}
+    total_cost = 0.0
 
-        for blob_name in blobs:
-            for row in _stream_and_parse_csv(
-                container_client, blob_name, sub_set, start_dt, end_dt, meter_filter_upper
-            ):
-                sub_name = row["subscription_name"]
-                if sub_name not in cost_by_sub:
-                    cost_by_sub[sub_name] = {
-                        "subscription_name": sub_name,
-                        "services": {},
-                        "total": 0.0,
-                        "gpu_cost": 0.0,
-                    }
-
-                entry = cost_by_sub[sub_name]
-                service = row["meter_category"]
-                cost = row["cost"]
-
-                if service not in entry["services"]:
-                    entry["services"][service] = {"cost": 0.0, "meter_subcategories": {}}
-
-                entry["services"][service]["cost"] += cost
-                sub_cat = row.get("meter_subcategory", "")
-                if sub_cat:
-                    if sub_cat not in entry["services"][service]["meter_subcategories"]:
-                        entry["services"][service]["meter_subcategories"][sub_cat] = 0.0
-                    entry["services"][service]["meter_subcategories"][sub_cat] += cost
-
-                entry["total"] += cost
-                total_cost += cost
-
-                # Flag GPU VMs
-                if _is_gpu_vm(row.get("meter_subcategory", "")):
-                    entry["gpu_cost"] += cost
-
-        # Round
-        for sub in cost_by_sub.values():
-            sub["total"] = round(sub["total"], 2)
-            sub["gpu_cost"] = round(sub["gpu_cost"], 2)
-            for svc in sub["services"].values():
-                svc["cost"] = round(svc["cost"], 2)
-                svc["meter_subcategories"] = {
-                    k: round(v, 2) for k, v in svc["meter_subcategories"].items()
+    for blob_name in blobs:
+        for row in _stream_and_parse_csv(
+            container_client, blob_name, sub_set, start_dt, end_dt, meter_filter_upper
+        ):
+            sub_name = row["subscription_name"]
+            if sub_name not in cost_by_sub:
+                cost_by_sub[sub_name] = {
+                    "subscription_name": sub_name,
+                    "services": {},
+                    "total": 0.0,
+                    "gpu_cost": 0.0,
                 }
 
-        result = {
-            "subscriptions_queried": len(subscription_names) if subscription_names else "all",
-            "period": {"start": start_date, "end": end_date},
-            "blobs_processed": len(blobs),
-            "results": list(cost_by_sub.values()),
-            "total_cost": round(total_cost, 2),
-        }
-        if meter_filter:
-            result["meter_filter"] = meter_filter
-        return result
+            entry = cost_by_sub[sub_name]
+            service = row["meter_category"]
+            cost = row["cost"]
 
+            if service not in entry["services"]:
+                entry["services"][service] = {"cost": 0.0, "meter_subcategories": {}}
+
+            entry["services"][service]["cost"] += cost
+            sub_cat = row.get("meter_subcategory", "")
+            if sub_cat:
+                if sub_cat not in entry["services"][service]["meter_subcategories"]:
+                    entry["services"][service]["meter_subcategories"][sub_cat] = 0.0
+                entry["services"][service]["meter_subcategories"][sub_cat] += cost
+
+            entry["total"] += cost
+            total_cost += cost
+
+            if _is_gpu_vm(row.get("meter_subcategory", "")):
+                entry["gpu_cost"] += cost
+
+    # Round
+    for sub in cost_by_sub.values():
+        sub["total"] = round(sub["total"], 2)
+        sub["gpu_cost"] = round(sub["gpu_cost"], 2)
+        for svc in sub["services"].values():
+            svc["cost"] = round(svc["cost"], 2)
+            svc["meter_subcategories"] = {
+                k: round(v, 2) for k, v in svc["meter_subcategories"].items()
+            }
+
+    result: dict = {
+        "subscriptions_queried": len(subscription_names) if subscription_names else "all",
+        "period": {"start": start_date, "end": end_date},
+        "source": "live",
+        "blobs_processed": len(blobs),
+        "results": list(cost_by_sub.values()),
+        "total_cost": round(total_cost, 2),
+    }
+    if meter_filter:
+        result["meter_filter"] = meter_filter
+    return result
+
+
+def query_azure_costs(
+    start_date: str,
+    end_date: str,
+    subscription_names: list[str] | None = None,
+    meter_filter: str | None = None,
+) -> dict:
+    """Query Azure billing data, using SQLite cache with live blob fallback.
+
+    This is a sync function (SQLite and Azure SDK use blocking I/O). The
+    orchestrator runs it via asyncio.to_thread to avoid blocking the event loop.
+
+    Args:
+        start_date: Start date (YYYY-MM-DD).
+        end_date: End date (YYYY-MM-DD).
+        subscription_names: Optional list of subscription names (e.g. pool-01-374).
+        meter_filter: Optional case-insensitive search string matched against
+            MeterCategory and MeterSubCategory.
+
+    Returns:
+        Dict with results_by_subscription and total_cost.
+    """
+    try:
+        datetime.strptime(start_date, "%Y-%m-%d")
+        datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError:
+        return {"error": "Dates must be YYYY-MM-DD format"}
+
+    # Try SQLite cache first
+    db_path = _get_cache_path()
+    if db_path is not None:
+        logger.info("Querying Azure billing from SQLite cache")
+        result = _query_from_cache(db_path, start_date, end_date, subscription_names, meter_filter)
+        if result is not None:
+            return result
+        logger.warning("Cache query returned no results, falling back to live blobs")
+
+    # Fall back to live blob streaming
+    logger.info("Querying Azure billing from live blob storage")
+    try:
+        return _query_from_blobs(start_date, end_date, subscription_names, meter_filter)
     except Exception as e:
         logger.exception("Azure billing query failed")
         return {"error": f"Azure billing query failed: {e}"}

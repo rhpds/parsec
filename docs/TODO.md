@@ -25,7 +25,7 @@ Tracked improvements, tech debt, and feature ideas.
 
 - [ ] **Frontend error handling for network failures** — if the SSE stream drops mid-response, the UI shows no error; add reconnection or failure state
 - [ ] **Add OpenAPI documentation** — FastAPI auto-generates `/docs` but it's not exposed or documented; could help API consumers
-- [ ] **Clean up noqa/type-ignore comments** — `azure_costs.py:207` has a malformed `# noqa` directive (ruff warning); `orchestrator.py` uses `# type: ignore[arg-type]` for TOOLS — consider typing TOOLS as `list[ToolParam]` properly
+- [ ] **Clean up noqa/type-ignore comments** — `azure_costs.py` has a `# noqa: typos:ignore` directive that ruff warns about (not valid noqa syntax); `orchestrator.py` uses `# type: ignore[arg-type]` for TOOLS — consider typing TOOLS as `list[ToolParam]` properly
 - [ ] **Add `from __future__ import annotations`** consistently — only `orchestrator.py` has it; add to other files for consistent deferred annotation evaluation
 - [ ] **Dead code audit** — vulture pre-commit hook is configured but skipped in CI; run it manually and clean up any findings
 - [ ] **Report cleanup** — `/app/reports/` grows unbounded; add a periodic cleanup or max-age policy

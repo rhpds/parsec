@@ -42,6 +42,20 @@ spec:
                 - ALL
             seccompProfile:
               type: RuntimeDefault
+        - name: seed-azure-billing
+          image: parsec:latest
+          command: ["python3", "scripts/refresh_azure_billing.py", "--init-only"]
+          volumeMounts:
+            - name: pricing-cache
+              mountPath: /app/data
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
       containers:
         - name: parsec
           image: parsec:latest
