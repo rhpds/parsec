@@ -179,8 +179,8 @@ The `query_azure_costs` tool reads from a local SQLite cache (`data/azure_billin
 ### How It Works
 
 - **`scripts/refresh_azure_billing.py`** downloads billing CSVs from Azure Blob Storage and ingests them into SQLite. It uses incremental processing — only new or changed blobs (by ETag) are re-downloaded. Streaming CSV parsing and batched inserts (10K rows per batch) keep memory low.
-- **`data/azure_billing.db`** is the SQLite cache (WAL mode for concurrent reads during writes). Not checked into git — populated by the CronJob.
-- **OpenShift CronJob** (`parsec-azure-billing-refresh`) runs daily (04:00 UTC) to refresh the cache on the shared `parsec-pricing-cache` PVC. The Deployment mounts the same PVC at `/app/data/`. An init container creates the schema on first deploy.
+- **`data/azure_billing.db`** is the SQLite cache (~1.3GB, WAL mode for concurrent reads during writes). Not checked into git — populated by the CronJob.
+- **OpenShift CronJob** (`parsec-azure-billing-refresh`) runs daily (04:00 UTC) to refresh the cache on the shared `parsec-pricing-cache` PVC (3Gi RWX CephFS). The Deployment mounts the same PVC at `/app/data/`. An init container creates the schema on first deploy.
 - **Fallback**: If the cache DB is missing or empty, `query_azure_costs` falls back to live blob streaming automatically.
 - **Response metadata**: Results include `"source": "cache"` or `"source": "live"` and `"cache_last_refresh"` timestamp.
 
@@ -263,6 +263,6 @@ annotation auto-triggers a rollout. Monitor with `oc get builds -n <namespace>`.
 - **GitHub auth**: Push access to `rhpds/parsec` requires a GitHub account with write permissions. Use `gh auth status` to check the current profile.
 - **ClusterRoleBindings**: Each environment has its own CRB (`parsec-oauth-dev`, `parsec-oauth-prod`) defined in the overlay, not the base. This avoids conflicts when applying overlays independently.
 - **EC2 pricing cache**: Uses a static JSON file from the public AWS Pricing Bulk API instead of calling `pricing:GetProducts` at runtime. No AWS credentials needed. Refreshed weekly by an OpenShift CronJob on a shared RWX CephFS PVC (`ocs-storagecluster-cephfs`). The per-region bulk files are ~250-400MB each so the CronJob needs 3Gi memory limit for JSON parsing.
-- **Azure billing cache**: Uses a SQLite database (`data/azure_billing.db`) on the same shared PVC. Refreshed daily by the `parsec-azure-billing-refresh` CronJob. Incremental processing via ETag comparison — only changed/new blobs are re-ingested. WAL mode enables concurrent reads during writes. Falls back to live blob streaming if the cache is missing.
+- **Azure billing cache**: Uses a SQLite database (`data/azure_billing.db`, ~1.3GB) on the same shared PVC (3Gi). Refreshed daily by the `parsec-azure-billing-refresh` CronJob. Incremental processing via ETag comparison — only changed/new blobs are re-ingested. WAL mode enables concurrent reads during writes. Falls back to live blob streaming if the cache is missing. For initial deployment, copy the DB from dev to prod via `oc rsync` to avoid a full re-ingest.
 
 See `docs/TODO.md` for the full project backlog.
