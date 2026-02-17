@@ -126,7 +126,10 @@ def extract_instances(data: dict) -> dict:
     instances: dict = {}
 
     for sku, product in products.items():
-        if product.get("productFamily") != "Compute Instance":
+        if product.get("productFamily") not in (
+            "Compute Instance",
+            "Compute Instance (bare metal)",
+        ):
             continue
 
         attrs = product.get("attributes", {})

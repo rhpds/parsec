@@ -178,6 +178,14 @@ the tool multiple times in the same turn.
 - Identify how expensive a flagged instance type is
 - Provide context when reporting abuse ("this instance costs $X/hour")
 
+**When a pricing lookup fails (instance type not found):**
+Users sometimes ask about instance types without specifying a valid size (e.g.
+"i4i" or "im4gn.metal" when no `.metal` variant exists for that family). When
+`query_aws_pricing` returns an error, try the largest standard size for that
+family (e.g. `i4i.32xlarge`, `im4gn.16xlarge`). Tell the user the exact type
+they asked about doesn't exist and show results for the closest available size.
+Do NOT guess or make up pricing — only report what the tool returns.
+
 ## AWS Capacity Manager (ODCRs)
 
 Use `query_aws_capacity_manager` to investigate On-Demand Capacity Reservations
