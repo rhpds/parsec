@@ -11,16 +11,17 @@ logger = logging.getLogger(__name__)
 
 
 async def query_azure_costs(
-    subscription_names: list[str],
     start_date: str,
     end_date: str,
+    subscription_names: list[str] | None = None,
 ) -> dict:
     """Query Azure billing CSVs for costs in specified subscriptions.
 
     Args:
-        subscription_names: List of subscription names (e.g. pool-01-374).
         start_date: Start date (YYYY-MM-DD).
         end_date: End date (YYYY-MM-DD).
+        subscription_names: Optional list of subscription names (e.g. pool-01-374).
+            If empty or None, returns costs across all subscriptions.
 
     Returns:
         Dict with results_by_subscription and total_cost.
@@ -35,17 +36,14 @@ async def query_azure_costs(
     except ValueError:
         return {"error": "Dates must be YYYY-MM-DD format"}
 
-    if not subscription_names:
-        return {"error": "No subscription_names provided"}
-
-    sub_set = set(subscription_names)
+    sub_set = set(subscription_names) if subscription_names else None
 
     try:
         # List billing CSV blobs in the date range
         blobs = _list_billing_blobs(container_client, start_dt, end_dt)
         if not blobs:
             return {
-                "subscription_names": subscription_names,
+                "subscription_names": subscription_names or "all",
                 "period": {"start": start_date, "end": end_date},
                 "results": [],
                 "total_cost": 0.0,
@@ -100,7 +98,7 @@ async def query_azure_costs(
                 }
 
         return {
-            "subscriptions_queried": len(subscription_names),
+            "subscriptions_queried": len(subscription_names) if subscription_names else "all",
             "period": {"start": start_date, "end": end_date},
             "blobs_processed": len(blobs),
             "results": list(cost_by_sub.values()),
@@ -139,7 +137,7 @@ def _list_billing_blobs(container_client, start_dt: datetime, end_dt: datetime) 
 def _download_and_parse_csv(
     container_client,
     blob_name: str,
-    subscription_names: set[str],
+    subscription_names: set[str] | None,
     start_dt: datetime,
     end_dt: datetime,
 ) -> list[dict]:
@@ -152,7 +150,7 @@ def _download_and_parse_csv(
 
     for row in reader:
         sub_name = row.get("SubscriptionName", row.get("subscriptionName", ""))
-        if sub_name not in subscription_names:
+        if subscription_names is not None and sub_name not in subscription_names:
             continue
 
         # Parse date

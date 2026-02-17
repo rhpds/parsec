@@ -57,9 +57,9 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
 
     elif tool_name == "query_azure_costs":
         return await query_azure_costs(
-            subscription_names=tool_input["subscription_names"],
             start_date=tool_input["start_date"],
             end_date=tool_input["end_date"],
+            subscription_names=tool_input.get("subscription_names"),
         )
 
     elif tool_name == "query_gcp_costs":
