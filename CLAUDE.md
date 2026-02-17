@@ -16,6 +16,7 @@ src/
   tools/
     provision_db.py          # Raw SQL against provision DB (read-only)
     aws_costs.py             # AWS Cost Explorer queries
+    aws_pricing.py           # EC2 pricing lookup (static cache, no AWS creds)
     aws_capacity_manager.py  # ODCR metrics from EC2 Capacity Manager
     azure_costs.py           # Azure billing CSV queries
     gcp_costs.py             # GCP BigQuery billing queries
@@ -31,6 +32,10 @@ static/                      # Chat UI (plain HTML/CSS/JS, no build step)
 config/
   config.yaml                # Base config (no secrets)
   config.local.yaml.template # Local dev secrets template
+data/
+  ec2_pricing.json           # Static EC2 pricing cache (checked into git)
+scripts/
+  refresh_pricing.py         # Refreshes ec2_pricing.json from public AWS API
 ```
 
 ## Running Locally
@@ -141,6 +146,31 @@ For local development, port-forward the cost-data-service and set `cost_monitor.
 oc port-forward svc/cost-data-service 8001:8000 -n cost-monitor-dev
 ```
 
+## EC2 Pricing Cache
+
+The `query_aws_pricing` tool reads from a static cache (`data/ec2_pricing.json`) instead of calling the AWS Pricing API at runtime. No AWS credentials are needed for pricing lookups.
+
+### How It Works
+
+- **`scripts/refresh_pricing.py`** downloads per-region pricing from the public AWS Pricing Bulk API (no credentials needed). It uses ETag-based conditional requests — a quick 18KB check against `region_index.json` skips everything if pricing hasn't changed.
+- **`data/ec2_pricing.json`** is the generated cache (~1.4MB, 1,075 instance types across 13 regions). Checked into git so it's baked into the Docker image.
+- **OpenShift CronJob** (`parsec-pricing-refresh`) runs weekly (Monday 3am UTC) to refresh the cache on a shared CephFS PVC. The Deployment mounts the same PVC at `/app/data/`. An init container seeds the PVC from the image-baked file on first deploy.
+- **Auto-reload**: The tool checks file mtime on each call and reloads when the CronJob writes a newer file.
+
+### Refreshing Locally
+
+```bash
+python3 scripts/refresh_pricing.py              # All 13 regions, ETag-cached
+python3 scripts/refresh_pricing.py --force      # Force re-download
+python3 scripts/refresh_pricing.py --regions us-east-1,us-west-2  # Subset
+```
+
+### Triggering Manually in OpenShift
+
+```bash
+oc create job pricing-manual --from=cronjob/parsec-pricing-refresh -n parsec-dev
+```
+
 ## Abuse Indicators
 
 - **AWS GPU**: g4dn.*, g5.*, g6.*, p3.*, p4.*, p5.*
@@ -204,5 +234,6 @@ annotation auto-triggers a rollout. Monitor with `oc get builds -n <namespace>`.
 - **AWS Capacity Manager (ODCRs)**: Uses `get_capacity_manager_metric_data` API from the payer account in us-east-1 with Organizations access. The `get_capacity_manager_metric_dimensions` API does not reliably return results, so inventory uses metric data grouped by `reservation-id` instead. RHDP ODCRs are transient (1-2 hours during provisioning) — the tool filters out ODCRs with < 24 hours of activity. Historical analysis (Nov 2025 – Feb 2026, 87k+ ODCRs) confirmed zero persistent waste. The Capacity Manager GUI's low utilization % reflects the brief startup window, not real waste.
 - **GitHub auth**: Push access to `rhpds/parsec` requires a GitHub account with write permissions. Use `gh auth status` to check the current profile.
 - **ClusterRoleBindings**: Each environment has its own CRB (`parsec-oauth-dev`, `parsec-oauth-prod`) defined in the overlay, not the base. This avoids conflicts when applying overlays independently.
+- **EC2 pricing cache**: Uses a static JSON file from the public AWS Pricing Bulk API instead of calling `pricing:GetProducts` at runtime. No AWS credentials needed. Refreshed weekly by an OpenShift CronJob on a shared RWX CephFS PVC (`ocs-storagecluster-cephfs`). The per-region bulk files are ~250-400MB each so the CronJob needs 3Gi memory limit for JSON parsing.
 
 See `docs/TODO.md` for the full project backlog.
