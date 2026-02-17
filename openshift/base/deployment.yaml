@@ -27,6 +27,21 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: seed-pricing
+          image: parsec:latest
+          command: ["sh", "-c", "test -f /app/data/ec2_pricing.json || cp /app/data-seed/ec2_pricing.json /app/data/ec2_pricing.json"]
+          volumeMounts:
+            - name: pricing-cache
+              mountPath: /app/data
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
       containers:
         - name: parsec
           image: parsec:latest
@@ -92,6 +107,8 @@ spec:
               readOnly: true
             - name: reports
               mountPath: /app/reports
+            - name: pricing-cache
+              mountPath: /app/data
           resources:
             requests:
               memory: "256Mi"
@@ -143,3 +160,6 @@ spec:
             optional: true
         - name: reports
           emptyDir: {}
+        - name: pricing-cache
+          persistentVolumeClaim:
+            claimName: parsec-pricing-cache

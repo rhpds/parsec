@@ -30,6 +30,8 @@ COPY src/ src/
 COPY static/ static/
 COPY config/config.yaml config/config.yaml
 COPY config/agent_instructions.md config/agent_instructions.md
+COPY data/ec2_pricing.json data-seed/ec2_pricing.json
+COPY scripts/refresh_pricing.py scripts/refresh_pricing.py
 
 RUN mkdir -p /app/reports && \
     chgrp -R 0 /app && \

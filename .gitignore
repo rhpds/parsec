@@ -27,3 +27,5 @@ reports/
 .pytest_cache/
 .coverage
 htmlcov/
+
+data/.pricing_etags.json

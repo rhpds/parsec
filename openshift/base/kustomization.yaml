@@ -18,3 +18,4 @@ resources:
   - auth/oauth-rbac.yaml
   - auth/oauth-proxy.yaml
   - auth/oauth-routes.yaml
+  - pricing-cronjob.yaml

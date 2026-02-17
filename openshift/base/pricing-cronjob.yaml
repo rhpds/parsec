@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: parsec-pricing-cache
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: parsec-pricing-refresh
+spec:
+  schedule: "0 3 * * 1"  # Every Monday at 03:00 UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 7200  # 2 hour timeout
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: parsec
+            component: pricing-refresh
+        spec:
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: refresh
+              image: parsec:latest
+              command: ["python3", "scripts/refresh_pricing.py"]
+              volumeMounts:
+                - name: pricing-cache
+                  mountPath: /app/data
+              resources:
+                requests:
+                  memory: "512Mi"
+                  cpu: "100m"
+                limits:
+                  memory: "3Gi"
+                  cpu: "1"
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities:
+                  drop:
+                    - ALL
+                seccompProfile:
+                  type: RuntimeDefault
+          volumes:
+            - name: pricing-cache
+              persistentVolumeClaim:
+                claimName: parsec-pricing-cache
+          restartPolicy: OnFailure
