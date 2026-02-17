@@ -30,7 +30,7 @@ spec:
       initContainers:
         - name: seed-pricing
           image: parsec:latest
-          command: ["sh", "-c", "test -f /app/data/ec2_pricing.json || cp /app/data-seed/ec2_pricing.json /app/data/ec2_pricing.json"]
+          command: ["sh", "-c", "cp /app/data-seed/ec2_pricing.json /app/data/ec2_pricing.json"]
           volumeMounts:
             - name: pricing-cache
               mountPath: /app/data
