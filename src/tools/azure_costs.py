@@ -1,8 +1,8 @@
 """Tool: query_azure_costs — query Azure billing CSVs for cost data."""
 
 import csv
-import io
 import logging
+from collections.abc import Iterator
 from datetime import datetime
 
 from src.connections.azure import get_container_client
@@ -55,8 +55,9 @@ async def query_azure_costs(
         total_cost = 0.0
 
         for blob_name in blobs:
-            rows = _download_and_parse_csv(container_client, blob_name, sub_set, start_dt, end_dt)
-            for row in rows:
+            for row in _stream_and_parse_csv(
+                container_client, blob_name, sub_set, start_dt, end_dt
+            ):
                 sub_name = row["subscription_name"]
                 if sub_name not in cost_by_sub:
                     cost_by_sub[sub_name] = {
@@ -134,19 +135,36 @@ def _list_billing_blobs(container_client, start_dt: datetime, end_dt: datetime) 
     return blobs
 
 
-def _download_and_parse_csv(
+def _blob_line_iterator(blob_client) -> Iterator[str]:
+    """Yield text lines from a blob, streaming chunk by chunk.
+
+    Only one chunk (~4 MB) plus a partial-line buffer are held in memory
+    at a time, instead of loading the entire blob with readall().
+    """
+    stream = blob_client.download_blob()
+    buffer = ""
+    first_chunk = True
+    for chunk in stream.chunks():
+        encoding = "utf-8-sig" if first_chunk else "utf-8"
+        first_chunk = False
+        buffer += chunk.decode(encoding)
+        while "\n" in buffer:
+            line, buffer = buffer.split("\n", 1)
+            yield line
+    if buffer:
+        yield buffer
+
+
+def _stream_and_parse_csv(
     container_client,
     blob_name: str,
     subscription_names: set[str] | None,
     start_dt: datetime,
     end_dt: datetime,
-) -> list[dict]:
-    """Download a billing CSV and extract rows for target subscriptions."""
+) -> Iterator[dict]:
+    """Stream a billing CSV and yield matching rows without loading entire blob."""
     blob_client = container_client.get_blob_client(blob_name)
-    data = blob_client.download_blob().readall().decode("utf-8-sig")
-
-    reader = csv.DictReader(io.StringIO(data))
-    rows = []
+    reader = csv.DictReader(_blob_line_iterator(blob_client))
 
     for row in reader:
         sub_name = row.get("SubscriptionName", row.get("subscriptionName", ""))
@@ -184,17 +202,13 @@ def _download_and_parse_csv(
         except (ValueError, TypeError):
             cost = 0.0
 
-        rows.append(
-            {
-                "subscription_name": sub_name,
-                "date": row_date.strftime("%Y-%m-%d"),
-                "meter_category": row.get("MeterCategory", row.get("meterCategory", "")),
-                "meter_subcategory": row.get("MeterSubCategory", row.get("meterSubCategory", "")),
-                "cost": cost,
-            }
-        )
-
-    return rows
+        yield {
+            "subscription_name": sub_name,
+            "date": row_date.strftime("%Y-%m-%d"),
+            "meter_category": row.get("MeterCategory", row.get("meterCategory", "")),
+            "meter_subcategory": row.get("MeterSubCategory", row.get("meterSubCategory", "")),
+            "cost": cost,
+        }
 
 
 def _is_gpu_vm(meter_subcategory: str) -> bool:
