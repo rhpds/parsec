@@ -3,8 +3,9 @@ kind: PersistentVolumeClaim
 metadata:
   name: parsec-pricing-cache
 spec:
+  storageClassName: ocs-storagecluster-cephfs
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
   resources:
     requests:
       storage: 100Mi
