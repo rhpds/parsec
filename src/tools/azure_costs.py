@@ -14,6 +14,7 @@ def query_azure_costs(
     start_date: str,
     end_date: str,
     subscription_names: list[str] | None = None,
+    meter_filter: str | None = None,
 ) -> dict:
     """Query Azure billing CSVs for costs in specified subscriptions.
 
@@ -24,7 +25,9 @@ def query_azure_costs(
         start_date: Start date (YYYY-MM-DD).
         end_date: End date (YYYY-MM-DD).
         subscription_names: Optional list of subscription names (e.g. pool-01-374).
-            If empty or None, returns costs across all subscriptions.
+            If empty or None, queries all subscriptions (requires meter_filter).
+        meter_filter: Case-insensitive search string matched against MeterCategory
+            and MeterSubCategory. Required when subscription_names is omitted.
 
     Returns:
         Dict with results_by_subscription and total_cost.
@@ -33,6 +36,15 @@ def query_azure_costs(
     if container_client is None:
         return {"error": "Azure blob storage not configured"}
 
+    if not subscription_names and not meter_filter:
+        return {
+            "error": (
+                "meter_filter is required when querying all subscriptions. "
+                "Provide a search term to filter by MeterCategory or MeterSubCategory "
+                "(e.g. 'Page Blob', 'Virtual Machines', 'NC Series')."
+            )
+        }
+
     try:
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
@@ -40,6 +52,7 @@ def query_azure_costs(
         return {"error": "Dates must be YYYY-MM-DD format"}
 
     sub_set = set(subscription_names) if subscription_names else None
+    meter_filter_upper = meter_filter.upper() if meter_filter else None
 
     try:
         # List billing CSV blobs in the date range
@@ -59,7 +72,7 @@ def query_azure_costs(
 
         for blob_name in blobs:
             for row in _stream_and_parse_csv(
-                container_client, blob_name, sub_set, start_dt, end_dt
+                container_client, blob_name, sub_set, start_dt, end_dt, meter_filter_upper
             ):
                 sub_name = row["subscription_name"]
                 if sub_name not in cost_by_sub:
@@ -101,13 +114,16 @@ def query_azure_costs(
                     k: round(v, 2) for k, v in svc["meter_subcategories"].items()
                 }
 
-        return {
+        result = {
             "subscriptions_queried": len(subscription_names) if subscription_names else "all",
             "period": {"start": start_date, "end": end_date},
             "blobs_processed": len(blobs),
             "results": list(cost_by_sub.values()),
             "total_cost": round(total_cost, 2),
         }
+        if meter_filter:
+            result["meter_filter"] = meter_filter
+        return result
 
     except Exception as e:
         logger.exception("Azure billing query failed")
@@ -164,6 +180,7 @@ def _stream_and_parse_csv(
     subscription_names: set[str] | None,
     start_dt: datetime,
     end_dt: datetime,
+    meter_filter: str | None = None,
 ) -> Iterator[dict]:
     """Stream a billing CSV and yield matching rows without loading entire blob."""
     blob_client = container_client.get_blob_client(blob_name)
@@ -173,6 +190,13 @@ def _stream_and_parse_csv(
         sub_name = row.get("SubscriptionName", row.get("subscriptionName", ""))
         if subscription_names is not None and sub_name not in subscription_names:
             continue
+
+        # Apply meter filter early to skip non-matching rows fast
+        if meter_filter is not None:
+            category = row.get("MeterCategory", row.get("meterCategory", "")).upper()
+            subcategory = row.get("MeterSubCategory", row.get("meterSubCategory", "")).upper()
+            if meter_filter not in category and meter_filter not in subcategory:
+                continue
 
         # Parse date
         date_str = row.get("Date", row.get("date", row.get("UsageDateTime", "")))

@@ -62,7 +62,9 @@ TOOLS = [
             "Can query specific subscriptions or all subscriptions. "
             "When investigating specific users/provisions, look up subscription names "
             "(sandbox_name) from the provision DB first. For broad cost searches across "
-            "all Azure data, omit subscription_names."
+            "all Azure data, omit subscription_names but provide a meter_filter to narrow "
+            "results (required for full scans). Full scans process many large CSVs and "
+            "take several minutes — warn the user before starting one."
         ),
         "input_schema": {
             "type": "object",
@@ -72,7 +74,7 @@ TOOLS = [
                     "items": {"type": "string"},
                     "description": (
                         "Optional list of Azure subscription names (e.g. pool-01-374). "
-                        "If omitted, queries all subscriptions."
+                        "If omitted, queries all subscriptions (requires meter_filter)."
                     ),
                 },
                 "start_date": {
@@ -82,6 +84,14 @@ TOOLS = [
                 "end_date": {
                     "type": "string",
                     "description": "End date in YYYY-MM-DD format.",
+                },
+                "meter_filter": {
+                    "type": "string",
+                    "description": (
+                        "Case-insensitive search string matched against MeterCategory "
+                        "and MeterSubCategory (e.g. 'Page Blob', 'Virtual Machines', "
+                        "'NC Series'). Required when subscription_names is omitted."
+                    ),
                 },
             },
             "required": ["start_date", "end_date"],

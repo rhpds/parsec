@@ -62,6 +62,7 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
             start_date=tool_input["start_date"],
             end_date=tool_input["end_date"],
             subscription_names=tool_input.get("subscription_names"),
+            meter_filter=tool_input.get("meter_filter"),
         )
 
     elif tool_name == "query_gcp_costs":
