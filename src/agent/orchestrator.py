@@ -334,9 +334,11 @@ def _serialize_messages(messages: list) -> list:
             # SDK content object list (from response.content)
             try:
                 serialized_content = [
-                    _clean_content_block(b.model_dump())
-                    if hasattr(b, "model_dump")
-                    else {"type": "text", "text": str(b)}
+                    (
+                        _clean_content_block(b.model_dump())
+                        if hasattr(b, "model_dump")
+                        else {"type": "text", "text": str(b)}
+                    )
                     for b in content
                 ]
                 result.append({"role": role, "content": serialized_content})
@@ -379,13 +381,27 @@ async def run_agent(
 
     for _round in range(max_rounds):
         try:
-            response = client.messages.create(
-                model=model,
-                max_tokens=max_tokens,
-                system=system,
-                tools=TOOLS,  # type: ignore[arg-type]
-                messages=messages,
+            # Run the synchronous API call in a thread so we can send
+            # keepalive SSE events and prevent proxy/browser timeouts.
+            def _call_api() -> anthropic.types.Message:
+                return client.messages.create(
+                    model=model,
+                    max_tokens=max_tokens,
+                    system=system,
+                    tools=TOOLS,  # type: ignore[arg-type]
+                    messages=messages,
+                )
+
+            api_task: asyncio.Task[anthropic.types.Message] = asyncio.ensure_future(
+                asyncio.to_thread(_call_api)
             )
+            elapsed = 0
+            while not api_task.done():
+                await asyncio.sleep(10)
+                if not api_task.done():
+                    elapsed += 10
+                    yield sse_status(f"Analyzing results... ({elapsed}s)")
+            response = api_task.result()
         except anthropic.APIError as e:
             logger.exception("Claude API error")
             yield sse_error(f"Claude API error: {e}")
@@ -451,7 +467,6 @@ async def run_agent(
 
         # Add tool results and loop back for Claude's next response
         messages.append({"role": "user", "content": tool_results})
-        yield sse_status("Analyzing results...")
 
     # If we exhausted max rounds
     yield sse_text("\n\n_Reached maximum tool call rounds. Please refine your question._")
