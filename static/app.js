@@ -63,6 +63,17 @@ marked.setOptions({ renderer: renderer });
         "— PRs welcome \uD83D\uDE01"
     );
     contentEl.appendChild(textEl);
+
+    // Auto-submit if ?q= URL parameter is present (e.g. from Slack alert links)
+    const urlParams = new URLSearchParams(window.location.search);
+    const injectedQuery = urlParams.get("q");
+    if (injectedQuery) {
+        // Clear the URL parameter so refreshes don't re-submit
+        window.history.replaceState({}, "", window.location.pathname);
+        input.value = injectedQuery;
+        // Trigger form submit after a brief delay to let the UI render
+        setTimeout(function() { form.requestSubmit(); }, 300);
+    }
 })();
 
 form.addEventListener("submit", async (e) => {
