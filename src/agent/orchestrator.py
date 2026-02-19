@@ -296,6 +296,15 @@ def _trim_history(history: list, max_tokens: int = 150000) -> list:
     return messages
 
 
+def _clean_content_block(block: dict) -> dict:
+    """Strip SDK-only fields that the API rejects on input."""
+    # The SDK adds fields like 'caller' to tool_use blocks that aren't
+    # valid when sending messages back to the API.
+    if block.get("type") == "tool_use":
+        return {k: v for k, v in block.items() if k in ("type", "id", "name", "input")}
+    return block
+
+
 def _serialize_messages(messages: list) -> list:
     """Serialize the messages array to JSON-safe dicts.
 
@@ -313,11 +322,11 @@ def _serialize_messages(messages: list) -> list:
             serialized_content = []
             for block in content:
                 if isinstance(block, dict):
-                    serialized_content.append(block)
+                    serialized_content.append(_clean_content_block(block))
                 elif hasattr(block, "model_dump"):
-                    serialized_content.append(block.model_dump())
+                    serialized_content.append(_clean_content_block(block.model_dump()))
                 elif hasattr(block, "to_dict"):
-                    serialized_content.append(block.to_dict())
+                    serialized_content.append(_clean_content_block(block.to_dict()))
                 else:
                     serialized_content.append({"type": "text", "text": str(block)})
             result.append({"role": role, "content": serialized_content})
@@ -325,7 +334,9 @@ def _serialize_messages(messages: list) -> list:
             # SDK content object list (from response.content)
             try:
                 serialized_content = [
-                    b.model_dump() if hasattr(b, "model_dump") else {"type": "text", "text": str(b)}
+                    _clean_content_block(b.model_dump())
+                    if hasattr(b, "model_dump")
+                    else {"type": "text", "text": str(b)}
                     for b in content
                 ]
                 result.append({"role": role, "content": serialized_content})
