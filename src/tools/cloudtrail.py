@@ -29,11 +29,14 @@ def _inject_partition_key(query: str) -> str:
 
     The CloudTrail Lake event data store uses calendarday (YYYYMMDD bigint) as
     a partition key. Queries MUST include calendarday in the WHERE clause or they
-    fail with InvalidQueryStatementException. Also, eventTime values must use
-    full timestamp format ('YYYY-MM-DDT00:00:00Z'), not short dates.
+    fail with InvalidQueryStatementException.
+
+    Also normalizes eventTime values to Presto-compatible format. CloudTrail Lake
+    (Presto) auto-coerces 'YYYY-MM-DD HH:MM:SS' (space separator) to timestamp
+    but rejects ISO format with T separator ('YYYY-MM-DDTHH:MM:SSZ').
 
     This function transparently adds calendarday filters and normalizes eventTime
-    formats so the agent doesn't need to know about partition keys.
+    formats so the agent doesn't need to know about partition keys or timestamp formats.
     """
     # Skip if calendarday is already present
     if re.search(r"\bcalendarday\b", query, re.IGNORECASE):
@@ -53,13 +56,17 @@ def _inject_partition_key(query: str) -> str:
         # Map eventTime operators to calendarday operators
         calendarday_clauses.append(f"calendarday {op} {calendarday}")
 
-        # Normalize short dates to full timestamps in the original query
-        # e.g. eventTime > '2026-01-15' → eventTime > '2026-01-15T00:00:00Z'
+        # Normalize eventTime values to Presto-compatible format:
+        #   '2026-02-19'            → '2026-02-19 00:00:00'
+        #   '2026-02-19T19:00:00'   → '2026-02-19 19:00:00'
+        #   '2026-02-19T19:00:00Z'  → '2026-02-19 19:00:00'
         full_match = m.group(0)
         date_value = full_match.split("'")[1]  # extract value between quotes
-        if "T" not in date_value and " " not in date_value:
-            normalized = f"eventTime {op} '{date_str}T00:00:00Z'"
-            query = query.replace(full_match, normalized)
+        normalized_value = date_value.replace("T", " ").rstrip("Z")
+        if " " not in normalized_value:
+            normalized_value += " 00:00:00"
+        normalized = f"eventTime {op} '{normalized_value}'"
+        query = query.replace(full_match, normalized)
 
     # Inject calendarday clause(s) after WHERE
     calendarday_filter = " AND ".join(calendarday_clauses)
