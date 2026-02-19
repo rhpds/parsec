@@ -376,7 +376,13 @@ async def run_agent(
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     system = f"{SYSTEM_PROMPT}\n\nToday's date is {today}."
 
-    messages = _trim_history(conversation_history or [])
+    incoming_history = conversation_history or []
+    messages = _trim_history(incoming_history)
+    logger.info(
+        "Agent loop: %d history messages received, %d after trim",
+        len(incoming_history),
+        len(messages),
+    )
     messages.append({"role": "user", "content": question})
 
     for _round in range(max_rounds):

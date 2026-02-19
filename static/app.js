@@ -221,6 +221,10 @@ form.addEventListener("submit", async (e) => {
                 break;
 
             case "done": {
+                // Clean up any remaining status indicator
+                const remainingStatus = contentEl.querySelector(".status-indicator");
+                if (remainingStatus) remainingStatus.remove();
+
                 // Finalize any tools still showing "running"
                 contentEl.querySelectorAll(".tool-status.running").forEach(function(s) {
                     s.className = "tool-status done";
