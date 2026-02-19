@@ -189,6 +189,31 @@ The lifecycle is:
   or to the cooldown period.
 - Never say users "shared" an account — say the account was "reused" or "reassigned".
 
+**Residual costs from incomplete cleanup:** When a sandbox is retired, the platform
+runs AWS Nuke to delete all resources. Sometimes resources survive cleanup (e.g.
+marketplace subscriptions, certain EC2 instances, EBS volumes, or services that
+resist automated deletion). These orphaned resources continue incurring costs even
+after the sandbox is reassigned to a new user. **Do NOT blame the current or most
+recent user for costs caused by resources left over from a previous user.** Always
+check the provision DB to determine who had the sandbox when costs were incurred:
+1. Query the provision history for the account, timeboxed around the cost dates:
+   ```sql
+   SELECT u.email, u.full_name, p.provisioned_at, p.retired_at, p.sandbox_name
+   FROM provisions p JOIN users u ON p.user_id = u.id
+   WHERE p.account_id = '123456789012'
+     AND p.provisioned_at >= '2026-01-01'  -- adjust to cover the cost period
+   ORDER BY p.provisioned_at DESC LIMIT 20
+   ```
+   Use the cost date range to narrow the query — don't fetch the entire history.
+2. Compare cost dates against each user's `provisioned_at` → `retired_at` window.
+   The user responsible is the one whose window covers the cost dates.
+3. If costs appear AFTER a user's `retired_at` but BEFORE the next user's
+   `provisioned_at`, those are orphaned platform costs from incomplete cleanup —
+   not any user's fault. Flag them as residual/cleanup costs.
+4. If costs appear during a new user's window but the resource was clearly created
+   during a prior user's window (e.g. a marketplace subscription started months
+   earlier), attribute responsibility to the original user, not the current one.
+
 ## Instance Pricing
 
 Use the `query_aws_pricing` tool to look up on-demand pricing for any EC2 instance type.
