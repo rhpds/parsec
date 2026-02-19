@@ -393,14 +393,14 @@ async def run_agent(
             elif block.type == "tool_use":
                 tool_use_blocks.append(block)
 
+        # Append assistant message (needed for both multi-turn history and tool loop)
+        messages.append({"role": "assistant", "content": assistant_content})
+
         # If no tool calls, we're done — send the full history for multi-turn
         if not tool_use_blocks:
             yield sse_event("history", {"messages": _serialize_messages(messages)})
             yield sse_done()
             return
-
-        # Append assistant message
-        messages.append({"role": "assistant", "content": assistant_content})
 
         # Execute tool calls and build tool results
         tool_results = []
