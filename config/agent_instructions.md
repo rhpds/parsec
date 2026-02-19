@@ -15,6 +15,7 @@ provisioning activity and cloud costs by querying real data sources.
 9. **query_aws_capacity_manager** — Query ODCR metrics from the payer account Capacity Manager
 10. **query_cloudtrail** — Query CloudTrail Lake for org-wide AWS API events
 11. **query_aws_account** — Inspect individual AWS member accounts (read-only cross-account)
+12. **query_marketplace_agreements** — Query the pre-enriched marketplace agreement inventory (DynamoDB)
 
 ## Provision Database Schema
 
@@ -356,6 +357,60 @@ WHERE p.account_id = '123456789012'
 ORDER BY p.provisioned_at DESC LIMIT 5
 ```
 
+## Marketplace Agreement Inventory
+
+Use `query_marketplace_agreements` to search the pre-enriched marketplace agreement
+inventory. This DynamoDB table is populated by the `mktp-investigator` Lambda and
+contains ~768 records covering all AWS Marketplace subscriptions across the org.
+
+**When to use this vs other tools:**
+- **`query_marketplace_agreements`** — Fast lookup of agreement metadata: "show all
+  active auto-renew SaaS agreements", "which accounts have marketplace subscriptions
+  over $1000", "find all agreements from vendor X". No CloudTrail scan needed.
+- **`query_cloudtrail`** — Use when you need the *event* that created the subscription
+  (who accepted it, when, from which IP). Search for `AcceptAgreementRequest` events.
+- **`query_aws_account` with `describe_marketplace`** — Use to get live agreement
+  details (terms, renewal dates) directly from a specific account's Marketplace API.
+
+**DynamoDB schema fields returned:**
+- `agreement_id` — AWS Marketplace agreement ID (e.g. `agmt-...`)
+- `account_id` — 12-digit AWS account ID
+- `account_name` — Human-readable account name (e.g. `sandbox3334`)
+- `status` — Agreement status: `ACTIVE`, `CLOSED`, etc.
+- `product_name` — Marketplace product name
+- `product_id` — Marketplace product ID
+- `offer_type` — Offer type
+- `classification` — `SaaS (Auto-Renew)`, `SaaS (Auto-Renew Disabled)`,
+  `Fixed/Upfront`, `Pay-As-You-Go`
+- `estimated_cost` — Estimated cost in USD
+- `currency` — Currency code (e.g. `USD`)
+- `auto_renew` — Whether auto-renewal is enabled (e.g. `true`, empty if N/A)
+- `agreement_start`, `agreement_end` — Agreement date range
+- `last_updated` — When the record was last refreshed
+
+**Filter options (all optional):**
+- `account_id` — Uses GSI for fast per-account lookup (Query instead of Scan)
+- `account_name` — Case-insensitive contains match
+- `status` — Exact match (e.g. `ACTIVE`)
+- `classification` — Exact match (e.g. `SaaS (Auto-Renew)`)
+- `min_cost` — Minimum estimated cost threshold in USD
+- `product_name` — Case-insensitive contains match on product_name
+- `vendor_name` — Case-insensitive contains match
+- `max_results` — Default 100, max 500
+
+**Response format:**
+`{agreements: [...], count: int, truncated: bool}`
+
+**Example investigation patterns:**
+- "Show all active SaaS auto-renew agreements":
+  `status="ACTIVE", classification="SaaS (Auto-Renew)"`
+- "Which accounts have marketplace costs over $1000?":
+  `min_cost=1000`
+- "Find all Ansible marketplace subscriptions":
+  `product_name="ansible"`
+- "What marketplace agreements does account 123456789012 have?":
+  `account_id="123456789012"`
+
 ## Abuse Indicators
 
 When investigating potential abuse, look for these patterns:
@@ -378,7 +433,8 @@ Look for Compute Engine costs with GPU-related SKUs in the GCP billing data.
 - For GCP cost data → use `query_gcp_costs` directly (no account lookup needed)
 - For broad cost overviews → prefer `query_cost_monitor` (faster, cached data)
 - For pricing context → use `query_aws_pricing` to look up instance costs
-- For marketplace/subscription questions → use `query_cloudtrail` to find `AcceptAgreementRequest` events, then `query_aws_account` with `describe_marketplace` for details
+- For marketplace agreement inventory → use `query_marketplace_agreements` for fast lookups (active agreements, auto-renew, costs, vendors)
+- For marketplace event history (who accepted, when) → use `query_cloudtrail` to find `AcceptAgreementRequest` events, then `query_aws_account` with `describe_marketplace` for live details
 - For "what's running on account X" → use `query_aws_account` with `describe_instances`
 - For IAM investigation → use `query_aws_account` with `list_users` or `lookup_events`
 - For org-wide API event searches → use `query_cloudtrail`
@@ -447,6 +503,11 @@ For `describe_marketplace`: `{agreement_count, agreements: [{agreement_id, statu
 offer_type, agreement_start, agreement_end, estimated_cost_usd, classification, auto_renew, terms}]}`.
 Classifications: "SaaS (Auto-Renew)", "SaaS (Auto-Renew Disabled)", "Fixed/Upfront", "Pay-As-You-Go".
 For `lookup_events`: `{event_count, events: [{event_name, event_time, username}]}`.
+
+**query_marketplace_agreements** returns:
+`{agreements: [{agreement_id, account_id, account_name, status, product_name,
+classification, estimated_cost, auto_renew, agreement_start, agreement_end, ...}],
+count, truncated}`. Max 500 agreements.
 
 **query_cost_monitor** returns:
 Varies by endpoint. Always includes `_dashboard_link` URL if configured.

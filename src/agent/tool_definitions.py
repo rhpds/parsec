@@ -352,6 +352,58 @@ TOOLS = [
         },
     },
     {
+        "name": "query_marketplace_agreements",
+        "description": (
+            "Query the marketplace agreement inventory for enriched data on AWS "
+            "Marketplace subscriptions across all org accounts. Use this for questions "
+            "about active marketplace agreements, auto-renew SaaS subscriptions, "
+            "vendor products, or cost thresholds — without needing to scan CloudTrail "
+            "or inspect individual accounts. Data is pre-enriched with account name, "
+            "product title, vendor, classification, cost, and auto-renew status."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string",
+                    "description": "Filter by 12-digit AWS account ID.",
+                },
+                "account_name": {
+                    "type": "string",
+                    "description": ("Filter by account name (case-insensitive contains match)."),
+                },
+                "status": {
+                    "type": "string",
+                    "description": ("Filter by agreement status (e.g. ACTIVE, CLOSED)."),
+                },
+                "classification": {
+                    "type": "string",
+                    "description": (
+                        "Filter by classification: 'SaaS (Auto-Renew)', "
+                        "'SaaS (Auto-Renew Disabled)', 'Fixed/Upfront', 'Pay-As-You-Go'."
+                    ),
+                },
+                "min_cost": {
+                    "type": "number",
+                    "description": "Minimum estimated cost (estimated_cost field) in USD.",
+                },
+                "product_name": {
+                    "type": "string",
+                    "description": ("Filter by product name (case-insensitive contains match)."),
+                },
+                "vendor_name": {
+                    "type": "string",
+                    "description": ("Filter by vendor name (case-insensitive contains match)."),
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Max agreements to return. Default: 100, max: 500.",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "render_chart",
         "description": (
             "Render a chart in the chat UI. Use this to visualize cost data, "

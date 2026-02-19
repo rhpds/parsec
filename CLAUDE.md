@@ -20,6 +20,7 @@ src/
     aws_capacity_manager.py  # ODCR metrics from EC2 Capacity Manager
     cloudtrail.py            # CloudTrail Lake queries (org-wide API events)
     aws_account.py           # Cross-account member account inspection (read-only)
+    marketplace_agreements.py # DynamoDB marketplace agreement inventory queries
     azure_costs.py           # Azure billing queries (SQLite cache + live CSV fallback)
     gcp_costs.py             # GCP BigQuery billing queries
   connections/
@@ -242,27 +243,28 @@ The marketplace-agreement API uses `aws-marketplace:` as its IAM action prefix (
 
 ## AWS IAM Policy
 
-Both tools use the same AWS IAM user as Cost Explorer and Capacity Manager (the parsec service account in the payer account). The IAM policy needs these two additional statements for CloudTrail Lake and cross-account access:
+All AWS tools use the `cost-monitor` IAM user in the payer account, with the
+managed policy `CostMonitorPolicy`. When adding new AWS tools that need additional
+IAM permissions, update this policy.
 
-```json
-{
-    "Sid": "CloudTrailLakeReadOnly",
-    "Effect": "Allow",
-    "Action": [
-        "cloudtrail:StartQuery",
-        "cloudtrail:GetQueryResults"
-    ],
-    "Resource": "arn:aws:cloudtrail:<REGION>:<PAYER_ACCOUNT_ID>:eventdatastore/<EVENT_DATA_STORE_ID>"
-},
-{
-    "Sid": "AssumeReadOnlyAccess",
-    "Effect": "Allow",
-    "Action": "sts:AssumeRole",
-    "Resource": "arn:aws:iam::*:role/OrganizationAccountAccessRole"
-}
+**Policy version limit:** AWS managed policies can have at most 5 versions. Before
+creating a new version (`aws iam create-policy-version`), list existing versions and
+delete the oldest non-default one:
+```bash
+aws iam list-policy-versions --policy-arn <POLICY_ARN>
+aws iam delete-policy-version --policy-arn <POLICY_ARN> --version-id <OLDEST_NON_DEFAULT>
 ```
 
-**CloudTrailLakeReadOnly** is scoped to a specific event data store ARN. Replace the placeholders with your payer account ID and CloudTrail Lake event data store ID.
+**Current policy statements:**
+
+| Sid | Actions | Resource |
+|---|---|---|
+| CostExplorerReadOnly | `ce:GetCostAndUsage`, `ce:GetDimensionValues`, `ce:GetReservation*`, `ce:ListCostCategoryDefinitions`, `ce:GetCostCategories` | `*` |
+| OrganizationsReadOnly | `organizations:DescribeAccount`, `organizations:DescribeOrganization`, `organizations:ListAccounts`, `organizations:ListRoots`, `organizations:ListOrganizationalUnitsForParent`, `organizations:ListChildren` | `*` |
+| CapacityManagerReadOnly | `ec2:GetCapacityManager*` | `*` |
+| CloudTrailLakeReadOnly | `cloudtrail:StartQuery`, `cloudtrail:GetQueryResults` | Event data store ARN |
+| AssumeReadOnlyAccess | `sts:AssumeRole` | `arn:aws:iam::*:role/OrganizationAccountAccessRole` |
+| MarketplaceInventoryReadOnly | `dynamodb:Scan`, `dynamodb:Query` | `marketplace-agreement-inventory` table + indexes |
 
 **AssumeReadOnlyAccess** allows assuming `OrganizationAccountAccessRole` in any member account. This role exists by default in accounts created through AWS Organizations. **Read-only enforcement is handled by the inline session policy in `src/tools/aws_account.py`**, not by the IAM policy — the session policy restricts to: `ec2:Describe*`, `iam:List*/Get*`, `cloudtrail:LookupEvents`, `aws-marketplace:DescribeAgreement/GetAgreementTerms/SearchAgreements`, `marketplace-entitlement:GetEntitlements`.
 

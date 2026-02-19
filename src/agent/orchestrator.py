@@ -36,6 +36,7 @@ from src.tools.azure_costs import query_azure_costs
 from src.tools.cloudtrail import query_cloudtrail
 from src.tools.cost_monitor import query_cost_monitor
 from src.tools.gcp_costs import query_gcp_costs
+from src.tools.marketplace_agreements import query_marketplace_agreements
 from src.tools.provision_db import execute_query
 
 logger = logging.getLogger(__name__)
@@ -123,6 +124,18 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
             action=tool_input["action"],
             region=tool_input.get("region", "us-east-1"),
             filters=tool_input.get("filters"),
+        )
+
+    elif tool_name == "query_marketplace_agreements":
+        return await query_marketplace_agreements(
+            account_id=tool_input.get("account_id"),
+            account_name=tool_input.get("account_name"),
+            status=tool_input.get("status"),
+            classification=tool_input.get("classification"),
+            min_cost=tool_input.get("min_cost"),
+            product_name=tool_input.get("product_name"),
+            vendor_name=tool_input.get("vendor_name"),
+            max_results=tool_input.get("max_results", 100),
         )
 
     elif tool_name == "render_chart":

@@ -31,7 +31,8 @@ secrets:
     password: "REPLACE_WITH_DB_PASSWORD"
 
   # AWS credentials (cost-monitor IAM user — powers Cost Explorer,
-  # CloudTrail Lake, Capacity Manager, and cross-account inspection)
+  # CloudTrail Lake, Capacity Manager, cross-account inspection,
+  # and DynamoDB marketplace agreement inventory)
   aws:
     access_key_id: "REPLACE_WITH_AWS_ACCESS_KEY"
     secret_access_key: "REPLACE_WITH_AWS_SECRET_KEY"
