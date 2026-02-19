@@ -7,6 +7,14 @@ const sendBtn = document.getElementById("send-btn");
 
 let conversationHistory = [];
 
+// Restore conversation history from localStorage (survives page refresh)
+try {
+    const saved = localStorage.getItem("parsec_history");
+    if (saved) conversationHistory = JSON.parse(saved);
+} catch (e) {
+    // Ignore corrupt data
+}
+
 // Open all markdown links in new tabs
 var renderer = new marked.Renderer();
 renderer.link = function(href, title, text) {
@@ -218,6 +226,7 @@ form.addEventListener("submit", async (e) => {
             case "history":
                 // Store full message history (includes tool calls/results)
                 conversationHistory = data.messages;
+                try { localStorage.setItem("parsec_history", JSON.stringify(conversationHistory)); } catch (e) {}
                 break;
 
             case "done": {
