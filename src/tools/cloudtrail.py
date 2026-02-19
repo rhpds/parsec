@@ -74,6 +74,31 @@ def _inject_partition_key(query: str) -> str:
     return query
 
 
+# Matches bare map columns used with LIKE/comparison operators
+# e.g. requestParameters LIKE '%foo%' → CAST(requestParameters AS varchar) LIKE '%foo%'
+_MAP_COLUMNS = ("requestParameters", "responseElements")
+_MAP_LIKE_RE = re.compile(
+    r"\b(" + "|".join(_MAP_COLUMNS) + r")\s+(LIKE|NOT\s+LIKE)\s+",
+    re.IGNORECASE,
+)
+
+
+def _cast_map_columns(query: str) -> str:
+    """Wrap map-type columns with CAST when used with LIKE.
+
+    CloudTrail Lake stores requestParameters and responseElements as
+    map(varchar, varchar). LIKE requires varchar, so we automatically
+    wrap them: requestParameters LIKE → CAST(requestParameters AS varchar) LIKE.
+    """
+
+    def _replacer(m: re.Match) -> str:
+        col = m.group(1)
+        op = m.group(2)
+        return f"CAST({col} AS varchar) {op} "
+
+    return _MAP_LIKE_RE.sub(_replacer, query)
+
+
 def _parse_java_map(s: str) -> dict:
     """Parse Java-style map strings like '{key=value, key2=value2}' into a dict.
 
@@ -214,6 +239,10 @@ async def query_cloudtrail(query: str, max_results: int = 100) -> dict:
 
         # Inject calendarday partition key and normalize eventTime format
         query = _inject_partition_key(query)
+
+        # Wrap map-type columns (requestParameters, responseElements) with CAST
+        # when used with LIKE — they are map(varchar, varchar), not varchar
+        query = _cast_map_columns(query)
 
         max_results = min(max_results, MAX_ROWS)
 
