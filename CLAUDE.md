@@ -1,6 +1,6 @@
 # Parsec
 
-Natural language cloud cost investigation tool. Investigators type questions in a chat UI, and Claude queries the provision DB, AWS Cost Explorer, Azure billing CSVs, and GCP BigQuery to answer them.
+Natural language cloud cost investigation tool. Investigators type questions in a chat UI, and Claude queries the provision DB, AWS Cost Explorer, Azure billing CSVs, GCP BigQuery, CloudTrail Lake, and individual AWS member accounts to answer them.
 
 ## Project Structure
 
@@ -18,6 +18,8 @@ src/
     aws_costs.py             # AWS Cost Explorer queries
     aws_pricing.py           # EC2 pricing lookup (static cache, no AWS creds)
     aws_capacity_manager.py  # ODCR metrics from EC2 Capacity Manager
+    cloudtrail.py            # CloudTrail Lake queries (org-wide API events)
+    aws_account.py           # Cross-account member account inspection (read-only)
     azure_costs.py           # Azure billing queries (SQLite cache + live CSV fallback)
     gcp_costs.py             # GCP BigQuery billing queries
   connections/
@@ -199,6 +201,71 @@ python3 scripts/refresh_azure_billing.py --init-only  # Create schema only
 oc create job azure-billing-manual --from=cronjob/parsec-azure-billing-refresh -n parsec-dev
 ```
 
+## CloudTrail Lake
+
+The `query_cloudtrail` tool queries CloudTrail Lake — an org-wide event data store that aggregates CloudTrail logs from all AWS accounts. Used for investigating marketplace subscriptions, IAM activity, service quota increases, and other API events.
+
+### How It Works
+
+- Queries a CloudTrail Lake event data store in us-east-1 (configured per environment)
+- The agent writes SQL with `FROM cloudtrail_events` — the tool substitutes the real event data store ID automatically
+- Uses `start_query()` → poll `get_query_results()` every 2s → paginate with `NextToken`
+- Parses CloudTrail Lake's `[{col: val}, ...]` row format into flat dicts
+- Auto-parses Java-style `{key=value}` strings in `requestParameters` and `responseElements` into dicts
+- Only SELECT queries allowed (validated before submission)
+- Configured via `cloudtrail.event_data_store_id` in local config (not checked into git).
+  Set in `config.local.yaml` for local dev, or in the `openshift/local/local-config*.yaml` for OpenShift (`deploy.sh` patches the ConfigMap).
+  Find the ID with: `aws cloudtrail list-event-data-stores --region us-east-1`
+
+## AWS Account Inspection
+
+The `query_aws_account` tool inspects individual AWS member accounts using cross-account STS AssumeRole with an inline session policy that restricts access to read-only operations.
+
+### How It Works
+
+- Assumes `OrganizationAccountAccessRole` in the target account via STS
+- Inline session policy limits to: `ec2:Describe*`, `iam:List*/Get*`, `cloudtrail:LookupEvents`, `aws-marketplace:DescribeAgreement/GetAgreementTerms/SearchAgreements`, `marketplace-entitlement:GetEntitlements`
+- Write operations (`CreateSecurityGroup`, `CreateUser`, etc.) return AccessDenied — verified in testing
+- Credentials cached per account to avoid redundant STS calls
+- When AssumeRole fails, checks `organizations:DescribeAccount` for suspended/closed status
+
+### Available Actions
+
+- `describe_instances` — EC2 instances with optional state/ID filters
+- `lookup_events` — recent CloudTrail events (account-local, last few hours)
+- `list_users` — IAM users + access keys per user
+- `describe_marketplace` — marketplace agreements via `describe_agreement` + `get_agreement_terms`. Pass `filters: {agreement_ids: ["agmt-..."]}` with IDs from CloudTrail Lake. `SearchAgreements` discovery doesn't work on member accounts.
+
+### Marketplace Investigation Pattern
+
+The marketplace-agreement API uses `aws-marketplace:` as its IAM action prefix (not `marketplace-agreement:`). The session policy must include explicit actions like `aws-marketplace:DescribeAgreement` — wildcard `marketplace-agreement:*` does not match. `SearchAgreements` returns `ValidationException` on member accounts; the correct flow is CloudTrail Lake discovery → direct `describe_agreement` with known agreement IDs.
+
+## AWS IAM Policy
+
+Both tools use the same AWS IAM user as Cost Explorer and Capacity Manager (the parsec service account in the payer account). The IAM policy needs these two additional statements for CloudTrail Lake and cross-account access:
+
+```json
+{
+    "Sid": "CloudTrailLakeReadOnly",
+    "Effect": "Allow",
+    "Action": [
+        "cloudtrail:StartQuery",
+        "cloudtrail:GetQueryResults"
+    ],
+    "Resource": "arn:aws:cloudtrail:<REGION>:<PAYER_ACCOUNT_ID>:eventdatastore/<EVENT_DATA_STORE_ID>"
+},
+{
+    "Sid": "AssumeReadOnlyAccess",
+    "Effect": "Allow",
+    "Action": "sts:AssumeRole",
+    "Resource": "arn:aws:iam::*:role/OrganizationAccountAccessRole"
+}
+```
+
+**CloudTrailLakeReadOnly** is scoped to a specific event data store ARN. Replace the placeholders with your payer account ID and CloudTrail Lake event data store ID.
+
+**AssumeReadOnlyAccess** allows assuming `OrganizationAccountAccessRole` in any member account. This role exists by default in accounts created through AWS Organizations. **Read-only enforcement is handled by the inline session policy in `src/tools/aws_account.py`**, not by the IAM policy — the session policy restricts to: `ec2:Describe*`, `iam:List*/Get*`, `cloudtrail:LookupEvents`, `aws-marketplace:DescribeAgreement/GetAgreementTerms/SearchAgreements`, `marketplace-entitlement:GetEntitlements`.
+
 ## Abuse Indicators
 
 - **AWS GPU**: g4dn.*, g5.*, g6.*, p3.*, p4.*, p5.*
@@ -264,5 +331,7 @@ annotation auto-triggers a rollout. Monitor with `oc get builds -n <namespace>`.
 - **ClusterRoleBindings**: Each environment has its own CRB (`parsec-oauth-dev`, `parsec-oauth-prod`) defined in the overlay, not the base. This avoids conflicts when applying overlays independently.
 - **EC2 pricing cache**: Uses a static JSON file from the public AWS Pricing Bulk API instead of calling `pricing:GetProducts` at runtime. No AWS credentials needed. Refreshed weekly by an OpenShift CronJob on a shared RWX CephFS PVC (`ocs-storagecluster-cephfs`). The per-region bulk files are ~250-400MB each so the CronJob needs 3Gi memory limit for JSON parsing.
 - **Azure billing cache**: Uses a SQLite database (`data/azure_billing.db`, ~1.3GB) on the same shared PVC (3Gi). Refreshed daily by the `parsec-azure-billing-refresh` CronJob. Incremental processing via ETag comparison — only changed/new blobs are re-ingested. WAL mode enables concurrent reads during writes. Falls back to live blob streaming if the cache is missing. For initial deployment, copy the DB from dev to prod via `oc rsync` to avoid a full re-ingest.
+- **CloudTrail Lake**: The event data store ID is environment-specific — set via local config overrides (`config.local.yaml` or `deploy.sh`), not hardcoded. The tool substitutes `cloudtrail_events` in FROM clauses with the real ID so the agent never sees it. CloudTrail Lake charges per byte scanned — always include `eventTime >` filters. `responseElements` often comes as Java-style `{key=value}` instead of JSON; the tool auto-parses these.
+- **Cross-account access**: Uses STS AssumeRole into `OrganizationAccountAccessRole` with an inline session policy for read-only enforcement. The session policy (not the IAM role) is the security boundary — even though `OrganizationAccountAccessRole` has admin, the inline policy limits to `ec2:Describe*`, `iam:List*/Get*`, etc. Credentials are cached per account ID at module level. The `marketplace-agreement` SDK client calls IAM actions under the `aws-marketplace:` prefix, not `marketplace-agreement:` — the session policy must use `aws-marketplace:DescribeAgreement` explicitly.
 
 See `docs/TODO.md` for the full project backlog.

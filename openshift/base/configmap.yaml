@@ -29,6 +29,9 @@ data:
       api_url: "http://cost-data-service.cost-monitor.svc:8000"
       dashboard_url: ""
 
+    cloudtrail:
+      event_data_store_id: ""
+
     auth:
       allowed_groups: "rhpds-admins,parsec-local-users"
       allowed_users: ""

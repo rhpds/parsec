@@ -303,6 +303,32 @@ main#chat {
     border-color: var(--accent);
 }
 
+/* Response export bar */
+.response-export-bar {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+
+.response-export-btn {
+    padding: 4px 12px;
+    font-size: 11px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.2s, border-color 0.2s;
+}
+
+.response-export-btn:hover {
+    color: var(--text);
+    border-color: var(--accent);
+}
+
 /* Report download */
 .report-download {
     display: inline-flex;

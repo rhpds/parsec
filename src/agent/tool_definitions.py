@@ -269,6 +269,89 @@ TOOLS = [
         },
     },
     {
+        "name": "query_cloudtrail",
+        "description": (
+            "Query CloudTrail Lake for org-wide AWS API events across all accounts in "
+            "the organization. Use this to investigate marketplace subscriptions "
+            "(AcceptAgreementRequest), service quota increases, IAM activity, "
+            "RunInstances events, and other API calls. Write SQL using "
+            "FROM cloudtrail_events (the tool substitutes the real event data store ID). "
+            "Always include an eventTime filter to limit bytes scanned."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "SQL query against CloudTrail Lake. Use FROM cloudtrail_events. "
+                        "Key columns: eventTime, eventName, eventSource, awsRegion, "
+                        "recipientAccountId, userIdentity.arn, userIdentity.accountId, "
+                        "requestParameters, responseElements. "
+                        "Always include WHERE eventTime > 'YYYY-MM-DD' to limit scan costs."
+                    ),
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum rows to return. Default: 100, max: 500.",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "query_aws_account",
+        "description": (
+            "Inspect an individual AWS member account using cross-account read-only "
+            "access. Use this to check running instances, IAM users, recent CloudTrail "
+            "events, or marketplace agreements on a specific account. The session is "
+            "scoped to read-only actions via an inline session policy — no writes are "
+            "possible."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "account_id": {
+                    "type": "string",
+                    "description": "12-digit AWS account ID to inspect.",
+                },
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "describe_instances",
+                        "lookup_events",
+                        "list_users",
+                        "describe_marketplace",
+                    ],
+                    "description": (
+                        "Action to perform. "
+                        "describe_instances: list EC2 instances (with optional state/ID filters). "
+                        "lookup_events: recent CloudTrail events (with optional event_name filter). "
+                        "list_users: IAM users and their access keys. "
+                        "describe_marketplace: marketplace agreements and terms."
+                    ),
+                },
+                "region": {
+                    "type": "string",
+                    "description": "AWS region for EC2/CloudTrail queries. Default: us-east-1.",
+                },
+                "filters": {
+                    "type": "object",
+                    "description": (
+                        "Optional action-specific filters. "
+                        "describe_instances: {state: 'running', instance_ids: [...]}. "
+                        "lookup_events: {event_name: 'RunInstances'}. "
+                        "list_users: no filters. "
+                        "describe_marketplace: {agreement_ids: ['agmt-...']} to enrich "
+                        "specific agreements found via query_cloudtrail. Without this, "
+                        "attempts SearchAgreements discovery (may not work on all accounts)."
+                    ),
+                },
+            },
+            "required": ["account_id", "action"],
+        },
+    },
+    {
         "name": "render_chart",
         "description": (
             "Render a chart in the chat UI. Use this to visualize cost data, "

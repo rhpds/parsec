@@ -28,10 +28,12 @@ from src.agent.streaming import (
 from src.agent.system_prompt import SYSTEM_PROMPT
 from src.agent.tool_definitions import TOOLS
 from src.config import get_config
+from src.tools.aws_account import query_aws_account
 from src.tools.aws_capacity_manager import query_aws_capacity_manager
 from src.tools.aws_costs import query_aws_costs
 from src.tools.aws_pricing import query_aws_pricing
 from src.tools.azure_costs import query_azure_costs
+from src.tools.cloudtrail import query_cloudtrail
 from src.tools.cost_monitor import query_cost_monitor
 from src.tools.gcp_costs import query_gcp_costs
 from src.tools.provision_db import execute_query
@@ -101,6 +103,20 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
             account_id=tool_input.get("account_id"),
             reservation_state=tool_input.get("reservation_state", "active"),
             hours=tool_input.get("hours", 168),
+        )
+
+    elif tool_name == "query_cloudtrail":
+        return await query_cloudtrail(
+            query=tool_input["query"],
+            max_results=tool_input.get("max_results", 100),
+        )
+
+    elif tool_name == "query_aws_account":
+        return await query_aws_account(
+            account_id=tool_input["account_id"],
+            action=tool_input["action"],
+            region=tool_input.get("region", "us-east-1"),
+            filters=tool_input.get("filters"),
         )
 
     elif tool_name == "render_chart":

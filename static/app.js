@@ -89,6 +89,7 @@ form.addEventListener("submit", async (e) => {
     let streamStarted = false;
     let textChunks = [];     // Array of text segments between tool calls
     let currentChunk = "";   // Current text being accumulated
+    let chartCanvases = [];  // Track chart canvases for export
 
     function ensureStreamStarted() {
         if (!streamStarted) {
@@ -161,6 +162,10 @@ form.addEventListener("submit", async (e) => {
                 ensureStreamStarted();
                 const chartEl = renderChart(data);
                 contentEl.appendChild(chartEl);
+                const chartCanvas = chartEl.querySelector("canvas");
+                if (chartCanvas) {
+                    chartCanvases.push({ title: data.title || "chart", canvas: chartCanvas });
+                }
                 scrollToBottom();
                 break;
             }
@@ -256,6 +261,13 @@ form.addEventListener("submit", async (e) => {
                 const liveEl = contentEl.querySelector(".md-text-live");
                 if (liveEl) {
                     liveEl.className = "md-text";
+                }
+
+                // Store export data and add export buttons
+                assistantEl._exportMarkdown = currentChunk || fullText;
+                assistantEl._exportCharts = chartCanvases;
+                if (fullText.trim() || currentChunk.trim() || chartCanvases.length > 0) {
+                    contentEl.appendChild(createResponseExportBar(assistantEl));
                 }
 
                 scrollToBottom();
@@ -505,6 +517,136 @@ function renderChart(data) {
     wrapper.appendChild(exportBar);
 
     return wrapper;
+}
+
+function createResponseExportBar(messageEl) {
+    var bar = document.createElement("div");
+    bar.className = "response-export-bar";
+
+    var mdBtn = document.createElement("button");
+    mdBtn.className = "response-export-btn";
+    mdBtn.textContent = "Export MD";
+    mdBtn.addEventListener("click", function() { exportResponseAsMarkdown(messageEl); });
+
+    var pdfBtn = document.createElement("button");
+    pdfBtn.className = "response-export-btn";
+    pdfBtn.textContent = "Export PDF";
+    pdfBtn.addEventListener("click", function() { exportResponseAsPDF(messageEl); });
+
+    bar.appendChild(mdBtn);
+    bar.appendChild(pdfBtn);
+    return bar;
+}
+
+function exportResponseAsMarkdown(messageEl) {
+    var md = messageEl._exportMarkdown || "";
+    var charts = messageEl._exportCharts || [];
+
+    // Append chart images as base64 inline images
+    charts.forEach(function(c) {
+        var dataUrl = c.canvas.toDataURL("image/png");
+        md += "\n\n![" + c.title + "](" + dataUrl + ")\n";
+    });
+
+    var blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    var link = document.createElement("a");
+    var timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+    link.download = "parsec-" + timestamp + ".md";
+    link.href = URL.createObjectURL(blob);
+    link.click();
+}
+
+function exportResponseAsPDF(messageEl) {
+    var contentEl = messageEl.querySelector(".content");
+    var clone = contentEl.cloneNode(true);
+
+    // Remove export bars and tool summaries from clone
+    clone.querySelectorAll(".response-export-bar, .chart-export-bar, .tool-calls-summary").forEach(function(el) {
+        el.remove();
+    });
+
+    // Replace canvases with static images
+    var origCanvases = contentEl.querySelectorAll("canvas");
+    var cloneCanvases = clone.querySelectorAll("canvas");
+    for (var i = 0; i < origCanvases.length; i++) {
+        var img = document.createElement("img");
+        img.src = origCanvases[i].toDataURL("image/png");
+        img.style.maxWidth = "100%";
+        cloneCanvases[i].parentNode.replaceChild(img, cloneCanvases[i]);
+    }
+
+    // Apply light theme inline styles for readable PDF
+    clone.style.background = "#ffffff";
+    clone.style.color = "#1a1a1a";
+    clone.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
+    clone.style.fontSize = "13px";
+    clone.style.lineHeight = "1.6";
+    clone.style.padding = "20px";
+    clone.style.width = "550px";
+
+    clone.querySelectorAll("h1, h2, h3").forEach(function(el) { el.style.color = "#1a1a1a"; });
+    clone.querySelectorAll("th").forEach(function(el) {
+        el.style.background = "#f0f0f0";
+        el.style.color = "#1a1a1a";
+        el.style.borderColor = "#ccc";
+    });
+    clone.querySelectorAll("td").forEach(function(el) { el.style.borderColor = "#ccc"; });
+    clone.querySelectorAll("code").forEach(function(el) {
+        el.style.background = "#f0f0f0";
+        el.style.color = "#1a1a1a";
+    });
+    clone.querySelectorAll("pre").forEach(function(el) { el.style.background = "#f0f0f0"; });
+    clone.querySelectorAll("a").forEach(function(el) { el.style.color = "#2563eb"; });
+
+    // Add clone to DOM visually hidden but still renderable by html2canvas
+    clone.style.position = "fixed";
+    clone.style.top = "0";
+    clone.style.left = "0";
+    clone.style.zIndex = "-1";
+    document.body.appendChild(clone);
+
+    html2canvas(clone, { scale: 2, useCORS: true }).then(function(canvas) {
+        document.body.removeChild(clone);
+
+        var jsPDF = window.jspdf.jsPDF;
+
+        // A4 dimensions in pt
+        var pageW = 595.28;
+        var pageH = 841.89;
+        var margin = 20;
+        var contentW = pageW - margin * 2;
+        var contentH = pageH - margin * 2;
+
+        // How many source pixels correspond to one page of content
+        var scale = canvas.width / contentW;
+        var sliceH = Math.floor(contentH * scale);
+
+        var doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+        var yPx = 0;
+        var pageNum = 0;
+
+        while (yPx < canvas.height) {
+            if (pageNum > 0) doc.addPage();
+            var h = Math.min(sliceH, canvas.height - yPx);
+
+            // Crop this page's slice from the full canvas
+            var pageCanvas = document.createElement("canvas");
+            pageCanvas.width = canvas.width;
+            pageCanvas.height = h;
+            var ctx = pageCanvas.getContext("2d");
+            ctx.drawImage(canvas, 0, yPx, canvas.width, h, 0, 0, canvas.width, h);
+
+            var pageImg = pageCanvas.toDataURL("image/png");
+            var drawH = h / scale;
+            doc.addImage(pageImg, "PNG", margin, margin, contentW, drawH);
+
+            yPx += sliceH;
+            pageNum++;
+        }
+
+        var timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+        doc.save("parsec-" + timestamp + ".pdf");
+    });
 }
 
 function scrollToBottom() {

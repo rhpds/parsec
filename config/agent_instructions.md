@@ -13,6 +13,8 @@ provisioning activity and cloud costs by querying real data sources.
 7. **render_chart** — Render a chart (bar, line, pie, doughnut) in the chat UI
 8. **generate_report** — Generate a formatted Markdown or AsciiDoc report
 9. **query_aws_capacity_manager** — Query ODCR metrics from the payer account Capacity Manager
+10. **query_cloudtrail** — Query CloudTrail Lake for org-wide AWS API events
+11. **query_aws_account** — Inspect individual AWS member accounts (read-only cross-account)
 
 ## Provision Database Schema
 
@@ -38,7 +40,11 @@ provisioning activity and cloud costs by querying real data sources.
 - catalog_id (int, FK → catalog_items.id) — component-level catalog item
 - request_id (varchar, FK → provision_request.id)
 - account_id (varchar) — 12-digit AWS account ID (when cloud='aws')
-- sandbox_name (varchar) — Azure subscription name, e.g. 'pool-01-374' (when cloud='azure')
+- sandbox_name (varchar) — sandbox/subscription identifier. Naming patterns by cloud:
+    - AWS: `sandboxNNNN` (e.g. 'sandbox5358', 'sandbox908') — always AWS
+    - Azure: `pool-XX-NNN` (e.g. 'pool-01-374', 'pool-00-30') — always Azure
+    - GCP: mixed — `sandboxNNNN` or `sandbox-XXXXX-*` (e.g. 'sandbox1236', 'sandbox-vgzls-ocp4-cluster')
+    - OpenShift CNV: `sandbox-XXXXX-zt-*` (e.g. 'sandbox-m7hff-zt-rhelbu')
 - cloud (varchar) — 'aws', 'azure', or 'gcp'
 - cloud_region (varchar)
 - last_state (varchar) — provision state (see Common Field Values below)
@@ -139,6 +145,23 @@ WHERE p.year = 2026 AND p.quarter = 1
 - AWS: `provisions.account_id` stores 12-digit AWS account IDs
 - Azure: `provisions.sandbox_name` stores subscription names (match `subscriptionName` in billing CSVs)
 
+**Sandbox naming conventions:**
+- `sandboxNNNN` (e.g. "sandbox5358") = **AWS** accounts (rarely GCP). Never Azure.
+- `pool-XX-NNN` (e.g. "pool-01-374") = **Azure** subscriptions. Always Azure.
+- `sandbox-XXXXX-zt-*` (e.g. "sandbox-m7hff-zt-rhelbu") = **OpenShift CNV**.
+- When a user mentions a sandbox by name, ALWAYS query the provision DB first to check
+  the `cloud` column before choosing a cost tool:
+  ```sql
+  SELECT p.cloud, p.account_id, p.sandbox_name
+  FROM provisions p
+  WHERE p.sandbox_name = 'sandbox5358'
+  ORDER BY p.provisioned_at DESC LIMIT 5
+  ```
+  Then use `query_aws_costs` if `cloud='aws'`, or `query_azure_costs` if `cloud='azure'`,
+  or `query_gcp_costs` if `cloud='gcp'`.
+  Do NOT assume the cloud provider based on the word "sandbox" — always verify via
+  the `cloud` column.
+
 **Find sub-resources for a catalog item:**
 ```sql
 SELECT cr.name, cr.display_name, cr.provider, cr.stage
@@ -235,6 +258,98 @@ asks about ODCR waste or unused reservations, always generate a report file:
      near-threshold ODCRs (e.g. 20+ hours) for monitoring
 6. In chat, show only the executive summary and link to the full report
 
+## CloudTrail Lake
+
+Use `query_cloudtrail` to search org-wide AWS API events across all accounts.
+CloudTrail Lake is an event data store that aggregates CloudTrail logs from the
+entire organization — you can find who did what, when, and in which account.
+
+**SQL syntax:** Write standard SQL using `FROM cloudtrail_events` — the tool
+automatically substitutes the real event data store ID. Always include a
+`WHERE eventTime >` filter to limit bytes scanned (CloudTrail Lake charges
+per byte).
+
+**Key columns:**
+- `eventID` — unique event identifier
+- `eventTime` — when the event occurred (ISO 8601)
+- `eventName` — API action (e.g. `RunInstances`, `AcceptAgreementRequest`)
+- `eventSource` — AWS service (e.g. `ec2.amazonaws.com`, `sts.amazonaws.com`)
+- `awsRegion` — region where the event occurred
+- `recipientAccountId` — account where the event was recorded
+- `userIdentity.arn` — ARN of the caller
+- `userIdentity.accountId` — account ID of the caller
+- `requestParameters` — input parameters (may be JSON or Java-style `{key=value}`)
+- `responseElements` — output data from the API call
+- `errorCode`, `errorMessage` — present if the API call failed
+
+**Common events to search for:**
+- `AcceptAgreementRequest` — marketplace subscription accepted
+- `RequestServiceQuotaIncrease` — service quota increase request
+- `RunInstances` — EC2 instance launch
+- `CreateAccessKey` — IAM access key creation
+- `ConsoleLogin` — console sign-in
+- `CreateUser` — IAM user creation
+
+**Example queries:**
+```sql
+-- Find marketplace subscriptions in the last 90 days
+SELECT eventTime, recipientAccountId, userIdentity.arn, requestParameters
+FROM cloudtrail_events
+WHERE eventName = 'AcceptAgreementRequest'
+  AND eventTime > '2025-12-01'
+ORDER BY eventTime DESC
+
+-- Find who launched GPU instances recently
+SELECT eventTime, recipientAccountId, userIdentity.arn,
+       requestParameters
+FROM cloudtrail_events
+WHERE eventName = 'RunInstances'
+  AND eventTime > '2026-02-01'
+ORDER BY eventTime DESC
+```
+
+**Important:** `requestParameters` and `responseElements` may contain data in
+either JSON format or Java-style `{key=value, nested={inner=val}}` format.
+Handle both when parsing results.
+
+## AWS Account Inspection
+
+Use `query_aws_account` to inspect individual AWS member accounts. This uses
+cross-account STS AssumeRole with an inline session policy that restricts
+access to read-only operations. No write actions are possible.
+
+**Available actions:**
+- `describe_instances` — List EC2 instances. Filters: `{state: "running"}`,
+  `{instance_ids: ["i-xxx"]}`. Use to check what's currently running.
+- `lookup_events` — Recent CloudTrail events in the account (last few hours).
+  Filters: `{event_name: "RunInstances"}`. Use for recent activity.
+- `list_users` — IAM users and their access keys. No filters. Use to check
+  for unauthorized IAM users or active access keys.
+- `describe_marketplace` — Marketplace agreements and terms (cost, renewal).
+  Filters: `{agreement_ids: ["agmt-..."]}` to enrich specific agreement IDs
+  found via `query_cloudtrail`. Without agreement_ids, attempts discovery via
+  SearchAgreements (may not work on all accounts — use CloudTrail first).
+
+**When to use which:**
+- "What's running on account X?" → `describe_instances` with `state: "running"`
+- "Who created IAM users on this account?" → `list_users`
+- "What marketplace subscriptions does this account have?" → `describe_marketplace`
+- "What happened recently on this account?" → `lookup_events`
+
+**Security:** The session policy enforces read-only access. Even if the
+OrganizationAccountAccessRole has admin permissions, the inline policy limits
+actions to `ec2:Describe*`, `iam:List*/Get*`, `cloudtrail:LookupEvents`,
+and marketplace read actions. Write operations return AccessDenied.
+
+**Cross-reference with provision DB:** Always look up the account in the
+provision DB first to find which user had it and when:
+```sql
+SELECT u.email, p.provisioned_at, p.retired_at, p.sandbox_name
+FROM provisions p JOIN users u ON p.user_id = u.id
+WHERE p.account_id = '123456789012'
+ORDER BY p.provisioned_at DESC LIMIT 5
+```
+
 ## Abuse Indicators
 
 When investigating potential abuse, look for these patterns:
@@ -257,6 +372,10 @@ Look for Compute Engine costs with GPU-related SKUs in the GCP billing data.
 - For GCP cost data → use `query_gcp_costs` directly (no account lookup needed)
 - For broad cost overviews → prefer `query_cost_monitor` (faster, cached data)
 - For pricing context → use `query_aws_pricing` to look up instance costs
+- For marketplace/subscription questions → use `query_cloudtrail` to find `AcceptAgreementRequest` events, then `query_aws_account` with `describe_marketplace` for details
+- For "what's running on account X" → use `query_aws_account` with `describe_instances`
+- For IAM investigation → use `query_aws_account` with `list_users` or `lookup_events`
+- For org-wide API event searches → use `query_cloudtrail`
 - For reports → use `generate_report` when the user asks for a report, export, or document
 - You can chain multiple tool calls to answer complex questions
 - Always show your reasoning and what you found
@@ -309,6 +428,19 @@ The `gpu_cost` field is auto-calculated by detecting NC/ND/NV series VMs.
 **query_aws_pricing** returns:
 `{instance_type, region, pricing: {vcpu, memory, gpu, gpu_memory, storage, network,
 hourly_price_usd, daily_price_usd, monthly_price_usd, os, region}}`.
+
+**query_cloudtrail** returns:
+`{columns, rows, row_count, bytes_scanned, truncated}` — rows is an array of flat dicts.
+Same structure as `query_provisions_db`. Max 500 rows.
+
+**query_aws_account** returns:
+`{account_id, action, region, ...action-specific fields}`. For `describe_instances`:
+`{instance_count, instances: [{instance_id, instance_type, state, launch_time, az, tags}]}`.
+For `list_users`: `{user_count, users: [{username, access_keys: [{access_key_id, status}]}]}`.
+For `describe_marketplace`: `{agreement_count, agreements: [{agreement_id, status, product_id,
+offer_type, agreement_start, agreement_end, estimated_cost_usd, classification, auto_renew, terms}]}`.
+Classifications: "SaaS (Auto-Renew)", "SaaS (Auto-Renew Disabled)", "Fixed/Upfront", "Pay-As-You-Go".
+For `lookup_events`: `{event_count, events: [{event_name, event_time, username}]}`.
 
 **query_cost_monitor** returns:
 Varies by endpoint. Always includes `_dashboard_link` URL if configured.
@@ -399,12 +531,48 @@ When a user or question spans multiple cloud providers:
 4. Combine totals in your response, noting the breakdown per cloud
 5. For GCP, query directly with date range (no account lookup needed)
 
+### Investigate a Sandbox by Name (e.g. "sandbox5358")
+
+When a user mentions a sandbox by name (sandboxNNNN, pool-XX-NNN, etc.):
+1. **Always query the provision DB first** to determine the cloud provider:
+   `SELECT p.cloud, p.account_id, p.sandbox_name, u.email, p.provisioned_at, p.retired_at FROM provisions p JOIN users u ON p.user_id = u.id WHERE p.sandbox_name = 'sandbox5358' ORDER BY p.provisioned_at DESC LIMIT 10`
+2. Check the `cloud` column in the result — `sandboxNNNN` names are almost always AWS
+3. For AWS (`cloud='aws'`): use the `account_id` from the result to `query_aws_costs`
+4. For Azure (`cloud='azure'`): use the `sandbox_name` to `query_azure_costs`
+5. For GCP (`cloud='gcp'`): use `query_gcp_costs` with the relevant date range
+6. Do NOT assume the cloud provider from the name alone — always check the `cloud` column
+
 ### Investigate a Specific AWS Account
 
 1. Find who used the account and when: `SELECT p.uuid, u.email, u.full_name, p.provisioned_at, p.retired_at FROM provisions p JOIN users u ON p.user_id = u.id WHERE p.account_id = '123456789012' ORDER BY p.provisioned_at DESC`
 2. Query costs for the account: `query_aws_costs(account_ids=['123456789012'], group_by=INSTANCE_TYPE)`
 3. Or use cost-monitor drilldown: `query_cost_monitor(drilldown, selected_key='123456789012', drilldown_type=account_services)`
 4. Look for GPU/large instances and attribute costs to users based on provision windows
+
+### Investigate Marketplace Subscriptions
+
+When a user asks about AWS Marketplace subscriptions (e.g. "when was Ansible ordered",
+"who subscribed to X", "what marketplace items do we have"):
+
+1. **Search CloudTrail Lake** for `AcceptAgreementRequest` events:
+   ```sql
+   SELECT eventTime, recipientAccountId, userIdentity.arn, requestParameters
+   FROM cloudtrail_events
+   WHERE eventName = 'AcceptAgreementRequest'
+     AND eventTime > '2025-01-01'
+   ORDER BY eventTime DESC
+   ```
+2. **Cross-reference** `recipientAccountId` with the provision DB to find which RHDP
+   user had the account at that time
+3. **Get agreement details** using `query_aws_account` with `describe_marketplace`
+   on the account, passing `filters: {agreement_ids: ["agmt-..."]}` extracted from
+   the CloudTrail `responseElements`. Returns product ID, cost, classification,
+   and auto-renewal status
+4. **Check cost impact** with `query_aws_costs` (group_by=SERVICE, look for
+   "AWS Marketplace") to see ongoing charges
+
+Marketplace subscriptions are NOT tracked in the provision DB. Do NOT query the
+provision DB for marketplace information — use CloudTrail Lake and account inspection.
 
 ## Charts
 

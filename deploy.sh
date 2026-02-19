@@ -287,20 +287,32 @@ oc patch route parsec-route -n ${NAMESPACE} --type=json -p "[{\"op\": \"add\", \
 echo -e "${GREEN}Route host set${NC}"
 echo ""
 
-# Step 5: Patch configmap with cost-monitor dashboard URL (now that configmap exists)
-local_cm_dashboard_url=$(yq eval '.cost_monitor.dashboard_url // ""' "$CONFIG_FILE")
-if [ -n "$local_cm_dashboard_url" ]; then
-    echo -e "${BLUE}Step 5: Setting cost-monitor dashboard URL...${NC}"
-    existing_config=$(oc get configmap parsec-config -n ${NAMESPACE} -o jsonpath='{.data.config\.yaml}' 2>/dev/null || echo "")
-    if [ -n "$existing_config" ]; then
-        updated_config=$(echo "$existing_config" | yq eval ".cost_monitor.dashboard_url = \"${local_cm_dashboard_url}\"" -)
-        oc create configmap parsec-config -n ${NAMESPACE} \
-            --from-literal=config.yaml="$updated_config" \
-            --dry-run=client -o yaml | oc apply -f -
-        echo -e "${GREEN}Dashboard URL set: ${local_cm_dashboard_url}${NC}"
+# Step 5: Patch configmap with environment-specific values (now that configmap exists)
+echo -e "${BLUE}Step 5: Patching configmap with local settings...${NC}"
+existing_config=$(oc get configmap parsec-config -n ${NAMESPACE} -o jsonpath='{.data.config\.yaml}' 2>/dev/null || echo "")
+if [ -n "$existing_config" ]; then
+    updated_config="$existing_config"
+
+    # Cost-monitor dashboard URL
+    local_cm_dashboard_url=$(yq eval '.cost_monitor.dashboard_url // ""' "$CONFIG_FILE")
+    if [ -n "$local_cm_dashboard_url" ]; then
+        updated_config=$(echo "$updated_config" | yq eval ".cost_monitor.dashboard_url = \"${local_cm_dashboard_url}\"" -)
+        echo -e "${GREEN}  Dashboard URL: ${local_cm_dashboard_url}${NC}"
     fi
-    echo ""
+
+    # CloudTrail Lake event data store ID
+    local_ct_eds_id=$(yq eval '.cloudtrail.event_data_store_id // ""' "$CONFIG_FILE")
+    if [ -n "$local_ct_eds_id" ]; then
+        updated_config=$(echo "$updated_config" | yq eval ".cloudtrail.event_data_store_id = \"${local_ct_eds_id}\"" -)
+        echo -e "${GREEN}  CloudTrail EDS: ${local_ct_eds_id}${NC}"
+    fi
+
+    oc create configmap parsec-config -n ${NAMESPACE} \
+        --from-literal=config.yaml="$updated_config" \
+        --dry-run=client -o yaml | oc apply -f -
+    echo -e "${GREEN}ConfigMap patched${NC}"
 fi
+echo ""
 
 # Step 6: Configure webhook — reuse existing secret to avoid breaking GitHub webhooks
 echo -e "${BLUE}Step 6: Configuring webhook...${NC}"

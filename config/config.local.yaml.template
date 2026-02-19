@@ -42,5 +42,10 @@ gcp:
   billing_account_id: "XXXXXX-XXXXXX-XXXXXX"
   credentials_path: "/path/to/service-account.json"
 
+cloudtrail:
+  # CloudTrail Lake event data store ID (UUID, not full ARN)
+  # Find via: aws cloudtrail list-event-data-stores --region us-east-1
+  event_data_store_id: "your-event-data-store-uuid"
+
 auth:
   allowed_users: "user1@redhat.com,user2@redhat.com"
