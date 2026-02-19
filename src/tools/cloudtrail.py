@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 MAX_ROWS = 500
 POLL_INTERVAL = 2
-QUERY_TIMEOUT = 120  # seconds — CloudTrail Lake scans can take 30-90s
+QUERY_TIMEOUT = 300  # seconds — CloudTrail Lake scans can take 30-120s+
 
 # Matches eventTime comparisons like: eventTime > '2026-01-15' or eventTime >= '2026-01-15T00:00:00Z'
 _EVENT_TIME_RE = re.compile(
@@ -87,14 +87,15 @@ def _cast_map_columns(query: str) -> str:
     """Wrap map-type columns with CAST when used with LIKE.
 
     CloudTrail Lake stores requestParameters and responseElements as
-    map(varchar, varchar). LIKE requires varchar, so we automatically
-    wrap them: requestParameters LIKE → CAST(requestParameters AS varchar) LIKE.
+    map(varchar, varchar). LIKE requires varchar, but Presto can't cast
+    map directly to varchar — it must go through JSON first:
+    CAST(CAST(col AS JSON) AS varchar).
     """
 
     def _replacer(m: re.Match) -> str:
         col = m.group(1)
         op = m.group(2)
-        return f"CAST({col} AS varchar) {op} "
+        return f"CAST(CAST({col} AS JSON) AS varchar) {op} "
 
     return _MAP_LIKE_RE.sub(_replacer, query)
 
