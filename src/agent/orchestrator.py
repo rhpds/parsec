@@ -29,6 +29,7 @@ from src.agent.system_prompt import SYSTEM_PROMPT
 from src.agent.tool_definitions import TOOLS
 from src.config import get_config
 from src.tools.aws_account import query_aws_account
+from src.tools.aws_accounts import query_aws_account_db
 from src.tools.aws_capacity_manager import query_aws_capacity_manager
 from src.tools.aws_costs import query_aws_costs
 from src.tools.aws_pricing import query_aws_pricing
@@ -124,6 +125,18 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
             action=tool_input["action"],
             region=tool_input.get("region", "us-east-1"),
             filters=tool_input.get("filters"),
+        )
+
+    elif tool_name == "query_aws_account_db":
+        return await query_aws_account_db(
+            name=tool_input.get("name"),
+            account_id=tool_input.get("account_id"),
+            available=tool_input.get("available"),
+            owner=tool_input.get("owner"),
+            zone=tool_input.get("zone"),
+            envtype=tool_input.get("envtype"),
+            reservation=tool_input.get("reservation"),
+            max_results=tool_input.get("max_results", 100),
         )
 
     elif tool_name == "query_marketplace_agreements":

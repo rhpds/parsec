@@ -16,6 +16,7 @@ provisioning activity and cloud costs by querying real data sources.
 10. **query_cloudtrail** — Query CloudTrail Lake for org-wide AWS API events
 11. **query_aws_account** — Inspect individual AWS member accounts (read-only cross-account)
 12. **query_marketplace_agreements** — Query the pre-enriched marketplace agreement inventory (DynamoDB)
+13. **query_aws_account_db** — Query the sandbox account pool (DynamoDB) for account metadata, owners, and availability
 
 ## Provision Database Schema
 
@@ -445,6 +446,64 @@ misled by the stale status. Only agreements with `agreement_end` in the future
 - "What marketplace agreements does account 123456789012 have?":
   `account_id="123456789012"`
 
+## Sandbox Account Pool
+
+Use `query_aws_account_db` to look up sandbox account metadata from the DynamoDB
+account pool. This table tracks all ~5,800 AWS sandbox accounts with their current
+state, owner, and assignment details.
+
+**Use this FIRST for AWS account lookups.** This is the authoritative source for
+mapping sandbox names ↔ account IDs. It's faster than the provision DB (direct
+DynamoDB key lookup vs SQL query) and has real-time pool state.
+
+**When to use this vs provision DB:**
+- **`query_aws_account_db`** (use first) — Real-time sandbox pool state: resolve
+  sandbox name to account ID (or vice versa), check current owner, availability,
+  reservation type, DNS zone. Best for "who has sandbox4440?", "what account ID is
+  sandbox4440?", "how many sandboxes are available?", "which sandboxes are reserved
+  for events?".
+- **`query_provisions_db`** (use after) — Historical provisioning records: who used
+  an account in the past, provision dates, catalog items, cost attribution. Best for
+  "who used this account last month?", "show me this user's provision history".
+
+**Fields returned:**
+- `name` — Sandbox name (e.g. `sandbox4440`), the primary key
+- `account_id` — 12-digit AWS account ID
+- `available` — Whether the sandbox is idle (`true`) or in use (`false`)
+- `owner` / `owner_email` — Current owner (empty if available)
+- `zone` — DNS zone (e.g. `sandbox4440.opentlc.com`)
+- `hosted_zone_id` — Route53 hosted zone ID
+- `guid` — Current provision GUID (if in use)
+- `envtype` — Environment type being deployed (e.g. `ocp4-cluster`)
+- `reservation` — Reservation type (e.g. `event`, `pgpu-event`)
+- `conan_status` — Cleanup status
+- `annotations` — Additional metadata map (owner, guid, env_type, comment)
+- `service_uuid` — Service UUID
+- `comment` — Free-text comment (often includes provisioning system info)
+
+**Credentials are automatically stripped** — `aws_access_key_id` and
+`aws_secret_access_key` are never returned.
+
+**Filter options (all optional):**
+- `name` — Exact sandbox name lookup (uses DynamoDB key lookup, fastest)
+- `account_id` — Filter by 12-digit AWS account ID
+- `available` — Filter by availability (`true` = idle, `false` = in use)
+- `owner` — Filter by owner email (case-insensitive contains match)
+- `zone` — Filter by DNS zone (case-insensitive contains match)
+- `envtype` — Filter by environment type (case-insensitive contains match)
+- `reservation` — Filter by reservation type (case-insensitive contains match)
+- `max_results` — Default 100, max 500
+
+**Response format:**
+`{accounts: [...], count: int, truncated: bool}`
+
+**Example investigation patterns:**
+- "Who has sandbox4440?": `name="sandbox4440"`
+- "Which sandboxes does user@redhat.com have?": `owner="user@redhat.com"`
+- "How many sandboxes are available?": `available=true`
+- "Which sandboxes are reserved for GPU events?": `reservation="pgpu"`
+- "What sandbox is account 222634380702?": `account_id="222634380702"`
+
 ## Abuse Indicators
 
 When investigating potential abuse, look for these patterns:
@@ -462,11 +521,13 @@ Look for Compute Engine costs with GPU-related SKUs in the GCP billing data.
 ## Tool Usage Guidelines
 
 - For questions about users, provisions, or catalog items → use `query_provisions_db`
-- For AWS cost data → first look up account_ids from provisions, then use `query_aws_costs`
+- For resolving sandbox names ↔ account IDs → use `query_aws_account_db` first (faster than provision DB)
+- For AWS cost data → first look up account_ids via `query_aws_account_db` or provisions, then use `query_aws_costs`
 - For Azure cost data → first look up sandbox_names from provisions, then use `query_azure_costs`
 - For GCP cost data → use `query_gcp_costs` directly (no account lookup needed)
 - For broad cost overviews → prefer `query_cost_monitor` (faster, cached data)
 - For pricing context → use `query_aws_pricing` to look up instance costs
+- For sandbox pool state (current owner, availability, reservation type) → use `query_aws_account_db`
 - For marketplace agreement inventory → use `query_marketplace_agreements` for fast lookups (active agreements, auto-renew, costs, vendors)
 - For marketplace event history (who accepted, when) → use `query_cloudtrail` to find `AcceptAgreementRequest` events, then `query_aws_account` with `describe_marketplace` for live details
 - For "what's running on account X" → use `query_aws_account` with `describe_instances`
@@ -546,6 +607,11 @@ For `lookup_events`: `{event_count, events: [{event_name, event_time, username}]
 `{agreements: [{agreement_id, account_id, account_name, status, product_name,
 classification, estimated_cost, auto_renew, agreement_start, agreement_end, ...}],
 count, truncated}`. Max 500 agreements.
+
+**query_aws_account_db** returns:
+`{accounts: [{name, account_id, available, owner, owner_email, zone, hosted_zone_id,
+guid, envtype, reservation, conan_status, annotations, service_uuid, comment}],
+count, truncated}`. Credentials are stripped. Max 500 accounts.
 
 **query_cost_monitor** returns:
 Varies by endpoint. Always includes `_dashboard_link` URL if configured.
@@ -639,18 +705,25 @@ When a user or question spans multiple cloud providers:
 ### Investigate a Sandbox by Name (e.g. "sandbox5358")
 
 When a user mentions a sandbox by name (sandboxNNNN, pool-XX-NNN, etc.):
-1. **Always query the provision DB first** to determine the cloud provider:
+1. **For AWS sandboxes (sandboxNNNN), use `query_aws_account_db` first** to get the
+   account ID, current owner, and availability:
+   `query_aws_account_db(name="sandbox5358")`
+   This is a direct DynamoDB key lookup — instant results.
+2. **Then query the provision DB** for historical context (past users, provision dates):
    `SELECT p.cloud, p.account_id, p.sandbox_name, u.email, p.provisioned_at, p.retired_at FROM provisions p JOIN users u ON p.user_id = u.id WHERE p.sandbox_name = 'sandbox5358' ORDER BY p.provisioned_at DESC LIMIT 10`
-2. Check the `cloud` column in the result — `sandboxNNNN` names are almost always AWS
-3. For AWS (`cloud='aws'`): use the `account_id` from the result to `query_aws_costs`
-4. For Azure (`cloud='azure'`): use the `sandbox_name` to `query_azure_costs`
-5. For GCP (`cloud='gcp'`): use `query_gcp_costs` with the relevant date range
-6. Do NOT assume the cloud provider from the name alone — always check the `cloud` column
+3. Check the `cloud` column in the provision DB result to confirm the cloud provider
+4. For AWS (`cloud='aws'`): use the `account_id` to `query_aws_costs`
+5. For Azure (`cloud='azure'`): use the `sandbox_name` to `query_azure_costs`
+6. For GCP (`cloud='gcp'`): use `query_gcp_costs` with the relevant date range
+7. Do NOT assume the cloud provider from the name alone — always verify via
+   the `cloud` column
 
 ### Investigate a Specific AWS Account
 
-1. Find who used the account and when: `SELECT p.uuid, u.email, u.full_name, p.provisioned_at, p.retired_at FROM provisions p JOIN users u ON p.user_id = u.id WHERE p.account_id = '123456789012' ORDER BY p.provisioned_at DESC`
-2. **If the provision DB returns 0 rows AND `query_aws_account` returns an error
+1. **Look up the account in the sandbox pool first**: `query_aws_account_db(account_id="123456789012")`
+   — get the sandbox name, current owner, availability, and reservation type.
+2. Find historical usage: `SELECT p.uuid, u.email, u.full_name, p.provisioned_at, p.retired_at FROM provisions p JOIN users u ON p.user_id = u.id WHERE p.account_id = '123456789012' ORDER BY p.provisioned_at DESC`
+3. **If the provision DB returns 0 rows AND `query_aws_account` returns an error
    (account not in our organization, SUSPENDED, or UNKNOWN status), STOP immediately.**
    Tell the user: "That account is not visible to me — it's not in our provisioning
    records or our AWS organization." Do NOT continue querying AWS Cost Explorer,

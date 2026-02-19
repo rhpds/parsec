@@ -264,7 +264,7 @@ aws iam delete-policy-version --policy-arn <POLICY_ARN> --version-id <OLDEST_NON
 | CapacityManagerReadOnly | `ec2:GetCapacityManager*` | `*` |
 | CloudTrailLakeReadOnly | `cloudtrail:StartQuery`, `cloudtrail:GetQueryResults` | Event data store ARN |
 | AssumeReadOnlyAccess | `sts:AssumeRole` | `arn:aws:iam::*:role/OrganizationAccountAccessRole` |
-| MarketplaceInventoryReadOnly | `dynamodb:Scan`, `dynamodb:Query` | `marketplace-agreement-inventory` table + indexes |
+| DynamoDBReadOnly | `dynamodb:Scan`, `dynamodb:Query`, `dynamodb:GetItem` | `marketplace-agreement-inventory` table + indexes, `accounts` table |
 
 **AssumeReadOnlyAccess** allows assuming `OrganizationAccountAccessRole` in any member account. This role exists by default in accounts created through AWS Organizations. **Read-only enforcement is handled by the inline session policy in `src/tools/aws_account.py`**, not by the IAM policy — the session policy restricts to: `ec2:Describe*`, `iam:List*/Get*`, `cloudtrail:LookupEvents`, `aws-marketplace:DescribeAgreement/GetAgreementTerms/SearchAgreements`, `marketplace-entitlement:GetEntitlements`.
 

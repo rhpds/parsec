@@ -27,7 +27,7 @@ TOOLS = [
         "name": "query_aws_costs",
         "description": (
             "Query AWS Cost Explorer for cost data across specified AWS accounts. "
-            "Use this after looking up account IDs from the provision DB. "
+            "Use this after looking up account IDs from query_aws_account_db or the provision DB. "
             "Supports grouping by SERVICE, INSTANCE_TYPE, or LINKED_ACCOUNT."
         ),
         "input_schema": {
@@ -398,6 +398,63 @@ TOOLS = [
                 "max_results": {
                     "type": "integer",
                     "description": "Max agreements to return. Default: 100, max: 500.",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "query_aws_account_db",
+        "description": (
+            "Query the sandbox account pool (DynamoDB) for AWS account metadata. "
+            "Use this FIRST to resolve sandbox names to account IDs or vice versa, "
+            "before querying the provision DB or cost tools. Returns current owner, "
+            "availability, reservation type, DNS zone, envtype, and annotations. "
+            "Credentials are stripped from results."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": (
+                        "Exact sandbox name for direct lookup (e.g. 'sandbox4440'). "
+                        "Uses DynamoDB key lookup — fastest option."
+                    ),
+                },
+                "account_id": {
+                    "type": "string",
+                    "description": "Filter by 12-digit AWS account ID.",
+                },
+                "available": {
+                    "type": "boolean",
+                    "description": "Filter by availability (true = idle, false = in use).",
+                },
+                "owner": {
+                    "type": "string",
+                    "description": "Filter by owner email (case-insensitive contains match).",
+                },
+                "zone": {
+                    "type": "string",
+                    "description": "Filter by DNS zone (case-insensitive contains match).",
+                },
+                "envtype": {
+                    "type": "string",
+                    "description": (
+                        "Filter by environment type (case-insensitive contains match, "
+                        "e.g. 'ocp4-cluster')."
+                    ),
+                },
+                "reservation": {
+                    "type": "string",
+                    "description": (
+                        "Filter by reservation type (case-insensitive contains match, "
+                        "e.g. 'event', 'pgpu-event')."
+                    ),
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Max accounts to return. Default: 100, max: 500.",
                 },
             },
             "required": [],
