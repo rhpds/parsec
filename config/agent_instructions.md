@@ -401,9 +401,18 @@ contains ~768 records covering all AWS Marketplace subscriptions across the org.
 **Response format:**
 `{agreements: [...], count: int, truncated: bool}`
 
+**Interpreting agreement status:** The `status` field from AWS may say `ACTIVE`
+even after the agreement's `agreement_end` date has passed. Always compare
+`agreement_end` against today's date. If `agreement_end` is in the past, treat
+the agreement as **effectively expired** regardless of the `status` field. When
+presenting results, flag these as "expired" or "lapsed" so investigators aren't
+misled by the stale status. Only agreements with `agreement_end` in the future
+(or empty/null) are truly active.
+
 **Example investigation patterns:**
 - "Show all active SaaS auto-renew agreements":
-  `status="ACTIVE", classification="SaaS (Auto-Renew)"`
+  `status="ACTIVE", classification="SaaS (Auto-Renew)"` — then filter results
+  to exclude agreements where `agreement_end` is in the past.
 - "Which accounts have marketplace costs over $1000?":
   `min_cost=1000`
 - "Find all Ansible marketplace subscriptions":
