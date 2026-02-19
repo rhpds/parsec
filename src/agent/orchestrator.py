@@ -392,6 +392,7 @@ async def run_agent(
                     messages=messages,
                 )
 
+            yield sse_status("Analyzing results...")
             api_task: asyncio.Task[anthropic.types.Message] = asyncio.ensure_future(
                 asyncio.to_thread(_call_api)
             )

@@ -197,10 +197,10 @@ form.addEventListener("submit", async (e) => {
                 // Remove previous status indicator if any
                 const oldStatus = contentEl.querySelector(".status-indicator");
                 if (oldStatus) oldStatus.remove();
-                const statusEl = document.createElement("div");
-                statusEl.className = "status-indicator";
-                statusEl.textContent = data.message;
-                contentEl.appendChild(statusEl);
+                const si = document.createElement("div");
+                si.className = "status-indicator";
+                si.innerHTML = '<div class="spinner"></div> ' + data.message;
+                contentEl.appendChild(si);
                 scrollToBottom();
                 break;
             }
