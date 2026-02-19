@@ -349,7 +349,23 @@ function addMessage(role, text) {
     el.className = "message " + role;
 
     if (role === "user") {
-        el.textContent = text;
+        const lines = text.split("\n");
+        const isLong = text.length > 300 || lines.length > 4;
+        if (isLong) {
+            const preview = lines.slice(0, 3).join("\n").substring(0, 200);
+            const details = document.createElement("details");
+            details.className = "user-query-details";
+            const summary = document.createElement("summary");
+            summary.textContent = preview + (preview.length < text.length ? "…" : "");
+            details.appendChild(summary);
+            const full = document.createElement("div");
+            full.className = "user-query-full";
+            full.textContent = text;
+            details.appendChild(full);
+            el.appendChild(details);
+        } else {
+            el.textContent = text;
+        }
     } else {
         const contentEl = document.createElement("div");
         contentEl.className = "content";

@@ -466,6 +466,10 @@ But these must be sequential (second depends on first):
 - **Error results**: All tools return `{"error": "..."}` on failure. Report the error
   to the user and suggest alternatives (e.g., if cost-monitor is unreachable, fall back
   to direct `query_aws_costs`).
+- **Unrecognized accounts**: If a user asks about a specific AWS account ID and it
+  returns 0 rows from the provision DB AND `query_aws_account` fails (not in our
+  organization), stop immediately and tell the user the account is not visible to you.
+  Do not keep trying other tools — they will all fail for the same reason.
 
 ## Tool Response Formats
 
@@ -612,9 +616,14 @@ When a user mentions a sandbox by name (sandboxNNNN, pool-XX-NNN, etc.):
 ### Investigate a Specific AWS Account
 
 1. Find who used the account and when: `SELECT p.uuid, u.email, u.full_name, p.provisioned_at, p.retired_at FROM provisions p JOIN users u ON p.user_id = u.id WHERE p.account_id = '123456789012' ORDER BY p.provisioned_at DESC`
-2. Query costs for the account: `query_aws_costs(account_ids=['123456789012'], group_by=INSTANCE_TYPE)`
-3. Or use cost-monitor drilldown: `query_cost_monitor(drilldown, selected_key='123456789012', drilldown_type=account_services)`
-4. Look for GPU/large instances and attribute costs to users based on provision windows
+2. **If the provision DB returns 0 rows AND `query_aws_account` returns an error
+   (account not in our organization, SUSPENDED, or UNKNOWN status), STOP immediately.**
+   Tell the user: "That account is not visible to me — it's not in our provisioning
+   records or our AWS organization." Do NOT continue querying AWS Cost Explorer,
+   CloudTrail, pricing, or other tools for an account that doesn't exist in our systems.
+3. Query costs for the account: `query_aws_costs(account_ids=['123456789012'], group_by=INSTANCE_TYPE)`
+4. Or use cost-monitor drilldown: `query_cost_monitor(drilldown, selected_key='123456789012', drilldown_type=account_services)`
+5. Look for GPU/large instances and attribute costs to users based on provision windows
 
 ### Investigate Marketplace Subscriptions
 

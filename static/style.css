@@ -90,6 +90,41 @@ main#chat {
     font-size: 14px;
 }
 
+.user-query-details {
+    cursor: pointer;
+}
+
+.user-query-details summary {
+    list-style: none;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.user-query-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.user-query-details summary::after {
+    content: " ▸ Show full query";
+    color: var(--accent);
+    font-size: 12px;
+    font-style: italic;
+}
+
+.user-query-details[open] summary {
+    font-size: 0;
+}
+
+.user-query-details[open] summary::after {
+    content: "▾ Hide full query";
+    font-size: 12px;
+}
+
+.user-query-full {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .message.assistant {
     align-self: flex-start;
     background: var(--bg-surface);
