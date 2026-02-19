@@ -475,6 +475,10 @@ async def run_agent(
         # Add tool results and loop back for Claude's next response
         messages.append({"role": "user", "content": tool_results})
 
+        # Send intermediate history so the client can persist context even if
+        # the SSE connection drops before the final response.
+        yield sse_event("history", {"messages": _serialize_messages(messages)})
+
     # If we exhausted max rounds
     yield sse_text("\n\n_Reached maximum tool call rounds. Please refine your question._")
     yield sse_event("history", {"messages": _serialize_messages(messages)})
