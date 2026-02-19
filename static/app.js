@@ -372,6 +372,12 @@ function createToolCall(toolName, toolInput) {
 
     if (toolName === "query_provisions_db" && toolInput.sql) {
         body.textContent = toolInput.sql;
+    } else if (toolName === "query_cloudtrail" && toolInput.query) {
+        statusSpan.textContent = "scanning CloudTrail Lake...";
+        body.textContent = toolInput.query;
+    } else if (toolName === "query_aws_account") {
+        statusSpan.textContent = "querying account " + (toolInput.account_id || "") + "...";
+        body.textContent = (toolInput.action || "") + " in " + (toolInput.account_id || "");
     } else if (toolName === "generate_report") {
         body.textContent = "Generating " + (toolInput.format || "markdown") + " report: " + (toolInput.title || "");
     } else {
@@ -389,8 +395,19 @@ function finalizeToolCall(toolEl, toolName, result) {
         statusSpan.textContent = "error";
     } else {
         statusSpan.className = "tool-status done";
-        if (result.row_count !== undefined) {
+        if (result.bytes_scanned !== undefined && result.row_count !== undefined) {
+            var mb = (result.bytes_scanned / 1024 / 1024).toFixed(0);
+            statusSpan.textContent = result.row_count + " rows (" + mb + " MB scanned)";
+        } else if (result.row_count !== undefined) {
             statusSpan.textContent = result.row_count + " rows";
+        } else if (result.instance_count !== undefined) {
+            statusSpan.textContent = result.instance_count + " instances";
+        } else if (result.user_count !== undefined) {
+            statusSpan.textContent = result.user_count + " users";
+        } else if (result.agreement_count !== undefined) {
+            statusSpan.textContent = result.agreement_count + " agreements";
+        } else if (result.event_count !== undefined) {
+            statusSpan.textContent = result.event_count + " events";
         } else if (result.total_cost !== undefined) {
             statusSpan.textContent = "$" + result.total_cost.toLocaleString();
         } else if (result.filename) {

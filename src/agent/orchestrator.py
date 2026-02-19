@@ -44,6 +44,12 @@ logger = logging.getLogger(__name__)
 REPORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "reports")
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
+# Status labels for tools that take >10s (shown in keepalive SSE events)
+_SLOW_TOOL_LABELS = {
+    "query_cloudtrail": "Scanning CloudTrail Lake",
+    "query_aws_account": "Querying AWS account",
+}
+
 
 async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
     """Dispatch a tool call to the appropriate handler."""
@@ -393,10 +399,13 @@ async def run_agent(
 
             # Run tool with periodic keepalive events to prevent proxy timeout
             task = asyncio.create_task(_execute_tool(tool_name, tool_input))
+            elapsed = 0
             while not task.done():
-                done, _ = await asyncio.wait({task}, timeout=30)
+                done, _ = await asyncio.wait({task}, timeout=10)
                 if not done:
-                    yield sse_status(f"Processing {tool_name}...")
+                    elapsed += 10
+                    label = _SLOW_TOOL_LABELS.get(tool_name, f"Processing {tool_name}")
+                    yield sse_status(f"{label}... ({elapsed}s)")
             result = task.result()
 
             yield sse_tool_result(tool_name, result)

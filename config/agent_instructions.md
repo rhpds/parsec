@@ -308,6 +308,12 @@ WHERE eventName = 'RunInstances'
 ORDER BY eventTime DESC
 ```
 
+**Performance:** CloudTrail Lake queries scan large volumes of data (100-400 MB
+typical) and take 30-90 seconds to complete. **Always warn the user before
+running a CloudTrail query** that it will take a moment. Use tight `eventTime`
+filters to minimize scan time and cost. The UI shows a live elapsed timer
+while the query runs.
+
 **Important:** `requestParameters` and `responseElements` may contain data in
 either JSON format or Java-style `{key=value, nested={inner=val}}` format.
 Handle both when parsing results.

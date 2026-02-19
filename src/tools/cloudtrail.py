@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 MAX_ROWS = 500
 POLL_INTERVAL = 2
+QUERY_TIMEOUT = 120  # seconds — CloudTrail Lake scans can take 30-90s
 
 
 def _parse_java_map(s: str) -> dict:
@@ -42,8 +43,9 @@ def _run_query(ct_client: Any, query: str, max_results: int) -> dict:
     response = ct_client.start_query(QueryStatement=query)
     query_id = response["QueryId"]
 
-    # Poll until query finishes
+    # Poll until query finishes (with timeout)
     bytes_scanned = 0
+    elapsed = 0
     while True:
         result = ct_client.get_query_results(QueryId=query_id, MaxQueryResults=max_results)
         status = result["QueryStatus"]
@@ -57,6 +59,13 @@ def _run_query(ct_client: Any, query: str, max_results: int) -> dict:
             return {"error": f"CloudTrail Lake query {status}: {error_msg}"}
 
         time.sleep(POLL_INTERVAL)
+        elapsed += POLL_INTERVAL
+        if elapsed >= QUERY_TIMEOUT:
+            logger.warning("CloudTrail Lake query timed out after %ds: %s", elapsed, query_id)
+            return {
+                "error": f"CloudTrail Lake query timed out after {elapsed}s. "
+                "Try narrowing the eventTime range to reduce data scanned."
+            }
 
     # Collect rows from first page
     all_rows = list(result.get("QueryResultRows", []))
