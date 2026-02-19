@@ -17,6 +17,62 @@ MAX_ROWS = 500
 POLL_INTERVAL = 2
 QUERY_TIMEOUT = 120  # seconds — CloudTrail Lake scans can take 30-90s
 
+# Matches eventTime comparisons like: eventTime > '2026-01-15' or eventTime >= '2026-01-15T00:00:00Z'
+_EVENT_TIME_RE = re.compile(
+    r"eventTime\s*([><=!]+)\s*'(\d{4}-\d{2}-\d{2})(?:[T\s]\S*)?'",
+    re.IGNORECASE,
+)
+
+
+def _inject_partition_key(query: str) -> str:
+    """Inject calendarday partition key filter based on eventTime filters.
+
+    The CloudTrail Lake event data store uses calendarday (YYYYMMDD bigint) as
+    a partition key. Queries MUST include calendarday in the WHERE clause or they
+    fail with InvalidQueryStatementException. Also, eventTime values must use
+    full timestamp format ('YYYY-MM-DDT00:00:00Z'), not short dates.
+
+    This function transparently adds calendarday filters and normalizes eventTime
+    formats so the agent doesn't need to know about partition keys.
+    """
+    # Skip if calendarday is already present
+    if re.search(r"\bcalendarday\b", query, re.IGNORECASE):
+        return query
+
+    # Find all eventTime comparisons and build calendarday equivalents
+    matches = list(_EVENT_TIME_RE.finditer(query))
+    if not matches:
+        return query
+
+    calendarday_clauses = []
+    for m in matches:
+        op = m.group(1)
+        date_str = m.group(2)  # YYYY-MM-DD
+        calendarday = date_str.replace("-", "")  # 20260115
+
+        # Map eventTime operators to calendarday operators
+        calendarday_clauses.append(f"calendarday {op} {calendarday}")
+
+        # Normalize short dates to full timestamps in the original query
+        # e.g. eventTime > '2026-01-15' → eventTime > '2026-01-15T00:00:00Z'
+        full_match = m.group(0)
+        date_value = full_match.split("'")[1]  # extract value between quotes
+        if "T" not in date_value and " " not in date_value:
+            normalized = f"eventTime {op} '{date_str}T00:00:00Z'"
+            query = query.replace(full_match, normalized)
+
+    # Inject calendarday clause(s) after WHERE
+    calendarday_filter = " AND ".join(calendarday_clauses)
+    query = re.sub(
+        r"\bWHERE\b",
+        f"WHERE {calendarday_filter} AND",
+        query,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+
+    return query
+
 
 def _parse_java_map(s: str) -> dict:
     """Parse Java-style map strings like '{key=value, key2=value2}' into a dict.
@@ -155,6 +211,9 @@ async def query_cloudtrail(query: str, max_results: int = 100) -> dict:
             query,
             flags=re.IGNORECASE,
         )
+
+        # Inject calendarday partition key and normalize eventTime format
+        query = _inject_partition_key(query)
 
         max_results = min(max_results, MAX_ROWS)
 
