@@ -47,5 +47,9 @@ cloudtrail:
   # Find via: aws cloudtrail list-event-data-stores --region us-east-1
   event_data_store_id: "your-event-data-store-uuid"
 
+# Alert investigation API key (used by cloud-slack-alerts Lambda)
+# Generate with: python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+alert_api_key: ""
+
 auth:
   allowed_users: "user1@redhat.com,user2@redhat.com"

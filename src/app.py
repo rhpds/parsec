@@ -12,6 +12,7 @@ from src.connections.aws import init_aws
 from src.connections.azure import init_azure
 from src.connections.gcp import init_gcp
 from src.connections.postgres import close_pool, init_pool
+from src.routes.alert import router as alert_router
 from src.routes.health import router as health_router
 from src.routes.query import router as query_router
 
@@ -69,6 +70,7 @@ app.add_middleware(
 
 # Routes
 app.include_router(health_router)
+app.include_router(alert_router)
 app.include_router(query_router)
 
 # Serve static frontend files

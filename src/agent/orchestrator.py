@@ -25,8 +25,8 @@ from src.agent.streaming import (
     sse_tool_result,
     sse_tool_start,
 )
-from src.agent.system_prompt import SYSTEM_PROMPT
-from src.agent.tool_definitions import TOOLS
+from src.agent.system_prompt import ALERT_INVESTIGATION_PROMPT, SYSTEM_PROMPT
+from src.agent.tool_definitions import SUBMIT_ALERT_VERDICT_TOOL, TOOLS
 from src.config import get_config
 from src.tools.aws_account import query_aws_account
 from src.tools.aws_accounts import query_aws_account_db
@@ -496,3 +496,191 @@ async def run_agent(
     yield sse_text("\n\n_Reached maximum tool call rounds. Please refine your question._")
     yield sse_event("history", {"messages": _serialize_messages(messages)})
     yield sse_done()
+
+
+async def run_alert_investigation(
+    alert_type: str,
+    account_id: str,
+    alert_text: str,
+    account_name: str = "",
+    user_arn: str = "",
+    event_time: str = "",
+    region: str = "",
+    event_details: dict | None = None,
+) -> dict:
+    """Run a non-streaming Claude investigation for an automated alert.
+
+    Returns a structured verdict dict with should_alert, severity, summary,
+    investigation_log, and duration_seconds.
+    """
+    import time as _time
+
+    start = _time.monotonic()
+    cfg = get_config()
+    model = cfg.anthropic.get("model", "claude-sonnet-4-20250514")
+    max_tokens = cfg.anthropic.get("max_tokens", 4096)
+    max_rounds = cfg.anthropic.get("max_tool_rounds", 10)
+
+    try:
+        client = _build_client(cfg)
+    except ValueError as e:
+        return {
+            "should_alert": True,
+            "severity": "medium",
+            "summary": f"Investigation failed: {e}",
+            "investigation_log": "",
+            "duration_seconds": round(_time.monotonic() - start, 1),
+        }
+
+    # Build system prompt: base instructions + alert investigation addendum
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
+    system = f"{SYSTEM_PROMPT}\n\nToday's date is {today}.\n{ALERT_INVESTIGATION_PROMPT}"
+
+    # Build tools list: standard tools + verdict tool (exclude render_chart, generate_report)
+    alert_tools = [t for t in TOOLS if t["name"] not in ("render_chart", "generate_report")]
+    alert_tools.append(SUBMIT_ALERT_VERDICT_TOOL)
+
+    # Construct the user message from alert context
+    details_str = json.dumps(event_details, default=str) if event_details else ""
+    user_message = (
+        f"Investigate this alert and submit your verdict.\n\n"
+        f"**Alert type:** {alert_type}\n"
+        f"**Account ID:** {account_id}\n"
+    )
+    if account_name:
+        user_message += f"**Account name:** {account_name}\n"
+    if user_arn:
+        user_message += f"**User ARN:** {user_arn}\n"
+    if event_time:
+        user_message += f"**Event time:** {event_time}\n"
+    if region:
+        user_message += f"**Region:** {region}\n"
+    user_message += f"\n**Alert text:**\n{alert_text}\n"
+    if details_str:
+        user_message += f"\n**Event details:**\n```json\n{details_str}\n```\n"
+
+    messages: list[dict] = [{"role": "user", "content": user_message}]
+    investigation_log: list[str] = []
+    verdict: dict | None = None
+
+    for _round in range(max_rounds):
+        try:
+
+            def _call_api() -> anthropic.types.Message:
+                return client.messages.create(
+                    model=model,
+                    max_tokens=max_tokens,
+                    system=system,
+                    tools=alert_tools,  # type: ignore[arg-type]
+                    messages=messages,  # type: ignore[arg-type]
+                )
+
+            response = await asyncio.to_thread(_call_api)
+        except anthropic.APIError as e:
+            logger.exception("Claude API error during alert investigation")
+            return {
+                "should_alert": True,
+                "severity": "medium",
+                "summary": f"Investigation failed: Claude API error ({e})",
+                "investigation_log": "\n".join(investigation_log),
+                "duration_seconds": round(_time.monotonic() - start, 1),
+            }
+
+        # Process response
+        assistant_content = response.content
+        tool_use_blocks = []
+
+        for block in assistant_content:
+            if block.type == "text" and block.text.strip():
+                investigation_log.append(block.text)
+            elif block.type == "tool_use":
+                tool_use_blocks.append(block)
+
+        messages.append({"role": "assistant", "content": assistant_content})
+
+        if not tool_use_blocks:
+            # Claude stopped without calling any tools — done
+            break
+
+        # Execute tool calls
+        tool_results = []
+        for tool_block in tool_use_blocks:
+            tool_name = tool_block.name
+            tool_input = tool_block.input
+
+            if tool_name == "submit_alert_verdict":
+                verdict = {
+                    "should_alert": tool_input.get("should_alert", True),
+                    "severity": tool_input.get("severity", "medium"),
+                    "summary": tool_input.get("summary", ""),
+                }
+                investigation_log.append(
+                    f"[Verdict] should_alert={verdict['should_alert']}, "
+                    f"severity={verdict['severity']}: {verdict['summary']}"
+                )
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_block.id,
+                        "content": json.dumps({"status": "verdict_recorded"}),
+                    }
+                )
+                continue
+
+            investigation_log.append(
+                f"[Tool: {tool_name}] input={json.dumps(tool_input, default=str)[:200]}"
+            )
+
+            try:
+                result = await _execute_tool(tool_name, tool_input)
+            except Exception as e:
+                logger.exception("Tool %s failed during alert investigation", tool_name)
+                result = {"error": str(e)}
+
+            # Summarize result for the log
+            result_str = json.dumps(result, default=str)
+            if len(result_str) > 300:
+                investigation_log.append(f"[Tool: {tool_name}] result: {result_str[:300]}...")
+            else:
+                investigation_log.append(f"[Tool: {tool_name}] result: {result_str}")
+
+            tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_block.id,
+                    "content": json.dumps(result, default=str),
+                }
+            )
+
+        messages.append({"role": "user", "content": tool_results})
+        trimmed = _trim_history(messages)
+        messages[:] = trimmed
+
+        # If we got a verdict, stop the loop
+        if verdict is not None:
+            break
+
+    elapsed = round(_time.monotonic() - start, 1)
+
+    # If Claude never called submit_alert_verdict, default to alerting
+    if verdict is None:
+        verdict = {
+            "should_alert": True,
+            "severity": "medium",
+            "summary": "Investigation did not produce a verdict — alerting as a precaution.",
+        }
+        investigation_log.append("[No verdict submitted — defaulting to should_alert=true]")
+
+    verdict["investigation_log"] = "\n".join(investigation_log)
+    verdict["duration_seconds"] = elapsed
+
+    logger.info(
+        "Alert investigation complete: type=%s account=%s should_alert=%s severity=%s duration=%.1fs",
+        alert_type,
+        account_id,
+        verdict["should_alert"],
+        verdict["severity"],
+        elapsed,
+    )
+
+    return verdict

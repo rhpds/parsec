@@ -1,5 +1,49 @@
 """Claude API tool schemas for Parsec."""
 
+# Verdict tool for alert investigations (not included in the default TOOLS list —
+# only appended during alert investigation mode).
+SUBMIT_ALERT_VERDICT_TOOL = {
+    "name": "submit_alert_verdict",
+    "description": (
+        "Submit your final verdict on whether this alert should fire. "
+        "Call this exactly once at the end of your investigation. "
+        "If in doubt, set should_alert=true — it is better to alert on a "
+        "false positive than to suppress a real threat."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "should_alert": {
+                "type": "boolean",
+                "description": (
+                    "Whether the alert should be posted to Slack. "
+                    "Set to false only when you are confident the activity is benign."
+                ),
+            },
+            "severity": {
+                "type": "string",
+                "enum": ["critical", "high", "medium", "low", "benign"],
+                "description": (
+                    "Severity level. Use 'benign' only when suppressing. "
+                    "critical = confirmed abuse or major unauthorized spend. "
+                    "high = likely abuse or significant cost risk. "
+                    "medium = suspicious but inconclusive. "
+                    "low = minor anomaly worth noting."
+                ),
+            },
+            "summary": {
+                "type": "string",
+                "description": (
+                    "1-3 sentence summary of your findings for the Slack message. "
+                    "Include the user, account, what happened, and why it matters "
+                    "(or why it's benign). Be specific and concise."
+                ),
+            },
+        },
+        "required": ["should_alert", "severity", "summary"],
+    },
+}
+
 TOOLS = [
     {
         "name": "query_provisions_db",

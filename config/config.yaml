@@ -45,6 +45,8 @@ cost_monitor:
 cloudtrail:
   event_data_store_id: ""
 
+alert_api_key: ""
+
 auth:
   # Comma-separated list of allowed OpenShift groups (from X-Forwarded-Groups)
   # When set, only users in these groups (or in allowed_users) can access Parsec

@@ -30,6 +30,7 @@ src/
     gcp.py                   # BigQuery client
   routes/
     query.py                 # GET /api/auth/check, POST /api/query (SSE), GET /api/reports/{filename}
+    alert.py                 # POST /api/alert/investigate (alert investigation API for cloud-slack-alerts)
     health.py                # GET /api/health, /api/health/ready
 static/                      # Chat UI (plain HTML/CSS/JS, no build step)
 config/
@@ -148,6 +149,63 @@ For local development, port-forward the cost-data-service and set `cost_monitor.
 
 ```bash
 oc port-forward svc/cost-data-service 8001:8000 -n cost-monitor-dev
+```
+
+## Alert Investigation API
+
+Parsec exposes a `POST /api/alert/investigate` endpoint that cloud-slack-alerts (`rhpds/cloud-slack-alerts`) calls before posting alerts to Slack. Parsec runs a full Claude investigation (provision DB, Cost Explorer, CloudTrail, account inspection) and returns a structured verdict: should this alert fire, and if so, at what severity with an AI-generated summary.
+
+### How It Works
+
+```
+EventBridge ──▶ Lambda (cloud-slack-alerts) ──▶ POST /api/alert/investigate ──▶ Parsec
+                     │                                                             │
+                     │◀──────── {should_alert, severity, summary} ◀────────────────┘
+                     │
+                     ├── should_alert=false → suppress (skip Slack), log to CloudWatch
+                     ├── should_alert=true  → append AI summary to Slack message, post
+                     └── error/timeout/None → post original alert without summary (safe fallback)
+```
+
+- **Auth**: `X-API-Key` header checked against `alert_api_key` config (not OAuth — bypasses the proxy via `-skip-auth-regex=^/api/(health|alert/)`).
+- **Request**: `AlertRequest` with `alert_type`, `account_id`, `account_name`, `user_arn`, `event_time`, `region`, `alert_text`, `event_details`.
+- **Response**: `AlertResponse` with `should_alert` (bool), `severity` (critical/high/medium/low/benign), `summary` (1-3 sentences), `investigation_log` (full text), `duration_seconds`.
+- **Agent loop**: Reuses the same Claude model, tools, and orchestrator as the chat UI. Adds a `submit_alert_verdict` tool that Claude calls to submit its verdict. Excludes `render_chart` and `generate_report` (not useful in background mode). Appends `ALERT_INVESTIGATION_PROMPT` to the system prompt with per-alert-type investigation strategies.
+- **Safe fallback**: If Claude never calls the verdict tool, or if the endpoint errors, defaults to `should_alert=true`.
+
+### Configuration
+
+- **`alert_api_key`** in `config.yaml` (empty = endpoint returns 503). Set via `PARSEC_ALERT_API_KEY` env var or `parsec-secrets` secret key `alert-api-key`.
+- Generate a key: `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
+- The same key must be set in both Parsec (`alert-api-key` in `parsec-secrets`) and cloud-slack-alerts (`PARSEC_API_KEY` Lambda env var).
+
+### Local Testing
+
+```bash
+# Set a test key in config.local.yaml:
+#   alert_api_key: "test-key"  # pragma: allowlist secret
+# Start Parsec, then:
+
+curl -X POST http://localhost:8000/api/alert/investigate \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: test-key" \
+  -d '{"alert_type":"iam_access_key","account_id":"123456789012","alert_text":"IAM access key created by test-user in sandbox4440"}'
+```
+
+### Slack Message Format (with AI summary)
+
+When Parsec returns `should_alert=true`, the Lambda appends an AI investigation block:
+
+```
+:moneybag: *AWS Marketplace Purchase*
+*Account:* `sandbox4440` (`123456789012`)
+...
+
+:warning: *AI Investigation* (high):
+External user test-user@gmail.com purchased CentOS Stream on sandbox4440.
+The $450 estimated cost is significant.
+
+:mag: Investigate in Parsec
 ```
 
 ## EC2 Pricing Cache
@@ -287,7 +345,7 @@ oc apply -k openshift/overlays/dev/
 oc apply -k openshift/overlays/prod/
 ```
 
-Required secrets: `parsec-secrets` (API key, DB creds), `oauth-proxy-secret` (client-id, client-secret, session_secret).  <!-- pragma: allowlist secret -->
+Required secrets: `parsec-secrets` (API key, DB creds, `alert-api-key`), `oauth-proxy-secret` (client-id, client-secret, session_secret).  <!-- pragma: allowlist secret -->
 
 ## Report Generation
 
@@ -334,6 +392,7 @@ annotation auto-triggers a rollout. Monitor with `oc get builds -n <namespace>`.
 - **EC2 pricing cache**: Uses a static JSON file from the public AWS Pricing Bulk API instead of calling `pricing:GetProducts` at runtime. No AWS credentials needed. Refreshed weekly by an OpenShift CronJob on a shared RWX CephFS PVC (`ocs-storagecluster-cephfs`). The per-region bulk files are ~250-400MB each so the CronJob needs 3Gi memory limit for JSON parsing.
 - **Azure billing cache**: Uses a SQLite database (`data/azure_billing.db`, ~1.3GB) on the same shared PVC (3Gi). Refreshed daily by the `parsec-azure-billing-refresh` CronJob. Incremental processing via ETag comparison — only changed/new blobs are re-ingested. WAL mode enables concurrent reads during writes. Falls back to live blob streaming if the cache is missing. For initial deployment, copy the DB from dev to prod via `oc rsync` to avoid a full re-ingest.
 - **CloudTrail Lake**: The event data store ID is environment-specific — set via local config overrides (`config.local.yaml` or `deploy.sh`), not hardcoded. The tool substitutes `cloudtrail_events` in FROM clauses with the real ID so the agent never sees it. CloudTrail Lake charges per byte scanned — always include `eventTime >` filters. `responseElements` often comes as Java-style `{key=value}` instead of JSON; the tool auto-parses these.
+- **Alert investigation API**: The `/api/alert/investigate` endpoint uses API key auth (`X-API-Key` header), not OAuth. The OAuth proxy's `-skip-auth-regex` bypasses SSO for `/api/alert/` paths. The agent loop is non-streaming (synchronous JSON response, not SSE) and excludes `render_chart`/`generate_report` tools. Claude calls `submit_alert_verdict` to submit its verdict; if it never calls the tool, the endpoint defaults to `should_alert=true`. Investigation typically takes 30-90 seconds depending on how many tools Claude calls.
 - **Cross-account access**: Uses STS AssumeRole into `OrganizationAccountAccessRole` with an inline session policy for read-only enforcement. The session policy (not the IAM role) is the security boundary — even though `OrganizationAccountAccessRole` has admin, the inline policy limits to `ec2:Describe*`, `iam:List*/Get*`, etc. Credentials are cached per account ID at module level. The `marketplace-agreement` SDK client calls IAM actions under the `aws-marketplace:` prefix, not `marketplace-agreement:` — the session policy must use `aws-marketplace:DescribeAgreement` explicitly.
 
 See `docs/TODO.md` for the full project backlog.

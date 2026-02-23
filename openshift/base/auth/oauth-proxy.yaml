@@ -51,7 +51,7 @@ spec:
             - -cookie-secret-file=/etc/proxy/secrets/session_secret
             - -openshift-service-account=parsec-oauth
             - -openshift-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-            - -skip-auth-regex=^/api/health
+            - -skip-auth-regex=^/api/(health|alert/)
             - -pass-user-headers=true
           volumeMounts:
             - name: oauth-proxy-secret
