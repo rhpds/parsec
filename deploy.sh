@@ -128,13 +128,21 @@ create_secrets() {
     local db_name=$(yq eval '.secrets.provision_db.database' "$CONFIG_FILE")
     local db_user=$(yq eval '.secrets.provision_db.user' "$CONFIG_FILE")
     local db_password=$(yq eval '.secrets.provision_db.password' "$CONFIG_FILE")
+    local alert_api_key=$(yq eval '.alert_api_key // ""' "$CONFIG_FILE")
+
+    local secret_args=(
+        --from-literal=db-host="$db_host"
+        --from-literal=db-port="$db_port"
+        --from-literal=db-name="$db_name"
+        --from-literal=db-user="$db_user"
+        --from-literal=db-password="$db_password"
+    )
+    if [ -n "$alert_api_key" ]; then
+        secret_args+=(--from-literal=alert-api-key="$alert_api_key")
+    fi
 
     oc create secret generic parsec-secrets -n ${NAMESPACE} \
-        --from-literal=db-host="$db_host" \
-        --from-literal=db-port="$db_port" \
-        --from-literal=db-name="$db_name" \
-        --from-literal=db-user="$db_user" \
-        --from-literal=db-password="$db_password" \
+        "${secret_args[@]}" \
         --dry-run=client -o yaml | oc apply -f -
 
     echo -e "${GREEN}parsec-secrets created${NC}"

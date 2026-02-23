@@ -32,6 +32,8 @@ data:
     cloudtrail:
       event_data_store_id: ""
 
+    alert_api_key: ""
+
     auth:
       allowed_groups: "rhpds-admins,parsec-local-users"
       allowed_users: ""
