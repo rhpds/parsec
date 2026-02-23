@@ -52,6 +52,7 @@ spec:
             - -openshift-service-account=parsec-oauth
             - -openshift-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
             - -skip-auth-regex=^/api/(health|alert/)
+            - -upstream-timeout=180s
             - -pass-user-headers=true
           volumeMounts:
             - name: oauth-proxy-secret
