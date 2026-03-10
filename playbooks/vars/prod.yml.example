@@ -1,0 +1,15 @@
+---
+# Production environment variables.
+# Copy this file to prod.yml and fill in your values.
+# prod.yml is gitignored and will not be committed.
+
+env: prod
+target_namespace: parsec
+kubeconfig: ~/secrets/your-cluster.kubeconfig
+kubeconfig_context: parsec-prod
+cluster_domain: apps.your-cluster.example.com
+git_branch: production
+oauth_enabled: true
+
+# See dev.yml.example for all available variables.
+# Production values follow the same structure.

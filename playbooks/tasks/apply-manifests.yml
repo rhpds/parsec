@@ -1,0 +1,99 @@
+---
+# Render Jinja2 manifests and apply to the cluster.
+# No kustomize dependency — all environment differences are handled
+# via Ansible variables in the template.
+
+- name: Check for kustomize-era deployment selectors (one-time migration)
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig }}"
+    context: "{{ kubeconfig_context | default(omit) }}"
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ target_namespace }}"
+  register: _existing_deploys
+
+- name: Delete deployments with kustomize labels in selectors
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    context: "{{ kubeconfig_context | default(omit) }}"
+    api_version: apps/v1
+    kind: Deployment
+    name: "{{ item.metadata.name }}"
+    namespace: "{{ target_namespace }}"
+    state: absent
+  loop: "{{ _existing_deploys.resources }}"
+  when: item.spec.selector.matchLabels.get('app.kubernetes.io/name', '') | length > 0
+  loop_control:
+    label: "{{ item.metadata.name }}"
+
+- name: Render manifests template
+  ansible.builtin.template:
+    src: manifests.yaml.j2
+    dest: "/tmp/parsec-manifests-{{ target_namespace }}.yaml"
+    mode: "0600"
+  changed_when: false
+
+- name: Apply manifests (namespaced resources)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    context: "{{ kubeconfig_context | default(omit) }}"
+    namespace: "{{ target_namespace }}"
+    state: present
+    src: "/tmp/parsec-manifests-{{ target_namespace }}.yaml"
+    apply: true
+    force: true
+
+- name: Apply OAuth ClusterRole (cluster-scoped)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    context: "{{ kubeconfig_context | default(omit) }}"
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRole
+      metadata:
+        name: parsec-oauth
+        labels:
+          app: parsec
+          component: oauth
+      rules:
+        - apiGroups: ["oauth.openshift.io"]
+          resources: ["oauthclients"]
+          verbs: ["get", "list"]
+        - apiGroups: ["user.openshift.io"]
+          resources: ["users"]
+          verbs: ["get"]
+        - apiGroups: [""]
+          resources: ["users"]
+          verbs: ["get"]
+        - apiGroups: ["user.openshift.io"]
+          resources: ["groups"]
+          verbs: ["get", "list"]
+
+- name: Apply OAuth ClusterRoleBinding (cluster-scoped)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    context: "{{ kubeconfig_context | default(omit) }}"
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: "parsec-oauth-{{ env }}"
+        labels:
+          app: parsec
+          component: oauth
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: parsec-oauth
+      subjects:
+        - kind: ServiceAccount
+          name: parsec-oauth
+          namespace: "{{ target_namespace }}"
+
+- name: Clean up rendered manifests
+  ansible.builtin.file:
+    path: "/tmp/parsec-manifests-{{ target_namespace }}.yaml"
+    state: absent
+  changed_when: false

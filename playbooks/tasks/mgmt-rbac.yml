@@ -1,0 +1,99 @@
+---
+# Bootstrap RBAC for the parsec-admin service account.
+#
+# Creates a scoped ClusterRole for cluster-level operations (namespaces,
+# ClusterRoles, OAuthClients) and an admin RoleBinding in the target namespace.
+#
+# Idempotent — safe to run on every deploy. The ClusterRole/Binding are only
+# created once; the per-namespace RoleBinding is created per env.
+#
+# Prerequisites: whoever runs this must have cluster-admin or equivalent.
+# On a fresh cluster, run: ansible-playbook playbooks/deploy.yaml -e env=dev --tags mgmt-rbac
+
+- name: Ensure management SA exists
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    context: "{{ kubeconfig_context | default(omit) }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: "{{ mgmt_service_account.name }}"
+        namespace: "{{ mgmt_service_account.namespace }}"
+
+- name: Ensure management ClusterRole exists
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    context: "{{ kubeconfig_context | default(omit) }}"
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRole
+      metadata:
+        name: parsec-mgmt
+      rules:
+        # ClusterRole/ClusterRoleBinding for OAuth RBAC
+        - apiGroups: ["rbac.authorization.k8s.io"]
+          resources: ["clusterroles", "clusterrolebindings"]
+          verbs: ["get", "list", "create", "update", "patch", "delete"]
+        # Namespace lifecycle
+        - apiGroups: [""]
+          resources: ["namespaces"]
+          verbs: ["get", "list", "create", "update", "patch"]
+        # OAuthClient (cluster-scoped)
+        - apiGroups: ["oauth.openshift.io"]
+          resources: ["oauthclients"]
+          verbs: ["get", "list", "create", "update", "patch", "delete"]
+        # OpenShift user/group lookups (for OAuth RBAC and verifying auth)
+        - apiGroups: ["user.openshift.io"]
+          resources: ["groups", "users"]
+          verbs: ["get", "list"]
+        # Core user lookups (needed to grant parsec-oauth ClusterRole)
+        - apiGroups: [""]
+          resources: ["users"]
+          verbs: ["get"]
+        # Manage membership of parsec access groups only
+        - apiGroups: ["user.openshift.io"]
+          resources: ["groups"]
+          resourceNames: ["parsec-local-users"]
+          verbs: ["update"]
+
+- name: Ensure management ClusterRoleBinding exists
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    context: "{{ kubeconfig_context | default(omit) }}"
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: parsec-mgmt
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: parsec-mgmt
+      subjects:
+        - kind: ServiceAccount
+          name: "{{ mgmt_service_account.name }}"
+          namespace: "{{ mgmt_service_account.namespace }}"
+
+- name: Ensure management SA has admin in {{ target_namespace }}
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    context: "{{ kubeconfig_context | default(omit) }}"
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: parsec-mgmt-admin
+        namespace: "{{ target_namespace }}"
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: admin
+      subjects:
+        - kind: ServiceAccount
+          name: "{{ mgmt_service_account.name }}"
+          namespace: "{{ mgmt_service_account.namespace }}"

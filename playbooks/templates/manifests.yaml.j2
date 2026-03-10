@@ -1,0 +1,660 @@
+{# Parsec OpenShift manifests - Jinja2 template for Ansible deployment #}
+{# Replaces kustomize overlays with a single template. All environment #}
+{# differences are handled via Ansible variables. #}
+---
+# ConfigMap — app configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: parsec-config
+data:
+  config.yaml: |
+    app:
+      name: parsec
+      port: 8000
+      host: "0.0.0.0"
+      log_level: info
+    anthropic:
+      model: "claude-sonnet-4@20250514"
+      max_tokens: 4096
+      max_tool_rounds: 10
+    provision_db:
+      min_pool_size: 2
+      max_pool_size: 10
+      statement_timeout_ms: 30000
+      max_rows: 500
+    aws:
+      region: "{{ aws_region }}"
+      batch_size: 100
+    cost_monitor:
+      api_url: "http://cost-data-service.cost-monitor.svc:8000"
+      dashboard_url: "{{ cost_monitor_dashboard_url | default('') }}"
+    cloudtrail:
+      event_data_store_id: "{{ cloudtrail_event_data_store_id | default('') }}"
+    alert_api_key: ""
+    auth:
+      allowed_groups: "{{ oauth_allowed_groups }}"
+      allowed_users: ""
+---
+# ImageStream
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: parsec
+spec:
+  lookupPolicy:
+    local: true
+---
+# BuildConfig
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: parsec
+spec:
+  source:
+    type: Git
+    git:
+      uri: "https://github.com/{{ github_repo }}.git"
+      ref: "{{ git_branch }}"
+    contextDir: "/"
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: dockerfiles/Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: parsec:latest
+  runPolicy: Serial
+  successfulBuildsHistoryLimit: 5
+  failedBuildsHistoryLimit: 5
+  triggers:
+    - type: ConfigChange
+    - type: GitHub
+      github:
+        secretReference:
+          name: parsec-webhook-secret
+---
+# Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: parsec-service
+  labels:
+    app: parsec
+    component: api
+spec:
+  type: ClusterIP
+  selector:
+    app: parsec
+    component: api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: parsec
+  annotations:
+    image.openshift.io/triggers: >-
+      [{"from":{"kind":"ImageStreamTag","name":"parsec:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"parsec\")].image"},{"from":{"kind":"ImageStreamTag","name":"parsec:latest"},"fieldPath":"spec.template.spec.initContainers[?(@.name==\"seed-pricing\")].image"},{"from":{"kind":"ImageStreamTag","name":"parsec:latest"},"fieldPath":"spec.template.spec.initContainers[?(@.name==\"seed-azure-billing\")].image"}]
+spec:
+  replicas: {{ deployment_replicas | default(1) }}
+  selector:
+    matchLabels:
+      app: parsec
+      component: api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: parsec
+        component: api
+    spec:
+      serviceAccountName: parsec-oauth
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: seed-pricing
+          image: parsec:latest
+          command: ["sh", "-c", "cp /app/data-seed/ec2_pricing.json /app/data/ec2_pricing.json"]
+          volumeMounts:
+            - name: pricing-cache
+              mountPath: /app/data
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+        - name: seed-azure-billing
+          image: parsec:latest
+          command: ["python3", "scripts/refresh_azure_billing.py", "--init-only"]
+          volumeMounts:
+            - name: pricing-cache
+              mountPath: /app/data
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+      containers:
+        - name: parsec
+          image: parsec:latest
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          env:
+            - name: PARSEC_ANTHROPIC__BACKEND
+              value: "vertex"
+            - name: PARSEC_ANTHROPIC__VERTEX_PROJECT_ID
+              value: "{{ vertex_project_id }}"
+            - name: PARSEC_ANTHROPIC__VERTEX_REGION
+              value: "{{ vertex_region }}"
+            - name: PARSEC_ANTHROPIC__VERTEX_CREDENTIALS_PATH
+              value: "/app/gcp/service-account.json"
+            - name: PARSEC_PROVISION_DB__HOST
+              valueFrom:
+                secretKeyRef:
+                  name: parsec-secrets
+                  key: db-host
+            - name: PARSEC_PROVISION_DB__PORT
+              value: "{{ provision_db_port }}"
+            - name: PARSEC_PROVISION_DB__DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: parsec-secrets
+                  key: db-name
+            - name: PARSEC_PROVISION_DB__USER
+              valueFrom:
+                secretKeyRef:
+                  name: parsec-secrets
+                  key: db-user
+            - name: PARSEC_PROVISION_DB__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: parsec-secrets
+                  key: db-password
+            - name: PARSEC_AWS__REGION
+              value: "{{ aws_region }}"
+            - name: PARSEC_GCP__CREDENTIALS_PATH
+              value: "/app/gcp-billing/service-account.json"
+            - name: PARSEC_ALERT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: parsec-secrets
+                  key: alert-api-key
+                  optional: true
+            - name: PARSEC_AUTH__ALLOWED_USERS
+              valueFrom:
+                configMapKeyRef:
+                  name: parsec-allowed-users
+                  key: allowed-users
+                  optional: true
+            - name: PARSEC_BABYLON__CLUSTERS__EAST__KUBECONFIG
+              value: "/app/babylon/east.kubeconfig"
+            - name: PARSEC_BABYLON__CLUSTERS__WEST__KUBECONFIG
+              value: "/app/babylon/west.kubeconfig"
+            - name: PARSEC_BABYLON__CLUSTERS__PARTNER0__KUBECONFIG
+              value: "/app/babylon/partner0.kubeconfig"
+            - name: PARSEC_BABYLON__CLUSTERS__PARTNER1__KUBECONFIG
+              value: "/app/babylon/partner1.kubeconfig"
+            - name: PARSEC_BABYLON__CLUSTERS__INTEGRATION__KUBECONFIG
+              value: "/app/babylon/integration.kubeconfig"
+            - name: PARSEC_BABYLON__CLUSTERS__BABYDEV__KUBECONFIG
+              value: "/app/babylon/babydev.kubeconfig"
+          envFrom:
+            - secretRef:
+                name: parsec-cloud-credentials
+                optional: true
+          volumeMounts:
+            - name: config
+              mountPath: /app/config/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            - name: vertex-credentials
+              mountPath: /app/gcp
+              readOnly: true
+            - name: gcp-billing-credentials
+              mountPath: /app/gcp-billing
+              readOnly: true
+            - name: reports
+              mountPath: /app/reports
+            - name: pricing-cache
+              mountPath: /app/data
+            - name: babylon-kubeconfigs
+              mountPath: /app/babylon
+              readOnly: true
+          resources:
+            requests:
+              memory: "{{ deployment_memory_request | default('256Mi') }}"
+              cpu: "100m"
+            limits:
+              memory: "{{ deployment_memory_limit | default('512Mi') }}"
+              cpu: "500m"
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/health/ready
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 12
+      volumes:
+        - name: config
+          configMap:
+            name: parsec-config
+        - name: vertex-credentials
+          secret:
+            secretName: vertex-credentials
+            defaultMode: 0400
+        - name: gcp-billing-credentials
+          secret:
+            secretName: gcp-billing-credentials
+            defaultMode: 0400
+            optional: true
+        - name: reports
+          emptyDir: {}
+        - name: pricing-cache
+          persistentVolumeClaim:
+            claimName: parsec-pricing-cache
+        - name: babylon-kubeconfigs
+          secret:
+            secretName: babylon-kubeconfigs
+            defaultMode: 0400
+            optional: true
+---
+# PVC for pricing/billing cache
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: parsec-pricing-cache
+spec:
+  storageClassName: ocs-storagecluster-cephfs
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 3Gi
+---
+# CronJob — EC2 pricing refresh (weekly)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: parsec-pricing-refresh
+spec:
+  schedule: "0 3 * * 1"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 7200
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: parsec
+            component: pricing-refresh
+        spec:
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: refresh
+              image: parsec:latest
+              command: ["python3", "scripts/refresh_pricing.py"]
+              volumeMounts:
+                - name: pricing-cache
+                  mountPath: /app/data
+              resources:
+                requests:
+                  memory: "512Mi"
+                  cpu: "100m"
+                limits:
+                  memory: "3Gi"
+                  cpu: "1"
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
+          volumes:
+            - name: pricing-cache
+              persistentVolumeClaim:
+                claimName: parsec-pricing-cache
+          restartPolicy: OnFailure
+---
+# CronJob — Azure billing refresh (daily)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: parsec-azure-billing-refresh
+spec:
+  schedule: "0 4 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 14400
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: parsec
+            component: azure-billing-refresh
+        spec:
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: refresh
+              image: parsec:latest
+              command: ["python3", "scripts/refresh_azure_billing.py"]
+              envFrom:
+                - secretRef:
+                    name: parsec-cloud-credentials
+              volumeMounts:
+                - name: pricing-cache
+                  mountPath: /app/data
+              resources:
+                requests:
+                  memory: "256Mi"
+                  cpu: "100m"
+                limits:
+                  memory: "1Gi"
+                  cpu: "500m"
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
+          volumes:
+            - name: pricing-cache
+              persistentVolumeClaim:
+                claimName: parsec-pricing-cache
+          restartPolicy: OnFailure
+---
+# Health check route (no auth, internal monitoring)
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: parsec-health
+  labels:
+    app: parsec
+    component: monitoring
+  annotations:
+    haproxy.router.openshift.io/timeout: 10s
+    haproxy.router.openshift.io/ip_whitelist: "10.0.0.0/8 172.16.0.0/12"
+spec:
+  to:
+    kind: Service
+    name: parsec-service
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  path: /api/health
+---
+# Webhook RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: webhook-access-unauthenticated
+  annotations:
+    rbac.authorization.kubernetes.io/autoupdate: "true"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: "system:webhook"
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: Group
+  name: "system:unauthenticated"
+---
+# OAuth ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: parsec-oauth
+  labels:
+    app: parsec
+    component: oauth
+  annotations:
+    serviceaccounts.openshift.io/oauth-redirectreference.primary: |
+      {
+        "kind": "OAuthRedirectReference",
+        "apiVersion": "v1",
+        "reference": {
+          "kind": "Route",
+          "name": "parsec-route"
+        }
+      }
+automountServiceAccountToken: true
+---
+# OAuth Role — config access
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: parsec-app-access
+  labels:
+    app: parsec
+    component: oauth
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+    resourceNames: ["parsec-allowed-users", "parsec-config"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+    resourceNames: ["oauth-proxy-secret"]
+---
+# OAuth RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: parsec-app-access
+  labels:
+    app: parsec
+    component: oauth
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: parsec-app-access
+subjects:
+  - kind: ServiceAccount
+    name: parsec-oauth
+    namespace: {{ target_namespace }}
+---
+# OAuth proxy Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oauth-proxy
+  labels:
+    app: parsec
+    component: oauth-proxy
+spec:
+  replicas: {{ oauth_proxy_replicas | default(1) }}
+  selector:
+    matchLabels:
+      app: parsec-oauth-proxy
+      component: oauth-proxy
+  template:
+    metadata:
+      labels:
+        app: parsec-oauth-proxy
+        component: oauth-proxy
+    spec:
+      serviceAccountName: parsec-oauth
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: oauth-proxy
+          image: registry.redhat.io/openshift4/ose-oauth-proxy-rhel9:latest
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+            - containerPort: 8443
+              name: https
+              protocol: TCP
+          env:
+            - name: OAUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: oauth-proxy-secret
+                  key: client-id
+          args:
+            - -provider=openshift
+            - -http-address=:8080
+            - -https-address=
+            - -email-domain=*
+            - -upstream=http://parsec-service:8000/
+            - -client-id=$(OAUTH_CLIENT_ID)
+            - -client-secret-file=/etc/proxy/secrets/client-secret
+            - -cookie-secret-file=/etc/proxy/secrets/session_secret
+            - -openshift-service-account=parsec-oauth
+            - -openshift-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            - -skip-auth-regex=^/api/(health|alert/)
+            - -upstream-timeout=180s
+            - -pass-user-headers=true
+          volumeMounts:
+            - name: oauth-proxy-secret
+              mountPath: /etc/proxy/secrets
+              readOnly: true
+            - name: oauth-serving-cert
+              mountPath: /etc/tls/private
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+          livenessProbe:
+            httpGet:
+              path: /oauth/healthz
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 10
+            timeoutSeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /oauth/healthz
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 5
+            timeoutSeconds: 3
+            periodSeconds: 5
+      volumes:
+        - name: oauth-proxy-secret
+          secret:
+            secretName: oauth-proxy-secret
+        - name: oauth-serving-cert
+          secret:
+            secretName: oauth-serving-cert
+---
+# OAuth proxy Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: oauth-proxy-service
+  labels:
+    app: parsec
+    component: oauth-proxy
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: oauth-serving-cert
+spec:
+  type: ClusterIP
+  selector:
+    app: parsec-oauth-proxy
+    component: oauth-proxy
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+    - name: https
+      port: 8443
+      targetPort: 8443
+      protocol: TCP
+---
+# Main route — all traffic goes through OAuth proxy
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: parsec-route
+  labels:
+    app: parsec
+    component: frontend
+  annotations:
+    haproxy.router.openshift.io/timeout: 300s
+    haproxy.router.openshift.io/balance: roundrobin
+    haproxy.router.openshift.io/rate-limit-connections: "50"
+spec:
+  host: {{ target_namespace }}.{{ cluster_domain }}
+  to:
+    kind: Service
+    name: oauth-proxy-service
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

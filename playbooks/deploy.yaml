@@ -1,0 +1,127 @@
+---
+# Parsec OpenShift Deployment Playbook
+#
+# Automates the full setup from empty namespace to running instance.
+# All tasks are idempotent — running the playbook twice produces the same result.
+#
+# Usage:
+#   ansible-playbook playbooks/deploy.yaml -e env=dev              # Full deploy
+#   ansible-playbook playbooks/deploy.yaml -e env=prod             # Full prod deploy
+#   ansible-playbook playbooks/deploy.yaml -e env=dev --tags apply # Just apply manifests
+#   ansible-playbook playbooks/deploy.yaml -e env=dev --tags secrets  # Just update secrets
+#   ansible-playbook playbooks/deploy.yaml -e env=dev --tags builds   # Just wait for builds
+#
+# Prerequisites:
+#   pip install kubernetes
+#   ansible-galaxy collection install kubernetes.core
+#   Create playbooks/vars/<env>.yml from the .example file
+
+- name: Deploy Parsec
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  collections:
+    - kubernetes.core
+
+  vars_files:
+    - vars/common.yml
+    - "vars/{{ env }}.yml"
+
+  pre_tasks:
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - env is defined
+          - target_namespace is defined
+          - kubeconfig is defined
+          - provision_db_host is defined
+        fail_msg: >
+          Missing required variables. Create playbooks/vars/{{ env | default('dev') }}.yml
+          from the corresponding .example file.
+
+    - name: Verify kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ kubeconfig }}"
+      register: _kubeconfig_file
+
+    - name: Fail if kubeconfig not found
+      ansible.builtin.fail:
+        msg: "Kubeconfig not found at {{ kubeconfig }}"
+      when: not _kubeconfig_file.stat.exists
+
+    - name: Verify cluster connectivity
+      kubernetes.core.k8s_cluster_info:
+        kubeconfig: "{{ kubeconfig }}"
+        context: "{{ kubeconfig_context | default(omit) }}"
+      register: _cluster_info
+
+    - name: Display deployment info
+      ansible.builtin.debug:
+        msg: |
+          Environment: {{ env }}
+          Namespace:   {{ target_namespace }}
+          Branch:      {{ git_branch }}
+          OAuth:       {{ oauth_enabled | default(true) }}
+
+  tasks:
+    - name: Bootstrap management SA RBAC
+      ansible.builtin.include_tasks:
+        file: tasks/mgmt-rbac.yml
+        apply:
+          tags: [mgmt-rbac, apply]
+      tags: [mgmt-rbac, apply]
+
+    - name: Create secrets
+      ansible.builtin.include_tasks:
+        file: tasks/secrets.yml
+        apply:
+          tags: [secrets, apply]
+      tags: [secrets, apply]
+
+    - name: Create OAuth resources
+      ansible.builtin.include_tasks:
+        file: tasks/oauth.yml
+        apply:
+          tags: [oauth, apply]
+      tags: [oauth, apply]
+      when: oauth_enabled | default(true) | bool
+
+    - name: Apply manifests
+      ansible.builtin.include_tasks:
+        file: tasks/apply-manifests.yml
+        apply:
+          tags: [apply]
+      tags: [apply]
+
+    - name: Wait for builds
+      ansible.builtin.include_tasks:
+        file: tasks/wait-for-builds.yml
+        apply:
+          tags: [builds, apply]
+      tags: [builds, apply]
+
+  post_tasks:
+    - name: Get pod status
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig }}"
+        context: "{{ kubeconfig_context | default(omit) }}"
+        kind: Pod
+        namespace: "{{ target_namespace }}"
+        label_selectors:
+          - app.kubernetes.io/name=parsec
+      register: _final_pods
+      tags: [always]
+
+    - name: Deployment summary
+      ansible.builtin.debug:
+        msg: |
+          === Parsec {{ env }} deployment complete ===
+
+          Namespace: {{ target_namespace }}
+          URL:       https://{{ target_namespace }}.{{ cluster_domain }}
+
+          Pods:
+          {% for pod in _final_pods.resources | sort(attribute='metadata.name') %}
+            {{ pod.metadata.name }}  {{ pod.status.phase }}
+          {% endfor %}
+      tags: [always]

@@ -37,12 +37,27 @@ src/
 static/                      # Chat UI (plain HTML/CSS/JS, no build step)
 config/
   config.yaml                # Base config (no secrets)
-  config.local.yaml.template # Local dev secrets template
 data/
   ec2_pricing.json           # Static EC2 pricing cache (checked into git)
 scripts/
   refresh_pricing.py         # Refreshes ec2_pricing.json from public AWS API
   refresh_azure_billing.py   # Refreshes azure_billing.db from Azure Blob Storage
+  local-server.sh            # Local dev server management (start/stop/restart/status)
+playbooks/
+  deploy.yaml                # Ansible deployment playbook (replaces deploy.sh)
+  requirements.yaml          # Ansible collection requirements
+  templates/
+    manifests.yaml.j2         # All OpenShift manifests (Jinja2 template)
+  tasks/
+    mgmt-rbac.yml             # Bootstrap management SA RBAC
+    secrets.yml               # Create/update secrets
+    oauth.yml                 # OAuth setup (idempotent)
+    apply-manifests.yml       # Render and apply manifests
+    wait-for-builds.yml       # Wait for build completion
+  vars/
+    common.yml                # Shared variables (committed)
+    dev.yml.example           # Dev vars template
+    prod.yml.example          # Prod vars template
 ```
 
 ## Running Locally
@@ -324,7 +339,7 @@ The `query_cloudtrail` tool queries CloudTrail Lake — an org-wide event data s
 - Auto-parses Java-style `{key=value}` strings in `requestParameters` and `responseElements` into dicts
 - Only SELECT queries allowed (validated before submission)
 - Configured via `cloudtrail.event_data_store_id` in local config (not checked into git).
-  Set in `config.local.yaml` for local dev, or in the `openshift/local/local-config*.yaml` for OpenShift (`deploy.sh` patches the ConfigMap).
+  Set in `config.local.yaml` for local dev, or in `playbooks/vars/<env>.yml` for OpenShift (the Ansible playbook patches the ConfigMap).
   Find the ID with: `aws cloudtrail list-event-data-stores --region us-east-1`
 
 ## AWS Account Inspection
@@ -389,15 +404,42 @@ aws iam delete-policy-version --policy-arn <POLICY_ARN> --version-id <OLDEST_NON
 
 ## OpenShift Deployment
 
-```bash
-# Dev
-oc apply -k openshift/overlays/dev/
+Deployment is managed by an Ansible playbook (`playbooks/deploy.yaml`). All tasks are
+idempotent — running the playbook twice produces the same result. No kustomize dependency.
 
-# Prod
-oc apply -k openshift/overlays/prod/
+```bash
+# Prerequisites
+pip install kubernetes
+ansible-galaxy collection install kubernetes.core
+
+# Create vars file from template
+cp playbooks/vars/dev.yml.example playbooks/vars/dev.yml
+# Edit with your secrets
+
+# Bootstrap management SA RBAC (one-time, needs cluster-admin)
+ansible-playbook playbooks/deploy.yaml -e env=dev \
+  -e kubeconfig=~/secrets/cluster-admin.kubeconfig \
+  --tags mgmt-rbac
+
+# Full deploy (uses SA kubeconfig)
+ansible-playbook playbooks/deploy.yaml -e env=dev
+
+# Just update secrets
+ansible-playbook playbooks/deploy.yaml -e env=dev --tags secrets
+
+# Just apply manifests
+ansible-playbook playbooks/deploy.yaml -e env=dev --tags apply
+
+# Production
+ansible-playbook playbooks/deploy.yaml -e env=prod
 ```
 
-Required secrets: `parsec-secrets` (API key, DB creds, `alert-api-key`), `oauth-proxy-secret` (client-id, client-secret, session_secret).  <!-- pragma: allowlist secret -->
+Required secrets (created by playbook): `parsec-secrets`, `vertex-credentials`,
+`parsec-cloud-credentials`, `gcp-billing-credentials`, `babylon-kubeconfigs`,
+`oauth-proxy-secret`.  <!-- pragma: allowlist secret -->
+
+Management SA: `parsec-admin` in `parsec-dev` namespace with `parsec-mgmt` ClusterRole
+(namespaces, OAuthClients, ClusterRoles) and `admin` RoleBinding per target namespace.
 
 ## Report Generation
 
@@ -413,8 +455,7 @@ Users can ask for reports in the chat ("generate a report of findings"). Claude 
 - PRs target `main` and must pass CI (quality-gates + docker-build)
 - **Pushes to `main` and `production` auto-trigger OpenShift builds** via GitHub webhooks.
   Do NOT manually trigger builds with `oc start-build`. If webhooks stop working, check
-  that the GitHub webhook secrets match the BuildConfig trigger secrets (they get out of
-  sync when `deploy.sh` regenerates them).
+  that the GitHub webhook secrets match the BuildConfig trigger secrets.
 
 ### CI Pipeline
 
@@ -440,10 +481,10 @@ annotation auto-triggers a rollout. Monitor with `oc get builds -n <namespace>`.
 - **Lazy DB init**: The provision DB pool retries on first query if startup initialization failed. Health readiness probe does NOT trigger DB init.
 - **AWS Capacity Manager (ODCRs)**: Uses `get_capacity_manager_metric_data` API from the payer account in us-east-1 with Organizations access. The `get_capacity_manager_metric_dimensions` API does not reliably return results, so inventory uses metric data grouped by `reservation-id` instead. RHDP ODCRs are transient (1-2 hours during provisioning) — the tool filters out ODCRs with < 24 hours of activity. Historical analysis (Nov 2025 – Feb 2026, 87k+ ODCRs) confirmed zero persistent waste. The Capacity Manager GUI's low utilization % reflects the brief startup window, not real waste.
 - **GitHub auth**: Push access to `rhpds/parsec` requires a GitHub account with write permissions. Use `gh auth status` to check the current profile.
-- **ClusterRoleBindings**: Each environment has its own CRB (`parsec-oauth-dev`, `parsec-oauth-prod`) defined in the overlay, not the base. This avoids conflicts when applying overlays independently.
+- **ClusterRoleBindings**: Each environment has its own CRB (`parsec-oauth-dev`, `parsec-oauth-prod`) created by the Ansible playbook with the environment name suffix.
 - **EC2 pricing cache**: Uses a static JSON file from the public AWS Pricing Bulk API instead of calling `pricing:GetProducts` at runtime. No AWS credentials needed. Refreshed weekly by an OpenShift CronJob on a shared RWX CephFS PVC (`ocs-storagecluster-cephfs`). The per-region bulk files are ~250-400MB each so the CronJob needs 3Gi memory limit for JSON parsing.
 - **Azure billing cache**: Uses a SQLite database (`data/azure_billing.db`, ~1.3GB) on the same shared PVC (3Gi). Refreshed daily by the `parsec-azure-billing-refresh` CronJob. Incremental processing via ETag comparison — only changed/new blobs are re-ingested. WAL mode enables concurrent reads during writes. Falls back to live blob streaming if the cache is missing. For initial deployment, copy the DB from dev to prod via `oc rsync` to avoid a full re-ingest.
-- **CloudTrail Lake**: The event data store ID is environment-specific — set via local config overrides (`config.local.yaml` or `deploy.sh`), not hardcoded. The tool substitutes `cloudtrail_events` in FROM clauses with the real ID so the agent never sees it. CloudTrail Lake charges per byte scanned — always include `eventTime >` filters. `responseElements` often comes as Java-style `{key=value}` instead of JSON; the tool auto-parses these.
+- **CloudTrail Lake**: The event data store ID is environment-specific — set via local config overrides (`config.local.yaml`) or Ansible vars (`playbooks/vars/<env>.yml`), not hardcoded. The tool substitutes `cloudtrail_events` in FROM clauses with the real ID so the agent never sees it. CloudTrail Lake charges per byte scanned — always include `eventTime >` filters. `responseElements` often comes as Java-style `{key=value}` instead of JSON; the tool auto-parses these.
 - **Alert investigation API**: The `/api/alert/investigate` endpoint uses API key auth (`X-API-Key` header), not OAuth. The OAuth proxy's `-skip-auth-regex` bypasses SSO for `/api/alert/` paths. The agent loop is non-streaming (synchronous JSON response, not SSE) and excludes `render_chart`/`generate_report` tools. Claude calls `submit_alert_verdict` to submit its verdict; if it never calls the tool, the endpoint defaults to `should_alert=true`. Investigation typically takes 30-90 seconds depending on how many tools Claude calls.
 - **Cross-account access**: Uses STS AssumeRole into `OrganizationAccountAccessRole` with an inline session policy for read-only enforcement. The session policy (not the IAM role) is the security boundary — even though `OrganizationAccountAccessRole` has admin, the inline policy limits to `ec2:Describe*`, `iam:List*/Get*`, etc. Credentials are cached per account ID at module level. The `marketplace-agreement` SDK client calls IAM actions under the `aws-marketplace:` prefix, not `marketplace-agreement:` — the session policy must use `aws-marketplace:DescribeAgreement` explicitly.
 

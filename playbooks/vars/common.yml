@@ -1,0 +1,34 @@
+---
+# Common variables shared across all environments.
+# This file is committed to git — do not put secrets here.
+
+app_name: parsec
+github_repo: rhpds/parsec
+kustomize_base: "{{ playbook_dir }}/../openshift"
+
+# Management service account (lives in parsec-dev, manages all envs)
+mgmt_service_account:
+  name: parsec-admin
+  namespace: parsec-dev
+
+# Anthropic / Vertex AI
+vertex_project_id: "itpc-gcp-product-all-claude"
+vertex_region: "us-east5"
+
+# Provision DB
+provision_db_port: "54327"
+
+# AWS
+aws_region: "us-east-1"
+
+# OAuth
+oauth_allowed_groups: "rhpds-admins,parsec-local-users"
+
+# Babylon clusters (rhdp-readonly SA kubeconfigs)
+babylon_kubeconfigs:
+  east: "{{ lookup('env', 'HOME') }}/secrets/babylon-readonly/east.kubeconfig"
+  west: "{{ lookup('env', 'HOME') }}/secrets/babylon-readonly/west.kubeconfig"
+  partner0: "{{ lookup('env', 'HOME') }}/secrets/babylon-readonly/partner0.kubeconfig"
+  partner1: "{{ lookup('env', 'HOME') }}/secrets/babylon-readonly/partner1.kubeconfig"
+  integration: "{{ lookup('env', 'HOME') }}/secrets/babylon-readonly/integration.kubeconfig"
+  babydev: "{{ lookup('env', 'HOME') }}/secrets/babylon-readonly/babydev.kubeconfig"

@@ -1,0 +1,49 @@
+---
+# Wait for the latest build to complete. Does not trigger new builds.
+
+- name: Get latest build
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig }}"
+    context: "{{ kubeconfig_context | default(omit) }}"
+    api_version: build.openshift.io/v1
+    kind: Build
+    namespace: "{{ target_namespace }}"
+    label_selectors:
+      - buildconfig=parsec
+  register: _builds
+
+- name: Find newest build
+  ansible.builtin.set_fact:
+    _latest_build: >-
+      {{ _builds.resources
+         | sort(attribute='metadata.creationTimestamp')
+         | last }}
+  when: _builds.resources | length > 0
+
+- name: Wait for build to complete
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig }}"
+    context: "{{ kubeconfig_context | default(omit) }}"
+    api_version: build.openshift.io/v1
+    kind: Build
+    name: "{{ _latest_build.metadata.name }}"
+    namespace: "{{ target_namespace }}"
+  register: _build_status
+  until: _build_status.resources[0].status.phase in ['Complete', 'Failed', 'Error', 'Cancelled']
+  retries: 60
+  delay: 10
+  when: _latest_build is defined and _latest_build.status.phase not in ['Complete', 'Failed', 'Error', 'Cancelled']
+
+- name: Fail if build failed
+  ansible.builtin.fail:
+    msg: "Build {{ _latest_build.metadata.name }} failed: {{ _latest_build.status.phase }}"
+  when:
+    - _latest_build is defined
+    - _build_status is defined
+    - _build_status.resources | default([]) | length > 0
+    - _build_status.resources[0].status.phase in ['Failed', 'Error', 'Cancelled']
+
+- name: Display build status
+  ansible.builtin.debug:
+    msg: "Build {{ _latest_build.metadata.name }}: {{ (_build_status.resources[0].status.phase) | default(_latest_build.status.phase) }}"
+  when: _latest_build is defined

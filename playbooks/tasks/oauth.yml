@@ -1,0 +1,61 @@
+---
+# Create OAuth secrets and OAuthClient. Idempotent — only creates if not exists.
+
+- name: Check if oauth-proxy-secret exists
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig }}"
+    context: "{{ kubeconfig_context | default(omit) }}"
+    api_version: v1
+    kind: Secret
+    name: oauth-proxy-secret
+    namespace: "{{ target_namespace }}"
+  register: _oauth_secret
+
+- name: Create OAuth resources (only if not exists)
+  when: _oauth_secret.resources | length == 0
+  block:
+    - name: Set OAuth client name
+      ansible.builtin.set_fact:
+        _oauth_client_name: "parsec-oauth-client{{ '-dev' if env == 'dev' else '' }}"
+
+    - name: Generate OAuth secrets
+      ansible.builtin.set_fact:
+        _oauth_client_secret: "{{ lookup('password', '/dev/null length=25 chars=ascii_letters,digits') }}"
+        _oauth_cookie_secret: "{{ lookup('password', '/dev/null length=32 chars=hexdigits') | lower }}"
+
+    - name: Create oauth-proxy-secret
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig }}"
+        context: "{{ kubeconfig_context | default(omit) }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: oauth-proxy-secret
+            namespace: "{{ target_namespace }}"
+          type: Opaque
+          stringData:
+            client-id: "{{ _oauth_client_name }}"
+            client-secret: "{{ _oauth_client_secret }}"
+            cookie-secret: "{{ _oauth_cookie_secret }}"
+            session_secret: "{{ _oauth_cookie_secret }}"
+
+    - name: Create OAuthClient
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig }}"
+        context: "{{ kubeconfig_context | default(omit) }}"
+        state: present
+        definition:
+          apiVersion: oauth.openshift.io/v1
+          kind: OAuthClient
+          metadata:
+            name: "{{ _oauth_client_name }}"
+            labels:
+              app: parsec
+              component: oauth
+          secret: "{{ _oauth_client_secret }}"
+          redirectURIs:
+            - "https://{{ target_namespace }}.{{ cluster_domain }}/oauth/callback"
+          grantMethod: auto
+          respondWithChallenges: false

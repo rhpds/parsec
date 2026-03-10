@@ -1,0 +1,54 @@
+---
+# Development environment variables.
+# Copy this file to dev.yml and fill in your values.
+# dev.yml is gitignored and will not be committed.
+
+env: dev
+target_namespace: parsec-dev
+kubeconfig: ~/secrets/your-cluster.kubeconfig
+kubeconfig_context: parsec-dev
+cluster_domain: apps.your-cluster.example.com
+git_branch: main
+oauth_enabled: true
+
+# Vertex AI service account key
+vertex_credentials_path: ~/path/to/vertex-sa.json
+
+# GCP billing service account key (separate from Vertex)
+gcp_billing_credentials_path: ~/path/to/gcp-billing-sa.json
+
+# Provision DB (read-only user)
+provision_db_host: your-db-host.example.com
+provision_db_name: your_database
+provision_db_user: your_readonly_user
+provision_db_password: your_password
+
+# AWS (cost-monitor IAM user)
+aws_access_key_id: AKIA...
+aws_secret_access_key: your-secret-key
+
+# Azure (billing CSV access)
+azure_client_id: your-client-id
+azure_client_secret: your-client-secret
+azure_tenant_id: your-tenant-id
+azure_storage_account: your-storage-account
+azure_container: your-container
+
+# GCP (BigQuery billing)
+gcp_project_id: your-project-id
+gcp_billing_dataset: your_billing_dataset
+gcp_billing_account_id: XXXXXX-XXXXXX-XXXXXX
+
+# CloudTrail Lake event data store ID
+# Find via: aws cloudtrail list-event-data-stores --region us-east-1
+cloudtrail_event_data_store_id: your-event-data-store-uuid
+
+# Cost monitor dashboard URL (for linking in chat responses)
+cost_monitor_dashboard_url: https://cost-monitor.apps.your-cluster.example.com
+
+# Alert investigation API key
+# Generate with: python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+alert_api_key: ""
+
+# Allowed users (comma-separated emails, empty = group-based auth only)
+allowed_users: ""

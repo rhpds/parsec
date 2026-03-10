@@ -11,6 +11,11 @@ config/.secrets.yaml
 .secrets.baseline
 
 openshift/local/
+playbooks/vars/dev.yml
+playbooks/vars/prod.yml
+
+logs/
+.server.pid
 
 .venv/
 venv/
