@@ -331,6 +331,7 @@ aws iam delete-policy-version --policy-arn <POLICY_ARN> --version-id <OLDEST_NON
 - **AWS GPU**: g4dn.*, g5.*, g6.*, p3.*, p4.*, p5.*
 - **AWS large/metal**: *.metal, *.96xlarge, *.48xlarge, *.24xlarge
 - **AWS Lightsail**: Large Windows instances, especially ap-south-1
+- **AWS instance names**: "Web-Created-VM" — strong indicator of compromised account (attacker-created via console)
 - **Azure GPU**: NC, ND, NV series (meterSubCategory)
 - **Suspicious**: External users with 50+ provisions in 90 days
 - **Disposable emails**: Multiple accounts from temporary email domains

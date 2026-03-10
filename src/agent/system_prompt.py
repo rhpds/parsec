@@ -50,10 +50,11 @@ cannot determine the answer, default to should_alert=true (safe fallback).
 
 **bulk_ec2_launches** — Multiple EC2 instances launched in a short window.
 1. Check instance types — are they GPU instances (g4dn, g5, g6, p3, p4, p5)?
-2. Look up the account and current owner
-3. Check provision history — is this a fresh provision (instances launching as part of setup)?
-4. If instances match the catalog item's expected workload, likely benign
-5. GPU instances launched by external users are high priority
+2. Check instance names — "Web-Created-VM" is a strong indicator of a compromised account
+3. Look up the account and current owner
+4. Check provision history — is this a fresh provision (instances launching as part of setup)?
+5. If instances match the catalog item's expected workload, likely benign
+6. GPU instances launched by external users are high priority
 
 **quota_increase** — A service quota increase was requested.
 1. Check which quota was increased and by how much

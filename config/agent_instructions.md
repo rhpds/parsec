@@ -515,6 +515,8 @@ When investigating potential abuse, look for these patterns:
 auto-detects these and reports a separate `gpu_cost` field per subscription)
 **GCP GPU VMs:** A2 series (A100 GPUs), G2 series (L4 GPUs), N1 with GPU accelerators.
 Look for Compute Engine costs with GPU-related SKUs in the GCP billing data.
+**Suspicious instance names:** Instances named "Web-Created-VM" are a strong indicator
+of compromised accounts (instances created through the AWS console by attackers).
 **Suspicious activity:** External users with 50+ provisions in 90 days
 **Disposable emails:** Multiple accounts from temporary email domains
 
