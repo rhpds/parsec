@@ -34,6 +34,7 @@ from src.tools.aws_capacity_manager import query_aws_capacity_manager
 from src.tools.aws_costs import query_aws_costs
 from src.tools.aws_pricing import query_aws_pricing
 from src.tools.azure_costs import query_azure_costs
+from src.tools.babylon import query_babylon_catalog
 from src.tools.cloudtrail import query_cloudtrail
 from src.tools.cost_monitor import query_cost_monitor
 from src.tools.gcp_costs import query_gcp_costs
@@ -50,6 +51,7 @@ os.makedirs(REPORTS_DIR, exist_ok=True)
 _SLOW_TOOL_LABELS = {
     "query_cloudtrail": "Scanning CloudTrail Lake",
     "query_aws_account": "Querying AWS account",
+    "query_babylon_catalog": "Querying Babylon cluster",
 }
 
 
@@ -149,6 +151,20 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
             product_name=tool_input.get("product_name"),
             vendor_name=tool_input.get("vendor_name"),
             max_results=tool_input.get("max_results", 100),
+        )
+
+    elif tool_name == "query_babylon_catalog":
+        return await query_babylon_catalog(
+            action=tool_input["action"],
+            cluster=tool_input.get("cluster", ""),
+            name=tool_input.get("name", ""),
+            search=tool_input.get("search", ""),
+            namespace=tool_input.get("namespace", ""),
+            sandbox_comment=tool_input.get("sandbox_comment", ""),
+            env_type=tool_input.get("env_type", ""),
+            account_id=tool_input.get("account_id", ""),
+            guid=tool_input.get("guid", ""),
+            max_results=tool_input.get("max_results", 50),
         )
 
     elif tool_name == "render_chart":

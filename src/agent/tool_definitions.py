@@ -505,6 +505,112 @@ TOOLS = [
         },
     },
     {
+        "name": "query_babylon_catalog",
+        "description": (
+            "Query a Babylon cluster for catalog item definitions, active deployments, "
+            "and provisioning state. Use this to find what cloud resources a catalog item "
+            "SHOULD deploy (instance types, counts, cloud provider) and what IS currently "
+            "deployed (ResourceClaims with sandbox account mappings). Requires a configured "
+            "Babylon cluster connection."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "search_catalog",
+                        "get_component",
+                        "list_deployments",
+                        "get_deployment",
+                        "list_anarchy_subjects",
+                        "list_resource_pools",
+                        "list_workshops",
+                        "list_multiworkshops",
+                        "list_anarchy_actions",
+                    ],
+                    "description": (
+                        "Action to perform. "
+                        "search_catalog: Search CatalogItems by name/keyword across "
+                        "babylon-catalog-* namespaces. "
+                        "get_component: Get an AgnosticVComponent definition with extracted "
+                        "expected instance types. "
+                        "list_deployments: List active ResourceClaims (requires namespace). "
+                        "get_deployment: Get a specific ResourceClaim with full details. "
+                        "list_anarchy_subjects: List AnarchySubjects (active provisions) "
+                        "across anarchy namespaces. "
+                        "list_resource_pools: List ResourcePools from poolboy namespace "
+                        "(pool sizing and pre-provisioned resources). "
+                        "list_workshops: List Workshops in a namespace (attendee counts, "
+                        "provision status). Requires namespace. "
+                        "list_multiworkshops: List MultiWorkshops in a namespace (multi-asset "
+                        "events with multiple workshop assets, seat counts, dates). "
+                        "Requires namespace. Always check this alongside list_workshops. "
+                        "list_anarchy_actions: List AnarchyActions (provision/start/stop/"
+                        "destroy lifecycle events). Filter by guid or search."
+                    ),
+                },
+                "cluster": {
+                    "type": "string",
+                    "description": (
+                        "Babylon cluster name to query. If empty, resolved from "
+                        "sandbox_comment or uses the default cluster. "
+                        "Use query_aws_account_db to get the comment field first."
+                    ),
+                },
+                "name": {
+                    "type": "string",
+                    "description": (
+                        "Resource name. For get_component: AgnosticVComponent name "
+                        "(e.g. 'clusterplatform.ocp4-aws.prod'). For get_deployment: "
+                        "ResourceClaim name."
+                    ),
+                },
+                "search": {
+                    "type": "string",
+                    "description": (
+                        "Search term for search/list actions (case-insensitive "
+                        "contains match against name, display name, keywords)."
+                    ),
+                },
+                "namespace": {
+                    "type": "string",
+                    "description": (
+                        "Namespace for scoped queries. Required for list_deployments "
+                        "and get_deployment (e.g. 'clusterplatform-prod')."
+                    ),
+                },
+                "sandbox_comment": {
+                    "type": "string",
+                    "description": (
+                        "Sandbox DynamoDB comment field value. Used to resolve which "
+                        "Babylon cluster manages this sandbox. Get this from "
+                        "query_aws_account_db."
+                    ),
+                },
+                "env_type": {
+                    "type": "string",
+                    "description": "Filter catalog search by env_type.",
+                },
+                "account_id": {
+                    "type": "string",
+                    "description": "Filter deployments by sandbox AWS account ID.",
+                },
+                "guid": {
+                    "type": "string",
+                    "description": (
+                        "Filter deployments or AnarchySubjects by provision GUID " "(e.g. 'qglkb')."
+                    ),
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum results to return. Default: 50.",
+                },
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "render_chart",
         "description": (
             "Render a chart in the chat UI. Use this to visualize cost data, "

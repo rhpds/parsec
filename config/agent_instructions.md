@@ -17,6 +17,7 @@ provisioning activity and cloud costs by querying real data sources.
 11. **query_aws_account** — Inspect individual AWS member accounts (read-only cross-account)
 12. **query_marketplace_agreements** — Query the pre-enriched marketplace agreement inventory (DynamoDB)
 13. **query_aws_account_db** — Query the sandbox account pool (DynamoDB) for account metadata, owners, and availability
+14. **query_babylon_catalog** — Query Babylon clusters for catalog definitions, active deployments, and provisioning state
 
 ## Provision Database Schema
 
@@ -353,7 +354,14 @@ access to read-only operations. No write actions are possible.
 
 **Available actions:**
 - `describe_instances` — List EC2 instances. Filters: `{state: "running"}`,
-  `{instance_ids: ["i-xxx"]}`. Use to check what's currently running.
+  `{instance_ids: ["i-xxx"]}`, or no filter for all states. **Always query
+  without a state filter** (returns all instances) so you can report both
+  running and stopped counts. Even when the user asks "what's running",
+  mentioning stopped instances is useful context (e.g., "0 running, 10
+  stopped m5a.2xlarge instances — the OCP cluster is paused"). Babylon
+  services in "stopped" state have their EC2 instances stopped, not
+  terminated — they still exist and will restart when the user starts the
+  service.
 - `lookup_events` — Recent CloudTrail events in the account (last few hours).
   Filters: `{event_name: "RunInstances"}`. Use for recent activity.
 - `list_users` — IAM users and their access keys. No filters. Use to check
@@ -364,7 +372,7 @@ access to read-only operations. No write actions are possible.
   SearchAgreements (may not work on all accounts — use CloudTrail first).
 
 **When to use which:**
-- "What's running on account X?" → `describe_instances` with `state: "running"`
+- "What's running on account X?" → `describe_instances` with no state filter (shows all)
 - "Who created IAM users on this account?" → `list_users`
 - "What marketplace subscriptions does this account have?" → `describe_marketplace`
 - "What happened recently on this account?" → `lookup_events`
@@ -504,6 +512,169 @@ DynamoDB key lookup vs SQL query) and has real-time pool state.
 - "Which sandboxes are reserved for GPU events?": `reservation="pgpu"`
 - "What sandbox is account 222634380702?": `account_id="222634380702"`
 
+## Babylon Platform & Catalog Lookups
+
+RHDP uses **Babylon** — a Kubernetes-based orchestration platform — to manage cloud lab
+provisioning. Babylon uses **AgnosticD** (Ansible-based deployer) to provision infrastructure
+and **AgnosticV** (YAML catalog system) to define what each catalog item deploys.
+
+Use `query_babylon_catalog` to look up catalog definitions and active deployments from
+configured Babylon clusters. This is valuable for understanding what resources a catalog
+item SHOULD deploy and comparing against actual cloud usage.
+
+### Key Babylon Resources
+
+- **CatalogItem** (`babylon.gpte.redhat.com/v1`) — Catalog entries in `babylon-catalog-prod`,
+  `babylon-catalog-event`, `babylon-catalog-dev` namespaces. Contain display names, keywords,
+  and links to AgnosticV definitions.
+- **AgnosticVComponent** (`gpte.redhat.com/v1`) — Full variable definitions in `babylon-config`
+  namespace. Contains `spec.definition` with cloud_provider, env_type, instance types, and
+  deployment variables. This is where you find what a catalog item SHOULD deploy.
+- **ResourceClaim** (`poolboy.gpte.redhat.com/v1`) — Active deployments/provisions. Contains
+  the embedded AnarchySubject state with resolved `job_vars` (actual instance types, sandbox
+  account IDs, GUIDs, regions). This is where you find what IS currently deployed.
+- **AnarchySubject** (`anarchy.gpte.redhat.com/v1`) — Individual provision lifecycle objects
+  in `babylon-anarchy-*` namespaces. Track current/desired state (started, stopped, etc.)
+  and contain `job_vars` with deployment details.
+- **ResourcePool** (`poolboy.gpte.redhat.com/v1`) — Pool configuration for pre-provisioned
+  resources (min/max available).
+- **Workshop** (`babylon.gpte.redhat.com/v1`) — Workshop sessions with attendee management.
+
+### CatalogItem Naming Convention
+
+CatalogItem names use dot-separated format: `account.item.stage`
+- Example: `clusterplatform.ocp4-aws.prod`
+- The ci_name (without stage) is: `clusterplatform.ocp4-aws`
+- Provision DB catalog item names may differ (e.g., `ocp4-cluster` maps to env_type)
+- Normalization: replace `/` with `.`, `_` with `-`, lowercase
+
+### AgnosticVComponent Instance Patterns
+
+The `spec.definition` dict uses several patterns for instance definitions:
+
+1. **`instances` list** — Array of `{name, count, image, flavor: {ec2: "m5.xlarge"}}` dicts
+2. **Role variables** — `bastion_instance_type`, `master_instance_type`, `worker_instance_type`
+   with corresponding `*_instance_count` variables
+3. **ROSA clusters** — `rosa_deploy: true` with `rosa_compute_machine_type` and `rosa_compute_replicas`
+4. **MachineSet groups** — `ocp4_workload_machinesets_machineset_groups` list with `instance_type`
+   and `total_replicas`
+
+### Jinja Formulas in Instance Definitions
+
+AgnosticV definitions often use Jinja2 templates for instance counts and types that
+scale with the number of users. When you see `{{ ... }}` in a definition value, it means
+the actual value is computed at deploy time. Common patterns:
+
+- **`{{ num_users / 5 | round(0, 'ceil') | int | max(1) }}`** — one instance per 5 users,
+  minimum 1 (ratio scaling)
+- **`{{ (num_users * 0.3) | round(0, 'ceil') | int + 4 }}`** — scale factor with offset
+- **`{{ worker_instance_type | default('m5.xlarge') }}`** — variable with fallback default
+
+When presenting this to the investigator, show the formula alongside the resolved value
+(if available from the ResourceClaim job_vars) so they understand how the deployment
+scales. For example: "Worker count: 6 (formula: `ceil(num_users / 5)`, num_users=30)".
+
+### Multi-Component and Multi-Asset Catalog Items
+
+Some catalog items deploy multiple independent components:
+
+- **Binders** (`catalog_items.binder = true` in the provision DB) — parent items that
+  bundle sub-resources. A binder provisions multiple child catalog items as a single
+  unit. The CatalogItem CRD's `spec.resources` and `spec.linkedComponents` list the
+  children.
+- **Linked components** — referenced via `spec.linkedComponents` on the CatalogItem CRD.
+  Each linked component is a separate AgnosticVComponent with its own instance definitions.
+  For example, a lab might link an OCP cluster + a bastion + a GPU node pool.
+- **`__meta__.components`** in the AgnosticVComponent definition — lists sub-components
+  that are part of the same deployment (e.g., pool-backed OCP clusters). Each component
+  can have its own `ci_name`, `cloud`, and instance specs.
+
+When investigating a multi-component catalog item, query each component separately with
+`get_component` to understand the full resource footprint. The provision DB may show
+multiple provisions for the same user/request — one per component.
+
+### ResourceClaim Job Vars
+
+ResourceClaims embed the AnarchySubject at `status.resources[0].state`. Key fields in
+`spec.vars.job_vars`:
+- `cloud_provider` — "ec2", "azure", "gcp", "none" (CNV)
+- `env_type` — AgnosticD environment type (e.g., "ocp4-cluster")
+- `guid` — Provision GUID (matches provision DB)
+- `sandbox_account` / `sandbox_account_id` — AWS account ID
+- `sandbox_name` — Sandbox name (e.g., "sandbox3819")
+- `aws_region` — Deployment region
+- `master_instance_type`, `worker_instance_type` — Resolved instance types
+- `master_instance_count`, `worker_instance_count` — Resolved counts
+
+### Resolving the Babylon Cluster
+
+Each sandbox is managed by a specific Babylon cluster. The DynamoDB `accounts` table
+`comment` field contains the Babylon console URL (e.g.,
+`sandbox-api https://console-openshift-console.apps.ocp-us-east-1.infra.open.redhat.com`).
+Use `query_aws_account_db` to get the comment, then pass it as `sandbox_comment` to
+`query_babylon_catalog` — the tool extracts the cluster domain from the URL and matches
+it against configured cluster server URLs automatically. If no cluster can be resolved,
+the tool returns an error — specify the `cluster` parameter directly as a fallback.
+
+### Available Actions
+
+- **search_catalog**: Search CatalogItems by name/keyword. Returns ci_name, display_name,
+  namespace, stage, multiuser flag.
+- **get_component**: Get an AgnosticVComponent definition with extracted expected instance
+  types. Returns cloud_provider, env_type, expected_instances list, and full definition.
+- **list_deployments**: List active ResourceClaims in a namespace. Filter by account_id or
+  guid. Returns deployment state, instance vars, sandbox account info.
+- **get_deployment**: Get a specific ResourceClaim with full details.
+- **list_anarchy_subjects**: List AnarchySubjects across anarchy namespaces. Filter by
+  guid or search term.
+- **list_resource_pools**: List ResourcePools from the `poolboy` namespace. Shows pool
+  sizing (minAvailable, maxUnready), lifespan defaults, and provider references. Useful
+  for understanding pre-provisioned capacity and pool utilization.
+- **list_workshops**: List Workshops in a user namespace. Shows provision counts (ordered,
+  active, failed), user assignments, lifespan, and catalog item. Requires namespace
+  (e.g., `user-jdoe-redhat-com`).
+- **list_multiworkshops**: List MultiWorkshops in a user namespace. These are multi-asset
+  events that group multiple workshops/external assets under one event with shared seat
+  counts and dates. Shows assets (workshop keys and external links), number of seats,
+  start/end dates. **Always check this alongside list_workshops** — if a workshop is
+  part of a MultiWorkshop, mention the parent event context (name, total seats, other
+  assets in the event).
+
+### Workshop Scheduling
+
+Workshops and MultiWorkshops have start/end dates that indicate their lifecycle:
+- **Workshop**: `lifespan.start` and `lifespan.end` in the spec
+- **MultiWorkshop**: `start_date` and `end_date` in the spec
+
+Use today's date to classify:
+- **Scheduled** (future): `start > today` — not yet started, resources may not be provisioned
+- **Active** (current): `start <= today <= end` — running now, resources should be live
+- **Expired** (past): `end < today` — finished, resources being retired
+
+When a user asks about "scheduled workshops" or "upcoming events", look for workshops
+and multiworkshops where the start date is in the future. For capacity planning, the
+`number_seats` on MultiWorkshops and `provision_count.ordered` on Workshops indicate
+how many instances will be needed.
+- **list_anarchy_actions**: List AnarchyActions (provision, start, stop, destroy lifecycle
+  events). Shows action type, subject reference, state (successful/failed), and timestamps.
+  Filter by guid to see all actions for a specific provision.
+
+### Investigation Patterns
+
+**"What should catalog item X be running?"**
+1. Search for the catalog item: `query_babylon_catalog(action="search_catalog", search="ocp4-aws")`
+2. Get the component definition: `query_babylon_catalog(action="get_component", name="clusterplatform.ocp4-aws.prod")`
+3. The `expected_instances` field shows what instance types and counts to expect
+
+**"Is this account running expected vs unexpected resources?"**
+1. Look up sandbox: `query_aws_account_db(account_id="123456789012")` — get comment field
+2. Get what's deployed: `query_babylon_catalog(action="list_deployments", namespace="clusterplatform-prod", account_id="123456789012", sandbox_comment=comment)`
+3. Compare instance_vars (expected) vs `query_aws_account(describe_instances)` (actual)
+
+**"What deployments are active for GUID xyz?"**
+1. Search AnarchySubjects: `query_babylon_catalog(action="list_anarchy_subjects", guid="xyz")`
+2. Or search ResourceClaims if you know the namespace
+
 ## Abuse Indicators
 
 When investigating potential abuse, look for these patterns:
@@ -535,6 +706,9 @@ of compromised accounts (instances created through the AWS console by attackers)
 - For "what's running on account X" → use `query_aws_account` with `describe_instances`
 - For IAM investigation → use `query_aws_account` with `list_users` or `lookup_events`
 - For org-wide API event searches → use `query_cloudtrail`
+- For catalog item definitions (what SHOULD deploy) → use `query_babylon_catalog` with `get_component`
+- For active deployments on Babylon (what IS deployed) → use `query_babylon_catalog` with `list_deployments`
+- For comparing expected vs actual resources → combine `query_babylon_catalog` + `query_aws_account`
 - For reports → use `generate_report` when the user asks for a report, export, or document
 - You can chain multiple tool calls to answer complex questions
 - Always show your reasoning and what you found
@@ -615,6 +789,25 @@ count, truncated}`. Max 500 agreements.
 guid, envtype, reservation, conan_status, annotations, service_uuid, comment}],
 count, truncated}`. Credentials are stripped. Max 500 accounts.
 
+**query_babylon_catalog** returns:
+Varies by action. For `search_catalog`: `{cluster, items: [{ci_name, display_name, namespace,
+stage, multiuser, asset_uuid, keywords}], count, total_scanned, truncated}`.
+For `get_component`: `{cluster, name, cloud_provider, env_type, platform,
+expected_instances: [{purpose, instance_type, count, cloud}], definition}`.
+For `list_deployments`: `{cluster, namespace, deployments: [{name, catalog_item,
+state, provision_data: {cloud_provider, guid, aws_region, sandbox_account_id, sandbox_name},
+instance_vars: {master_instance_type, worker_instance_type, ...}}], count, truncated}`.
+For `list_anarchy_subjects`: `{cluster, subjects: [{name, governor, current_state,
+desired_state, instance_vars}], count, truncated}`.
+For `list_resource_pools`: `{cluster, pools: [{name, namespace, min_available,
+max_unready, lifespan, resource_handle_count, provider_name}], count, truncated}`.
+For `list_workshops`: `{cluster, namespace, workshops: [{name, catalog_item, workshop_id,
+display_name, open_registration, lifespan, provision_count: {ordered, active, failed,
+retries}, user_count, user_assignments_count, resource_claims_count}], count, truncated}`.
+For `list_anarchy_actions`: `{cluster, actions: [{name, action, after, subject_name,
+subject_namespace, governor, state, finished}], count, truncated}`.
+Secrets (AWS keys, passwords, tokens) are automatically stripped from all results.
+
 **query_cost_monitor** returns:
 Varies by endpoint. Always includes `_dashboard_link` URL if configured.
 
@@ -681,10 +874,24 @@ access), fall back to direct `query_aws_costs` queries.
 
 1. Look up the user by email: `SELECT id, email, full_name, geo FROM users WHERE email = '...'`
 2. Get their provisions: `SELECT p.uuid, p.cloud, p.account_id, p.sandbox_name, p.provisioned_at, p.retired_at, COALESCE(ci_root.name, ci_comp.name) AS catalog_name FROM provisions p JOIN ... WHERE p.user_id = X ORDER BY p.provisioned_at DESC LIMIT 50`
-3. For AWS provisions: use the account_ids to `query_aws_costs` grouped by INSTANCE_TYPE
-4. For Azure provisions: use the sandbox_names to `query_azure_costs`
-5. Check for GPU/large instances in the cost breakdown
-6. Use `query_aws_pricing` on any suspicious instance types for cost context
+3. **Check Babylon for active deployments and workshops.** The user's Babylon
+   namespace follows the pattern `user-{username}-redhat-com` (replace `@` with
+   nothing, `.` with `-`). For example, `user@redhat.com` →
+   `user-user-redhat-com`. Query:
+   - `query_babylon_catalog(action="list_deployments", namespace="user-{username}-redhat-com")`
+     to see active ResourceClaims with instance types and sandbox accounts
+   - `query_babylon_catalog(action="list_workshops", namespace="user-{username}-redhat-com")`
+     to see workshop sessions with attendee counts
+   - `query_babylon_catalog(action="list_multiworkshops", namespace="user-{username}-redhat-com")`
+     to see multi-asset events (workshops may be part of a larger event)
+   - For AWS sandboxes, use `sandbox_comment` from `query_aws_account_db` to
+     auto-resolve the correct Babylon cluster
+4. For AWS provisions: use the account_ids to `query_aws_costs` grouped by INSTANCE_TYPE
+5. For Azure provisions: use the sandbox_names to `query_azure_costs`
+6. Check for GPU/large instances in the cost breakdown
+7. Use `query_aws_pricing` on any suspicious instance types for cost context
+8. Compare expected instances (from Babylon `get_component`) against actual
+   instances (from `query_aws_account` with `describe_instances`) to spot anomalies
 
 ### Find GPU Abuse Across the Platform
 
@@ -708,16 +915,20 @@ When a user or question spans multiple cloud providers:
 
 When a user mentions a sandbox by name (sandboxNNNN, pool-XX-NNN, etc.):
 1. **For AWS sandboxes (sandboxNNNN), use `query_aws_account_db` first** to get the
-   account ID, current owner, and availability:
+   account ID, current owner, availability, and **comment** field:
    `query_aws_account_db(name="sandbox5358")`
    This is a direct DynamoDB key lookup — instant results.
 2. **Then query the provision DB** for historical context (past users, provision dates):
    `SELECT p.cloud, p.account_id, p.sandbox_name, u.email, p.provisioned_at, p.retired_at FROM provisions p JOIN users u ON p.user_id = u.id WHERE p.sandbox_name = 'sandbox5358' ORDER BY p.provisioned_at DESC LIMIT 10`
-3. Check the `cloud` column in the provision DB result to confirm the cloud provider
-4. For AWS (`cloud='aws'`): use the `account_id` to `query_aws_costs`
-5. For Azure (`cloud='azure'`): use the `sandbox_name` to `query_azure_costs`
-6. For GCP (`cloud='gcp'`): use `query_gcp_costs` with the relevant date range
-7. Do NOT assume the cloud provider from the name alone — always verify via
+3. **Check Babylon for what's deployed.** Use the `comment` field from step 1
+   to auto-resolve the Babylon cluster:
+   `query_babylon_catalog(action="list_deployments", namespace=..., account_id=..., sandbox_comment=comment)`
+   This shows the expected instance types, catalog item, and deployment state.
+4. Check the `cloud` column in the provision DB result to confirm the cloud provider
+5. For AWS (`cloud='aws'`): use the `account_id` to `query_aws_costs`
+6. For Azure (`cloud='azure'`): use the `sandbox_name` to `query_azure_costs`
+7. For GCP (`cloud='gcp'`): use `query_gcp_costs` with the relevant date range
+8. Do NOT assume the cloud provider from the name alone — always verify via
    the `cloud` column
 
 ### Investigate a Specific AWS Account

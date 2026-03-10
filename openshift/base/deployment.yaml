@@ -110,6 +110,18 @@ spec:
                   name: parsec-allowed-users
                   key: allowed-users
                   optional: true
+            - name: PARSEC_BABYLON__CLUSTERS__EAST__KUBECONFIG
+              value: "/app/babylon/east.kubeconfig"
+            - name: PARSEC_BABYLON__CLUSTERS__WEST__KUBECONFIG
+              value: "/app/babylon/west.kubeconfig"
+            - name: PARSEC_BABYLON__CLUSTERS__PARTNER0__KUBECONFIG
+              value: "/app/babylon/partner0.kubeconfig"
+            - name: PARSEC_BABYLON__CLUSTERS__PARTNER1__KUBECONFIG
+              value: "/app/babylon/partner1.kubeconfig"
+            - name: PARSEC_BABYLON__CLUSTERS__INTEGRATION__KUBECONFIG
+              value: "/app/babylon/integration.kubeconfig"
+            - name: PARSEC_BABYLON__CLUSTERS__BABYDEV__KUBECONFIG
+              value: "/app/babylon/babydev.kubeconfig"
           envFrom:
             - secretRef:
                 name: parsec-cloud-credentials
@@ -129,6 +141,9 @@ spec:
               mountPath: /app/reports
             - name: pricing-cache
               mountPath: /app/data
+            - name: babylon-kubeconfigs
+              mountPath: /app/babylon
+              readOnly: true
           resources:
             requests:
               memory: "256Mi"
@@ -183,3 +198,8 @@ spec:
         - name: pricing-cache
           persistentVolumeClaim:
             claimName: parsec-pricing-cache
+        - name: babylon-kubeconfigs
+          secret:
+            secretName: babylon-kubeconfigs
+            defaultMode: 0400
+            optional: true

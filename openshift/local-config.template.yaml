@@ -58,6 +58,16 @@ secrets:
     github_secret: "generate-secure-webhook-secret"
     generic_secret: "generate-secure-webhook-secret"
 
+  # Babylon cluster kubeconfigs (rhdp-readonly SA tokens)
+  # Generated via: oc create token rhdp-readonly -n gpte --duration=8760h
+  babylon_kubeconfigs:
+    east: "/path/to/babylon-readonly/east.kubeconfig"
+    west: "/path/to/babylon-readonly/west.kubeconfig"
+    partner0: "/path/to/babylon-readonly/partner0.kubeconfig"
+    partner1: "/path/to/babylon-readonly/partner1.kubeconfig"
+    integration: "/path/to/babylon-readonly/integration.kubeconfig"
+    babydev: "/path/to/babylon-readonly/babydev.kubeconfig"
+
 # Alert investigation API key (used by cloud-slack-alerts Lambda)
 # Generate with: python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 alert_api_key: ""

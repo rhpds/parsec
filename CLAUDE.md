@@ -1,6 +1,6 @@
 # Parsec
 
-Natural language cloud cost investigation tool. Investigators type questions in a chat UI, and Claude queries the provision DB, AWS Cost Explorer, Azure billing CSVs, GCP BigQuery, CloudTrail Lake, and individual AWS member accounts to answer them.
+Natural language cloud cost investigation tool. Investigators type questions in a chat UI, and Claude queries the provision DB, AWS Cost Explorer, Azure billing CSVs, GCP BigQuery, CloudTrail Lake, individual AWS member accounts, and Babylon clusters to answer them.
 
 ## Project Structure
 
@@ -23,11 +23,13 @@ src/
     marketplace_agreements.py # DynamoDB marketplace agreement inventory queries
     azure_costs.py           # Azure billing queries (SQLite cache + live CSV fallback)
     gcp_costs.py             # GCP BigQuery billing queries
+    babylon.py               # Babylon cluster catalog/deployment queries
   connections/
     postgres.py              # asyncpg pool
     aws.py                   # boto3 session
     azure.py                 # Azure blob client
     gcp.py                   # BigQuery client
+    babylon.py               # Babylon cluster K8s API clients (httpx-based)
   routes/
     query.py                 # GET /api/auth/check, POST /api/query (SSE), GET /api/reports/{filename}
     alert.py                 # POST /api/alert/investigate (alert investigation API for cloud-slack-alerts)
@@ -259,6 +261,55 @@ python3 scripts/refresh_azure_billing.py --init-only  # Create schema only
 ```bash
 oc create job azure-billing-manual --from=cronjob/parsec-azure-billing-refresh -n parsec-dev
 ```
+
+## Babylon Cluster Integration
+
+The `query_babylon_catalog` tool queries Babylon clusters for catalog item definitions, active deployments, and provisioning state. This enables comparing expected vs actual cloud resources during cost investigation.
+
+### How It Works
+
+- Uses httpx-based K8s API clients (no `kubernetes` Python library dependency)
+- Parses kubeconfig files for server URL, bearer token, and TLS settings
+- Queries CatalogItem, AgnosticVComponent, ResourceClaim, and AnarchySubject CRDs
+- Automatically strips secrets (AWS keys, passwords, tokens) from all results
+- Multiple Babylon clusters supported (east, west, partner0, etc.)
+- Cluster resolution from sandbox DynamoDB `comment` field via configurable pattern matching
+
+### Babylon CRDs Used
+
+| CRD | API Group | Namespace | Purpose |
+|---|---|---|---|
+| CatalogItem | `babylon.gpte.redhat.com/v1` | `babylon-catalog-{prod,event,dev}` | Catalog entries with display names |
+| AgnosticVComponent | `gpte.redhat.com/v1` | `babylon-config` | Full variable definitions (expected instances) |
+| ResourceClaim | `poolboy.gpte.redhat.com/v1` | Per-user namespaces | Active deployments with resolved instance types |
+| AnarchySubject | `anarchy.gpte.redhat.com/v1` | `babylon-anarchy-*` | Provision lifecycle and state |
+
+### Configuration
+
+```yaml
+# config.local.yaml
+babylon:
+  clusters:
+    east:
+      kubeconfig: "~/secrets/babylon-prod.kubeconfig"
+    west:
+      kubeconfig: "~/secrets/babylon-west.kubeconfig"
+  default_cluster: "east"
+  comment_cluster_map:
+    partner0: "partner0"
+```
+
+For OpenShift deployment, store kubeconfigs as secrets and mount them into the pod.
+
+### Instance Definition Extraction
+
+The tool extracts expected instances from AgnosticVComponent `spec.definition` using several patterns:
+- **instances list**: `{name, count, flavor: {ec2: "m5.xlarge"}}` dicts
+- **Role variables**: `bastion_instance_type`, `master_instance_type`, etc. with `*_instance_count`
+- **ROSA clusters**: `rosa_deploy: true` with `rosa_compute_machine_type`
+- **MachineSet groups**: `ocp4_workload_machinesets_machineset_groups` with `instance_type` and `total_replicas`
+
+Note: Some catalog items define instance types only in AgnosticD defaults (not in the CRD). For these, the `expected_instances` list may be empty, but the ResourceClaim `job_vars` will have the resolved values.
 
 ## CloudTrail Lake
 

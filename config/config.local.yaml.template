@@ -47,6 +47,22 @@ cloudtrail:
   # Find via: aws cloudtrail list-event-data-stores --region us-east-1
   event_data_store_id: "your-event-data-store-uuid"
 
+babylon:
+  # Babylon cluster connections for catalog/deployment lookups.
+  # Local dev: load kubeconfigs directly from ~/secrets.
+  # Cluster resolution is automatic — the sandbox DynamoDB comment field
+  # contains the Babylon console URL, which is matched against cluster
+  # server URLs from the kubeconfigs.
+  clusters:
+    east:
+      kubeconfig: "~/secrets/babylon-prod.kubeconfig"
+    west:
+      kubeconfig: "~/secrets/babylon-west.kubeconfig"
+    # partner0:
+    #   kubeconfig: "~/secrets/babylon-partner0.kubeconfig"
+    # integration:
+    #   kubeconfig: "~/secrets/babylon-integration.kubeconfig"
+
 # Alert investigation API key (used by cloud-slack-alerts Lambda)
 # Generate with: python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 alert_api_key: ""

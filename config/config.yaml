@@ -45,6 +45,19 @@ cost_monitor:
 cloudtrail:
   event_data_store_id: ""
 
+babylon:
+  # Babylon cluster connections for catalog/deployment lookups.
+  # Each cluster needs a kubeconfig (token-based or client certificate).
+  # Set kubeconfig paths in config.local.yaml.
+  # Cluster resolution: the sandbox DynamoDB comment field contains the
+  # Babylon console URL — the tool extracts the cluster domain and matches
+  # it against configured cluster server URLs automatically.
+  clusters: {}
+  #   east:
+  #     kubeconfig: "~/secrets/babylon-prod.kubeconfig"
+  #   west:
+  #     kubeconfig: "~/secrets/babylon-west.kubeconfig"
+
 alert_api_key: ""
 
 auth:

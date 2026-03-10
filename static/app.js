@@ -57,12 +57,16 @@ marked.setOptions({ renderer: renderer });
     const textEl = document.createElement("div");
     textEl.className = "md-text";
     textEl.innerHTML = marked.parse(
-        "**Hi, I'm Parsec** — a natural language investigation assistant for RHDP cloud costs.\n\n" +
+        "**Hi, I'm Parsec** — a natural language investigation assistant for RHDP cloud costs and provisioning.\n\n" +
         "I can help you with things like:\n" +
+        "- \"What services does user@redhat.com have?\"\n" +
+        "- \"What instances should clusterplatform.ocp4-aws.prod be running?\"\n" +
+        "- \"What's deployed on sandbox1234?\"\n" +
         "- \"Who are the top GPU users this week?\"\n" +
         "- \"How much did we spend on AWS yesterday?\"\n" +
         "- \"Show me external users with 50+ provisions since December\"\n" +
-        "- \"How much does a g4dn.xlarge cost?\"\n" +
+        "- \"What workshops are running in user-user-redhat-com?\"\n" +
+        "- \"Show me the active workshops on the east Babylon cluster\"\n" +
         "- \"Chart the top 10 AWS services by cost this month\"\n" +
         "- \"Generate a report of suspicious activity\"\n\n" +
         "I'm still learning! My instructions are in " +

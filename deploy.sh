@@ -206,6 +206,25 @@ create_secrets() {
 
     echo -e "${GREEN}parsec-allowed-users configmap created${NC}"
 
+    # Babylon cluster kubeconfigs
+    echo -e "${BLUE}Creating babylon-kubeconfigs secret...${NC}"
+    local babylon_args=()
+    for cluster_name in east west partner0 partner1 integration babydev; do
+        local kc_path=$(yq eval ".secrets.babylon_kubeconfigs.${cluster_name} // \"\"" "$CONFIG_FILE")
+        if [ -n "$kc_path" ] && [ -f "$kc_path" ]; then
+            babylon_args+=(--from-file="${cluster_name}.kubeconfig=${kc_path}")
+            echo -e "${GREEN}  ${cluster_name}: ${kc_path}${NC}"
+        fi
+    done
+    if [ ${#babylon_args[@]} -gt 0 ]; then
+        oc create secret generic babylon-kubeconfigs -n ${NAMESPACE} \
+            "${babylon_args[@]}" \
+            --dry-run=client -o yaml | oc apply -f -
+        echo -e "${GREEN}babylon-kubeconfigs created (${#babylon_args[@]} clusters)${NC}"
+    else
+        echo -e "${YELLOW}No babylon kubeconfigs found — skipping${NC}"
+    fi
+
     echo -e "${GREEN}All secrets created${NC}"
 }
 

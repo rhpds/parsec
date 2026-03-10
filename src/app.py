@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from src.config import get_config
 from src.connections.aws import init_aws
 from src.connections.azure import init_azure
+from src.connections.babylon import init_babylon
 from src.connections.gcp import init_gcp
 from src.connections.postgres import close_pool, init_pool
 from src.routes.alert import router as alert_router
@@ -37,7 +38,12 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.exception("%s initialization failed — will retry on first query", name)
 
-    for name, init_fn in [("AWS", init_aws), ("Azure", init_azure), ("GCP", init_gcp)]:
+    for name, init_fn in [
+        ("AWS", init_aws),
+        ("Azure", init_azure),
+        ("GCP", init_gcp),
+        ("Babylon", init_babylon),
+    ]:
         try:
             init_fn()
             logger.info("%s initialized", name)
