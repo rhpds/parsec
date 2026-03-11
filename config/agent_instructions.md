@@ -391,6 +391,12 @@ access to read-only operations. No write actions are possible.
 - "What marketplace subscriptions does this account have?" → `describe_marketplace`
 - "What happened recently on this account?" → `lookup_events`
 
+**IMPORTANT — Prefer `lookup_events` over `query_cloudtrail` for single-account
+investigations.** CloudTrail Lake scans the entire org's data regardless of account
+filters (1+ GB even for a single account over 24 hours), making it slow. `lookup_events`
+queries the account's own CloudTrail directly and returns in seconds. Only use
+`query_cloudtrail` when you need to search across multiple accounts or the entire org.
+
 **Security:** The session policy enforces read-only access. Even if the
 OrganizationAccountAccessRole has admin permissions, the inline policy limits
 actions to `ec2:Describe*`, `iam:List*/Get*`, `cloudtrail:LookupEvents`,
@@ -719,7 +725,8 @@ of compromised accounts (instances created through the AWS console by attackers)
 - For marketplace event history (who accepted, when) → use `query_cloudtrail` to find `AcceptAgreementRequest` events, then `query_aws_account` with `describe_marketplace` for live details
 - For "what's running on account X" → use `query_aws_account` with `describe_instances`
 - For IAM investigation → use `query_aws_account` with `list_users` or `lookup_events`
-- For org-wide API event searches → use `query_cloudtrail`
+- For recent activity on a specific account → use `query_aws_account` with `lookup_events` (fast, seconds) — NOT `query_cloudtrail` (slow, scans entire org)
+- For org-wide API event searches across all accounts → use `query_cloudtrail`
 - For catalog item definitions (what SHOULD deploy) → use `query_babylon_catalog` with `get_component`
 - For active deployments on Babylon (what IS deployed) → use `query_babylon_catalog` with `list_deployments`
 - For comparing expected vs actual resources → combine `query_babylon_catalog` + `query_aws_account`
