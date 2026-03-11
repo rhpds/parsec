@@ -20,8 +20,15 @@ document.getElementById("new-chat-btn").addEventListener("click", function() {
     conversationHistory = [];
     localStorage.removeItem("parsec_history");
     messagesEl.innerHTML = "";
-    // Re-trigger the welcome message by reloading
     window.location.reload();
+});
+
+// Theme toggle — preference is applied in <head> to prevent flash
+document.getElementById("theme-toggle-btn").addEventListener("click", function() {
+    var current = document.documentElement.getAttribute("data-theme");
+    var next = current === "light" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem("parsec_theme", next);
 });
 
 // Open all markdown links in new tabs

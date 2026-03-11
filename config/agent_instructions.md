@@ -816,19 +816,11 @@ Varies by endpoint. Always includes `_dashboard_link` URL if configured.
 - **AWS Cost Explorer**: end_date is EXCLUSIVE. The tool auto-adjusts if start == end,
   so you can pass the same date for both and it will work. Today's data may have up to
   24h delay; if you get empty results for today, try the last 7 days instead.
-- **IMPORTANT — Cost data lags 24 hours.** Cost Explorer does NOT have data for
-  today's activity. If someone launched 50 GPU instances this morning, Cost Explorer
-  will still show $0. You MUST estimate costs from CloudTrail when investigating
-  recent activity (last 24h):
-  1. Query CloudTrail Lake for `RunInstances` events to find what was actually launched
-  2. Extract instance types, regions, launch times, and instance counts
-  3. Use `query_aws_pricing` to look up on-demand hourly rates per instance type/region
-  4. Estimate runtime (launch time to termination/provision retirement) and calculate:
-     `count × hours × hourly_rate` for each instance type
-  5. Present totals as "**Estimated cost** (Cost Explorer data not yet available)"
-  **Always do this when the incident is within the last 24 hours.** A report showing
-  $0.02 for an account that launched dozens of GPU instances is obviously wrong — the
-  investigator needs real cost estimates, not stale billing data.
+- **CRITICAL — Cost Explorer lags 24 hours.** When investigating activity from
+  today, do NOT query `query_aws_costs` for EC2 charges — it will return yesterday's
+  data (a few cents of DNS/S3) and completely miss the real compute costs. Skip
+  Cost Explorer entirely and estimate from CloudTrail + pricing instead.
+  See the investigation playbooks below for the step-by-step approach.
 - **Azure**: dates are inclusive. Today's billing data may be delayed.
 - **GCP BigQuery**: dates are inclusive. Uses America/Los_Angeles timezone to match
   GCP Console date attribution. Data is typically available within a few hours.
@@ -938,14 +930,18 @@ When a user mentions a sandbox by name (sandboxNNNN, pool-XX-NNN, etc.):
    `query_babylon_catalog(action="list_deployments", namespace=..., account_id=..., sandbox_comment=comment)`
    This shows the expected instance types, catalog item, and deployment state.
 4. Check the `cloud` column in the provision DB result to confirm the cloud provider
-5. For AWS (`cloud='aws'`): use the `account_id` to `query_aws_costs`.
-   **If the incident is within the last 24 hours and Cost Explorer returns $0 or
-   near-zero**, the data is stale — you MUST estimate costs from CloudTrail instead:
-   - Query CloudTrail Lake for `RunInstances` WHERE `recipientAccountId = '<id>'`
-   - Extract instance types, counts, regions, and launch times
-   - Look up pricing with `query_aws_pricing` for each instance type/region
-   - Calculate: `instances × hours_running × hourly_rate` per type
-   - Present as "**Estimated cost** (billing data not yet available)"
+5. For AWS (`cloud='aws'`): determine the cost approach based on timing:
+   - **If the activity is from today (within the last 24 hours):** Do NOT use
+     `query_aws_costs` — it will only show stale data from yesterday ($0.02 for
+     DNS/S3) and completely miss today's EC2 charges. Instead, estimate costs
+     directly from CloudTrail:
+     1. `query_cloudtrail` for `RunInstances` WHERE `recipientAccountId = '<id>'`
+        and `eventTime` within the incident window
+     2. Extract instance types, counts, regions, and launch times from the results
+     3. `query_aws_pricing` to look up on-demand hourly rates per instance type/region
+     4. Calculate: `instances x hours_running x hourly_rate` per type
+     5. Present as "**Estimated cost** (billing data not yet available)"
+   - **If the activity is older than 24 hours:** use `query_aws_costs` normally.
 6. For Azure (`cloud='azure'`): use the `sandbox_name` to `query_azure_costs`
 7. For GCP (`cloud='gcp'`): use `query_gcp_costs` with the relevant date range
 8. Do NOT assume the cloud provider from the name alone — always verify via
@@ -961,9 +957,10 @@ When a user mentions a sandbox by name (sandboxNNNN, pool-XX-NNN, etc.):
    Tell the user: "That account is not visible to me — it's not in our provisioning
    records or our AWS organization." Do NOT continue querying AWS Cost Explorer,
    CloudTrail, pricing, or other tools for an account that doesn't exist in our systems.
-3. Query costs for the account: `query_aws_costs(account_ids=['123456789012'], group_by=INSTANCE_TYPE)`.
-   **If the activity is within the last 24 hours, Cost Explorer will NOT have the data yet.**
-   In that case, estimate costs from CloudTrail Lake `RunInstances` events + `query_aws_pricing`.
+3. **If the activity is from today (within 24 hours):** skip `query_aws_costs` — it
+   won't have today's EC2 charges. Estimate costs from CloudTrail `RunInstances`
+   events + `query_aws_pricing` instead (see sandbox playbook step 5 for details).
+   **If older than 24 hours:** use `query_aws_costs(account_ids=[...], group_by=INSTANCE_TYPE)`.
 4. Or use cost-monitor drilldown: `query_cost_monitor(drilldown, selected_key='123456789012', drilldown_type=account_services)`
 5. Look for GPU/large instances and attribute costs to users based on provision windows
 
