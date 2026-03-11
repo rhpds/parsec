@@ -938,7 +938,14 @@ When a user mentions a sandbox by name (sandboxNNNN, pool-XX-NNN, etc.):
    `query_babylon_catalog(action="list_deployments", namespace=..., account_id=..., sandbox_comment=comment)`
    This shows the expected instance types, catalog item, and deployment state.
 4. Check the `cloud` column in the provision DB result to confirm the cloud provider
-5. For AWS (`cloud='aws'`): use the `account_id` to `query_aws_costs`
+5. For AWS (`cloud='aws'`): use the `account_id` to `query_aws_costs`.
+   **If the incident is within the last 24 hours and Cost Explorer returns $0 or
+   near-zero**, the data is stale — you MUST estimate costs from CloudTrail instead:
+   - Query CloudTrail Lake for `RunInstances` WHERE `recipientAccountId = '<id>'`
+   - Extract instance types, counts, regions, and launch times
+   - Look up pricing with `query_aws_pricing` for each instance type/region
+   - Calculate: `instances × hours_running × hourly_rate` per type
+   - Present as "**Estimated cost** (billing data not yet available)"
 6. For Azure (`cloud='azure'`): use the `sandbox_name` to `query_azure_costs`
 7. For GCP (`cloud='gcp'`): use `query_gcp_costs` with the relevant date range
 8. Do NOT assume the cloud provider from the name alone — always verify via
@@ -954,7 +961,9 @@ When a user mentions a sandbox by name (sandboxNNNN, pool-XX-NNN, etc.):
    Tell the user: "That account is not visible to me — it's not in our provisioning
    records or our AWS organization." Do NOT continue querying AWS Cost Explorer,
    CloudTrail, pricing, or other tools for an account that doesn't exist in our systems.
-3. Query costs for the account: `query_aws_costs(account_ids=['123456789012'], group_by=INSTANCE_TYPE)`
+3. Query costs for the account: `query_aws_costs(account_ids=['123456789012'], group_by=INSTANCE_TYPE)`.
+   **If the activity is within the last 24 hours, Cost Explorer will NOT have the data yet.**
+   In that case, estimate costs from CloudTrail Lake `RunInstances` events + `query_aws_pricing`.
 4. Or use cost-monitor drilldown: `query_cost_monitor(drilldown, selected_key='123456789012', drilldown_type=account_services)`
 5. Look for GPU/large instances and attribute costs to users based on provision windows
 
