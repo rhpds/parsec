@@ -294,8 +294,14 @@ entire organization — you can find who did what, when, and in which account.
 
 **SQL syntax:** Write standard SQL using `FROM cloudtrail_events` — the tool
 automatically substitutes the real event data store ID. Always include a
-`WHERE eventTime >` filter to limit bytes scanned (CloudTrail Lake charges
-per byte).
+`WHERE eventTime >` filter to limit data scanned.
+
+**IMPORTANT — Default to 24 hours:** If the user does not specify a timeframe,
+default to the past 24 hours and tell them: "I'm checking the last 24 hours —
+let me know if you need a wider range." Start narrow and only widen if the user
+asks or if results come back empty. Never query more than 7 days unless the user
+explicitly requests it. Broad queries (30+ days) take several minutes and can
+time out.
 
 **Key columns:**
 - `eventID` — unique event identifier
@@ -320,27 +326,35 @@ per byte).
 
 **Example queries:**
 ```sql
--- Find marketplace subscriptions in the last 90 days
+-- Find marketplace subscriptions in the last 24 hours
 SELECT eventTime, recipientAccountId, userIdentity.arn, requestParameters
 FROM cloudtrail_events
 WHERE eventName = 'AcceptAgreementRequest'
-  AND eventTime > '2025-12-01'
+  AND eventTime > '2026-03-10'
 ORDER BY eventTime DESC
 
--- Find who launched GPU instances recently
+-- Find who launched instances on a specific account in the last 24 hours
 SELECT eventTime, recipientAccountId, userIdentity.arn,
        requestParameters
 FROM cloudtrail_events
 WHERE eventName = 'RunInstances'
-  AND eventTime > '2026-02-01'
+  AND recipientAccountId = '123456789012'
+  AND eventTime > '2026-03-10'
 ORDER BY eventTime DESC
 ```
 
-**Performance:** CloudTrail Lake queries scan large volumes of data (100-400 MB
-typical) and take 30-90 seconds to complete. **Always warn the user before
-running a CloudTrail query** that it will take a moment. Use tight `eventTime`
-filters to minimize scan time and cost. The UI shows a live elapsed timer
-while the query runs.
+**Query optimization tips:**
+- Always filter by `recipientAccountId` when investigating a specific account —
+  this dramatically reduces scan time vs scanning the entire org.
+- Combine `eventName` + `recipientAccountId` + tight `eventTime` for fastest results.
+- If you need broader history, widen incrementally (24h → 7d → 30d) and tell the
+  user each time.
+
+**Performance:** CloudTrail Lake queries scan large volumes of data. Narrow
+queries (24h, single account) complete in 10-30 seconds. Broad queries (30+ days,
+all accounts) can take several minutes or time out. **Always warn the user before
+running a CloudTrail query** that it will take a moment. The UI shows a live
+elapsed timer while the query runs.
 
 **Important:** `requestParameters` and `responseElements` may contain data in
 either JSON format or Java-style `{key=value, nested={inner=val}}` format.
@@ -969,12 +983,13 @@ When a user mentions a sandbox by name (sandboxNNNN, pool-XX-NNN, etc.):
 When a user asks about AWS Marketplace subscriptions (e.g. "when was Ansible ordered",
 "who subscribed to X", "what marketplace items do we have"):
 
-1. **Search CloudTrail Lake** for `AcceptAgreementRequest` events:
+1. **Search CloudTrail Lake** for `AcceptAgreementRequest` events (start with 24h,
+   widen if needed):
    ```sql
    SELECT eventTime, recipientAccountId, userIdentity.arn, requestParameters
    FROM cloudtrail_events
    WHERE eventName = 'AcceptAgreementRequest'
-     AND eventTime > '2025-01-01'
+     AND eventTime > '<24h-ago>'
    ORDER BY eventTime DESC
    ```
 2. **Cross-reference** `recipientAccountId` with the provision DB to find which RHDP
