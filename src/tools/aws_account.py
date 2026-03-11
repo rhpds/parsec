@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 import boto3
@@ -45,6 +46,8 @@ _SESSION_POLICY = json.dumps(
 
 # Cache assumed credentials per account to avoid redundant STS calls
 _assumed_creds: dict[str, dict | None] = {}
+_failed_assume_times: dict[str, datetime] = {}
+_FAILED_CACHE_TTL_SECONDS = 300
 
 
 def _check_account_status(session: boto3.Session, account_id: str) -> tuple[str | None, str | None]:
@@ -61,7 +64,22 @@ def _check_account_status(session: boto3.Session, account_id: str) -> tuple[str 
 def _get_assumed_creds(session: boto3.Session, account_id: str) -> dict | None:
     """Assume role in member account with read-only session policy. Cached."""
     if account_id in _assumed_creds:
-        return _assumed_creds[account_id]
+        cached = _assumed_creds[account_id]
+        if cached is not None:
+            expiry = cached.get("Expiration")
+            if expiry and expiry.astimezone(UTC) < datetime.now(UTC):
+                del _assumed_creds[account_id]
+            else:
+                return cached
+        else:
+            failed_at = _failed_assume_times.get(account_id)
+            if (
+                failed_at
+                and (datetime.now(UTC) - failed_at).total_seconds() < _FAILED_CACHE_TTL_SECONDS
+            ):
+                return cached
+            del _assumed_creds[account_id]
+            _failed_assume_times.pop(account_id, None)
 
     sts = session.client("sts", region_name="us-east-1")
     role_arn = f"arn:aws:iam::{account_id}:role/{ASSUME_ROLE_NAME}"
@@ -77,6 +95,7 @@ def _get_assumed_creds(session: boto3.Session, account_id: str) -> dict | None:
     except ClientError as e:
         logger.warning("Cannot assume role in %s: %s", account_id, e)
         _assumed_creds[account_id] = None
+        _failed_assume_times[account_id] = datetime.now(UTC)
         return None
 
 
