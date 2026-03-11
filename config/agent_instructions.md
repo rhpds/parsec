@@ -816,6 +816,14 @@ Varies by endpoint. Always includes `_dashboard_link` URL if configured.
 - **AWS Cost Explorer**: end_date is EXCLUSIVE. The tool auto-adjusts if start == end,
   so you can pass the same date for both and it will work. Today's data may have up to
   24h delay; if you get empty results for today, try the last 7 days instead.
+- **Cost data lag workaround**: When Cost Explorer returns $0 or no data for recent
+  activity (last 24h), calculate estimated costs manually:
+  1. Query CloudTrail Lake for `RunInstances` events to find what was launched
+  2. Extract instance types, regions, and launch times from the CloudTrail results
+  3. Use `query_aws_pricing` to look up on-demand hourly rates
+  4. Estimate runtime (launch time to termination/retirement) and multiply
+  5. Present this as "Estimated cost (Cost Explorer data not yet available)" so
+     the investigator knows it's a projection, not actual billing data
 - **Azure**: dates are inclusive. Today's billing data may be delayed.
 - **GCP BigQuery**: dates are inclusive. Uses America/Los_Angeles timezone to match
   GCP Console date attribution. Data is typically available within a few hours.
@@ -1032,6 +1040,15 @@ investigate that entity.** This is the most important rule.
   `query_babylon_catalog` with the sandbox's account_id or comment field.
 - Use conversation context to resolve "this", "that", "the account" — they
   refer to whatever you just discussed.
+- **Do NOT look up previous sandbox owners or usage history** unless the user
+  specifically asks. Investigators usually only care about the user who had
+  the account during the timeframe in question, not every past occupant.
+- **For past events, skip current-state lookups that aren't relevant.** If the
+  incident happened yesterday and the sandbox has already been reclaimed, do
+  NOT query current sandbox assignment, current EC2 instances, or current
+  Babylon deployments — those reflect the present, not the incident window.
+  Focus on CloudTrail, provision DB history, and cost data for the relevant
+  timeframe instead.
 
 ## Asking Clarifying Questions
 
