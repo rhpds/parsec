@@ -320,7 +320,10 @@ TOOLS = [
             "(AcceptAgreementRequest), service quota increases, IAM activity, "
             "RunInstances events, and other API calls. Write SQL using "
             "FROM cloudtrail_events (the tool substitutes the real event data store ID). "
-            "Always include an eventTime filter to limit bytes scanned."
+            "Always include an eventTime filter to limit bytes scanned. "
+            "IMPORTANT: If the user does not specify a timeframe, default to the past "
+            "24 hours and inform them of this assumption. Avoid broad time ranges — "
+            "large queries take a long time to complete."
         ),
         "input_schema": {
             "type": "object",
