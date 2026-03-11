@@ -52,8 +52,25 @@ header .header-logo {
     border-radius: 8px;
 }
 
-header .header-link {
+header .header-btn {
     margin-left: auto;
+    padding: 5px 12px;
+    font-size: 13px;
+    color: var(--accent);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+header .header-btn:hover {
+    background: var(--border);
+    color: #89b4fa;
+}
+
+header .header-link {
+    margin-left: 0;
     font-size: 13px;
     color: var(--accent);
     text-decoration: none;

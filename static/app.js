@@ -15,6 +15,15 @@ try {
     // Ignore corrupt data
 }
 
+// New Chat button — clears conversation and reloads
+document.getElementById("new-chat-btn").addEventListener("click", function() {
+    conversationHistory = [];
+    localStorage.removeItem("parsec_history");
+    messagesEl.innerHTML = "";
+    // Re-trigger the welcome message by reloading
+    window.location.reload();
+});
+
 // Open all markdown links in new tabs
 var renderer = new marked.Renderer();
 renderer.link = function(href, title, text) {
