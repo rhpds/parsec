@@ -816,14 +816,19 @@ Varies by endpoint. Always includes `_dashboard_link` URL if configured.
 - **AWS Cost Explorer**: end_date is EXCLUSIVE. The tool auto-adjusts if start == end,
   so you can pass the same date for both and it will work. Today's data may have up to
   24h delay; if you get empty results for today, try the last 7 days instead.
-- **Cost data lag workaround**: When Cost Explorer returns $0 or no data for recent
-  activity (last 24h), calculate estimated costs manually:
-  1. Query CloudTrail Lake for `RunInstances` events to find what was launched
-  2. Extract instance types, regions, and launch times from the CloudTrail results
-  3. Use `query_aws_pricing` to look up on-demand hourly rates
-  4. Estimate runtime (launch time to termination/retirement) and multiply
-  5. Present this as "Estimated cost (Cost Explorer data not yet available)" so
-     the investigator knows it's a projection, not actual billing data
+- **IMPORTANT — Cost data lags 24 hours.** Cost Explorer does NOT have data for
+  today's activity. If someone launched 50 GPU instances this morning, Cost Explorer
+  will still show $0. You MUST estimate costs from CloudTrail when investigating
+  recent activity (last 24h):
+  1. Query CloudTrail Lake for `RunInstances` events to find what was actually launched
+  2. Extract instance types, regions, launch times, and instance counts
+  3. Use `query_aws_pricing` to look up on-demand hourly rates per instance type/region
+  4. Estimate runtime (launch time to termination/provision retirement) and calculate:
+     `count × hours × hourly_rate` for each instance type
+  5. Present totals as "**Estimated cost** (Cost Explorer data not yet available)"
+  **Always do this when the incident is within the last 24 hours.** A report showing
+  $0.02 for an account that launched dozens of GPU instances is obviously wrong — the
+  investigator needs real cost estimates, not stale billing data.
 - **Azure**: dates are inclusive. Today's billing data may be delayed.
 - **GCP BigQuery**: dates are inclusive. Uses America/Los_Angeles timezone to match
   GCP Console date attribution. Data is typically available within a few hours.
