@@ -221,6 +221,9 @@ spec:
             - secretRef:
                 name: parsec-cloud-credentials
                 optional: true
+            - secretRef:
+                name: parsec-aap2-credentials
+                optional: true
           volumeMounts:
             - name: config
               mountPath: /app/config/config.yaml

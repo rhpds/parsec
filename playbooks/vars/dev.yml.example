@@ -50,5 +50,19 @@ cost_monitor_dashboard_url: https://cost-monitor.apps.your-cluster.example.com
 # Generate with: python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 alert_api_key: ""
 
+# AAP2 controller credentials (monitor read-only user)
+aap2_east_url: https://aap2-prod-us-east-2.aap.infra.demo.redhat.com
+aap2_east_username: monitor
+aap2_east_password: ""
+aap2_west_url: https://aap2-prod-us-west-2.aap.infra.demo.redhat.com
+aap2_west_username: monitor
+aap2_west_password: ""
+aap2_event0_url: https://event0.apps.ocpv-infra01.dal12.infra.demo.redhat.com
+aap2_event0_username: monitor
+aap2_event0_password: ""
+aap2_partner0_url: https://aap2-partner0-prod-us-east-2.aap.infra.partner.demo.redhat.com
+aap2_partner0_username: monitor
+aap2_partner0_password: ""
+
 # Allowed users (comma-separated emails, empty = group-based auth only)
 allowed_users: ""
