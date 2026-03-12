@@ -713,6 +713,17 @@ and retry patterns.
    to see the error details
 6. Report findings: what task failed, on which host, with what error message
 
+**If the AnarchySubject is gone** (already cleaned up after retirement), skip
+further Babylon searches and go directly to AAP2:
+- Use `query_aap2(action="find_jobs", template_name="<guid>")` to find the job
+  by GUID in the job name
+- Or search by catalog item name: `template_name="osp-on-ocp-cnv"`
+
+**When investigating failed provisions, always check AAP2.** The failure root cause
+(which Ansible task failed, what error message) is in AAP2 job events, not in
+Babylon. Don't spend tool calls searching multiple Babylon clusters for AnarchyActions
+— go straight to AAP2 once you have a GUID or catalog item name.
+
 ### Available Controllers
 
 - east: aap2-prod-us-east-2 (primary production)
@@ -953,6 +964,9 @@ access), fall back to direct `query_aws_costs` queries.
 7. Use `query_aws_pricing` on any suspicious instance types for cost context
 8. Compare expected instances (from Babylon `get_component`) against actual
    instances (from `query_aws_account` with `describe_instances`) to spot anomalies
+9. **For failed provisions**: use `query_aap2` to get the AAP2 job details and
+   failed events. Find the job via AnarchySubject `towerJobs` or by searching
+   `query_aap2(action="find_jobs", template_name="<guid>")`.
 
 ### Find GPU Abuse Across the Platform
 
