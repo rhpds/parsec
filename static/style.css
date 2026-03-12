@@ -812,6 +812,19 @@ footer {
     font-weight: 500;
 }
 
+.shared-banner .header-btn {
+    background: var(--accent);
+    color: var(--bg);
+    border: 1px solid var(--accent);
+    font-weight: 600;
+}
+
+.shared-banner .header-btn:hover {
+    background: var(--accent-bright);
+    border-color: var(--accent-bright);
+    color: var(--bg);
+}
+
 /* ─── Share modal ─── */
 .modal-overlay {
     position: fixed;
