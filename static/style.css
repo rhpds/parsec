@@ -624,6 +624,12 @@ footer {
     transform: none;
 }
 
+#query-form #new-chat-btn {
+    padding: 11px 16px;
+    font-size: 12px;
+    border-radius: var(--radius-md);
+}
+
 /* ─── Error ─── */
 .error-message {
     color: var(--error);
