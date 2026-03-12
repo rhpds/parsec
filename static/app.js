@@ -847,76 +847,83 @@ function renderSharedMessages(messages) {
             var el = addMessage("assistant", "");
             var contentEl = el.querySelector(".content");
             var content = msg.content;
+            var restoredText = "";
+
             if (typeof content === "string") {
+                restoredText = content;
                 var textDiv = document.createElement("div");
                 textDiv.className = "md-text";
                 textDiv.innerHTML = marked.parse(content);
                 contentEl.appendChild(textDiv);
-                return;
-            }
-            if (!Array.isArray(content)) return;
+            } else if (Array.isArray(content)) {
+                var toolCalls = [];
+                var textParts = [];
 
-            var toolCalls = [];
-            var textParts = [];
-
-            content.forEach(function(block) {
-                if (block.type === "text" && block.text) {
-                    textParts.push(block.text);
-                } else if (block.type === "tool_use") {
-                    toolCalls.push(block);
-                }
-            });
-
-            // Show tool calls as collapsed summary
-            if (toolCalls.length > 0) {
-                var wrapper = document.createElement("details");
-                wrapper.className = "tool-calls-summary";
-                var summary = document.createElement("summary");
-                summary.textContent = toolCalls.length === 1
-                    ? "1 query executed"
-                    : toolCalls.length + " queries executed";
-                wrapper.appendChild(summary);
-                var inner = document.createElement("div");
-                inner.className = "tool-calls-inner";
-                toolCalls.forEach(function(tc) {
-                    var tcEl = document.createElement("details");
-                    tcEl.className = "tool-call";
-                    var tcSummary = document.createElement("summary");
-                    var nameSpan = document.createElement("span");
-                    nameSpan.className = "tool-name";
-                    nameSpan.textContent = tc.name || "tool";
-                    var statusSpan = document.createElement("span");
-                    statusSpan.className = "tool-status done";
-                    statusSpan.textContent = "done";
-                    tcSummary.appendChild(nameSpan);
-                    tcSummary.appendChild(statusSpan);
-                    tcEl.appendChild(tcSummary);
-                    var body = document.createElement("div");
-                    body.className = "tool-body";
-                    body.textContent = JSON.stringify(tc.input || {}, null, 2);
-                    tcEl.appendChild(body);
-                    inner.appendChild(tcEl);
+                content.forEach(function(block) {
+                    if (block.type === "text" && block.text) {
+                        textParts.push(block.text);
+                    } else if (block.type === "tool_use") {
+                        toolCalls.push(block);
+                    }
                 });
-                wrapper.appendChild(inner);
-                contentEl.appendChild(wrapper);
+
+                // Show tool calls as collapsed summary
+                if (toolCalls.length > 0) {
+                    var wrapper = document.createElement("details");
+                    wrapper.className = "tool-calls-summary";
+                    var tcSummaryEl = document.createElement("summary");
+                    tcSummaryEl.textContent = toolCalls.length === 1
+                        ? "1 query executed"
+                        : toolCalls.length + " queries executed";
+                    wrapper.appendChild(tcSummaryEl);
+                    var inner = document.createElement("div");
+                    inner.className = "tool-calls-inner";
+                    toolCalls.forEach(function(tc) {
+                        var tcEl = document.createElement("details");
+                        tcEl.className = "tool-call";
+                        var tcSummary = document.createElement("summary");
+                        var nameSpan = document.createElement("span");
+                        nameSpan.className = "tool-name";
+                        nameSpan.textContent = tc.name || "tool";
+                        var statusSpan = document.createElement("span");
+                        statusSpan.className = "tool-status done";
+                        statusSpan.textContent = "done";
+                        tcSummary.appendChild(nameSpan);
+                        tcSummary.appendChild(statusSpan);
+                        tcEl.appendChild(tcSummary);
+                        var body = document.createElement("div");
+                        body.className = "tool-body";
+                        body.textContent = JSON.stringify(tc.input || {}, null, 2);
+                        tcEl.appendChild(body);
+                        inner.appendChild(tcEl);
+                    });
+                    wrapper.appendChild(inner);
+                    contentEl.appendChild(wrapper);
+                }
+
+                // Render text content
+                restoredText = textParts.join("");
+                if (restoredText.trim()) {
+                    var sharedChoices = extractChoices(restoredText);
+                    var renderText = sharedChoices ? sharedChoices.cleanedText : restoredText;
+                    var textDiv2 = document.createElement("div");
+                    textDiv2.className = "md-text";
+                    textDiv2.innerHTML = marked.parse(renderText);  // safe: server-generated markdown
+                    contentEl.appendChild(textDiv2);
+                    if (sharedChoices) {
+                        var choicesSummary = document.createElement("div");
+                        choicesSummary.className = "choices-summary";
+                        choicesSummary.textContent = "Choices were presented";
+                        contentEl.appendChild(choicesSummary);
+                    }
+                }
             }
 
-            // Render text content (marked.parse output — same pattern as existing streaming code)
-            var fullText = textParts.join("");
-            if (fullText.trim()) {
-                var sharedChoices = extractChoices(fullText);
-                var renderText = sharedChoices ? sharedChoices.cleanedText : fullText;
-                var textDiv2 = document.createElement("div");
-                textDiv2.className = "md-text";
-                textDiv2.innerHTML = marked.parse(renderText);  // safe: server-generated markdown
-                contentEl.appendChild(textDiv2);
-                if (sharedChoices) {
-                    // In shared/restored sessions, show choices as collapsed summary
-                    var summary = document.createElement("div");
-                    summary.className = "choices-summary";
-                    summary.textContent = "Choices were presented";
-                    contentEl.appendChild(summary);
-                }
+            // Add export bar to restored assistant messages
+            if (restoredText.trim()) {
+                el._exportMarkdown = restoredText;
+                el._exportCharts = [];
+                contentEl.appendChild(createResponseExportBar(el));
             }
         }
         // Skip tool_result messages — internal
