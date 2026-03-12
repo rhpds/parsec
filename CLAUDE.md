@@ -24,12 +24,14 @@ src/
     azure_costs.py           # Azure billing queries (SQLite cache + live CSV fallback)
     gcp_costs.py             # GCP BigQuery billing queries
     babylon.py               # Babylon cluster catalog/deployment queries
+    aap2.py                  # AAP2 controller job queries (REST API)
   connections/
     postgres.py              # asyncpg pool
     aws.py                   # boto3 session
     azure.py                 # Azure blob client
     gcp.py                   # BigQuery client
     babylon.py               # Babylon cluster K8s API clients (httpx-based)
+    aap2.py                  # AAP2 controller REST API clients (httpx-based)
   routes/
     query.py                 # GET /api/auth/check, POST /api/query (SSE), GET /api/reports/{filename}
     alert.py                 # POST /api/alert/investigate (alert investigation API for cloud-slack-alerts)
@@ -325,6 +327,63 @@ The tool extracts expected instances from AgnosticVComponent `spec.definition` u
 - **MachineSet groups**: `ocp4_workload_machinesets_machineset_groups` with `instance_type` and `total_replicas`
 
 Note: Some catalog items define instance types only in AgnosticD defaults (not in the CRD). For these, the `expected_instances` list may be empty, but the ResourceClaim `job_vars` will have the resolved values.
+
+## AAP2 Job Investigation
+
+The `query_aap2` tool queries AAP2 (Ansible Automation Platform) controller REST APIs for job metadata, execution events, and job search. Used for investigating provisioning failures, slow jobs, and retry patterns.
+
+### How It Works
+
+- Uses the AAP2 REST API (`/api/v2/`) with HTTP Basic Auth (`monitor` user per controller)
+- Four controllers configured: `east` (aap2-prod-us-east-2), `west` (aap2-prod-us-west-2), `event0` (event controller on ocpv-infra01), `partner0` (partner Babylon controller)
+- Controller resolution: accepts short names (`east`) or full hostnames from AnarchySubject `status.towerJobs.<action>.towerHost`
+- httpx-based async client with pagination support
+
+### Available Actions
+
+| Action | API Endpoint | Purpose |
+|---|---|---|
+| `get_job` | `GET /api/v2/jobs/{id}/` | Job metadata, status, duration, extra_vars, git context |
+| `get_job_events` | `GET /api/v2/jobs/{id}/job_events/` | Execution events with `failed_only`/`changed_only` filters |
+| `find_jobs` | `GET /api/v2/jobs/` | Search by status, time range, template name (one or all controllers) |
+
+### Investigation Flow
+
+1. Get the provision GUID from the user's question or provision DB
+2. Use `query_babylon_catalog` with `list_anarchy_subjects` + guid to find the AnarchySubject
+3. Read `status.towerJobs` to get `towerHost` (controller hostname) and `deployerJob` (job ID)
+4. Call `query_aap2(action="get_job", controller=towerHost, job_id=deployerJob)`
+5. If failed, call `query_aap2(action="get_job_events", controller=towerHost, job_id=deployerJob, failed_only=true)`
+
+### Configuration
+
+```yaml
+# config.local.yaml
+aap2:
+  clusters:
+    east:
+      url: "https://aap2-prod-us-east-2.aap.infra.demo.redhat.com"
+      username: "monitor"
+      password: "<password>"
+    west:
+      url: "https://aap2-prod-us-west-2.aap.infra.demo.redhat.com"
+      username: "monitor"
+      password: "<password>"
+    event0:
+      url: "https://event0.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
+      username: "monitor"
+      password: "<password>"
+    partner0:
+      url: "https://aap2-partner0-prod-us-east-2.aap.infra.partner.demo.redhat.com"
+      username: "monitor"
+      password: "<password>"
+```
+
+For OpenShift deployment, store credentials in a secret and inject via env vars (`PARSEC_AAP2__CLUSTERS__EAST__PASSWORD`, etc.).
+
+### Secret Stripping
+
+Extra vars from AAP2 jobs often contain AWS keys, passwords, and tokens. The tool strips these using the same `_SECRET_PATTERNS` and `_SECRET_KEYS` as the Babylon tool before returning results.
 
 ## CloudTrail Lake
 
