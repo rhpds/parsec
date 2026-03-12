@@ -363,25 +363,26 @@ form.addEventListener("submit", async (e) => {
                     contentEl.insertBefore(wrapper, contentEl.firstChild);
                 }
 
-                // Render the final answer (currentChunk is the text after the last tool call)
+                // Extract choice buttons from {{choices}} blocks before rendering final text
+                var finalText = currentChunk || fullText;
+                var choicesResult = extractChoices(finalText);
+                if (choicesResult) {
+                    finalText = choicesResult.cleanedText;
+                }
+
+                // Render the final answer
                 const liveEl = contentEl.querySelector(".md-text-live");
                 if (liveEl) {
+                    // Re-render with cleaned text if choices were extracted
+                    if (choicesResult) {
+                        liveEl.innerHTML = marked.parse(finalText);
+                    }
                     liveEl.className = "md-text";
                 }
 
-                // Extract and render choice buttons from {{choices}} blocks
-                var choicesResult = extractChoices(currentChunk || fullText);
+                // Append choice buttons after the text
                 if (choicesResult) {
-                    // Re-render the cleaned text (without choices block)
-                    // Note: marked.parse is used throughout this file for server-generated
-                    // markdown from Claude responses — same trust model as the existing
-                    // renderCurrentText() and renderSharedMessages() functions.
-                    var mdTextEl = contentEl.querySelector(".md-text");
-                    if (mdTextEl) {
-                        mdTextEl.innerHTML = marked.parse(choicesResult.cleanedText);
-                    }
-                    var choicesEl = renderChoices(choicesResult.options, choicesResult.multi);
-                    contentEl.appendChild(choicesEl);
+                    contentEl.appendChild(renderChoices(choicesResult.options, choicesResult.multi));
                 }
 
                 // Store export data and add export buttons
@@ -903,10 +904,19 @@ function renderSharedMessages(messages) {
             // Render text content (marked.parse output — same pattern as existing streaming code)
             var fullText = textParts.join("");
             if (fullText.trim()) {
+                var sharedChoices = extractChoices(fullText);
+                var renderText = sharedChoices ? sharedChoices.cleanedText : fullText;
                 var textDiv2 = document.createElement("div");
                 textDiv2.className = "md-text";
-                textDiv2.innerHTML = marked.parse(fullText);  // safe: server-generated markdown
+                textDiv2.innerHTML = marked.parse(renderText);  // safe: server-generated markdown
                 contentEl.appendChild(textDiv2);
+                if (sharedChoices) {
+                    // In shared/restored sessions, show choices as collapsed summary
+                    var summary = document.createElement("div");
+                    summary.className = "choices-summary";
+                    summary.textContent = "Choices were presented";
+                    contentEl.appendChild(summary);
+                }
             }
         }
         // Skip tool_result messages — internal

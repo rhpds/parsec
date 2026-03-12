@@ -626,8 +626,22 @@ footer {
 
 #query-form #new-chat-btn {
     padding: 11px 16px;
-    font-size: 12px;
+    font-size: 13px;
+    font-weight: 500;
     border-radius: var(--radius-md);
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    cursor: pointer;
+    transition: color var(--transition), border-color var(--transition), background var(--transition);
+    white-space: nowrap;
+}
+
+#query-form #new-chat-btn:hover {
+    color: var(--text-bright);
+    border-color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.03);
 }
 
 /* ─── Error ─── */
