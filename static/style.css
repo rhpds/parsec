@@ -872,6 +872,38 @@ footer {
     font-style: italic;
 }
 
+.modal-content .header-btn {
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-family: var(--font-sans);
+    transition: color var(--transition), border-color var(--transition), background var(--transition);
+}
+
+.modal-content .header-btn:hover {
+    color: var(--text-bright);
+    border-color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.modal-content #share-copy-btn {
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+    font-weight: 600;
+}
+
+.modal-content #share-copy-btn:hover {
+    background: var(--accent-bright);
+    border-color: var(--accent-bright);
+    color: var(--bg);
+}
+
 .modal-content #share-close-btn {
     margin-top: 14px;
     display: block;
