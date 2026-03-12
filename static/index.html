@@ -28,6 +28,10 @@
             <button id="theme-toggle-btn" class="header-btn" title="Toggle light/dark theme" aria-label="Toggle theme"></button>
             <a href="https://cost-monitor.apps.ocpv-infra01.dal12.infra.demo.redhat.com" target="_blank" rel="noopener" class="header-link">Cost Monitor</a>
         </header>
+        <div id="shared-banner" class="shared-banner" style="display: none;">
+            <span>Viewing a shared investigation</span>
+            <button id="continue-btn" class="header-btn">Continue Investigation</button>
+        </div>
         <main id="chat">
             <div id="messages"></div>
         </main>
@@ -48,6 +52,18 @@
             </form>
         </footer>
     </div>
-    <script src="/app.js?v=5"></script>
+    <div id="share-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <h3>Share Investigation</h3>
+            <p>Anyone with access to Parsec can view this link:</p>
+            <div class="share-link-row">
+                <input type="text" id="share-link-input" readonly>
+                <button id="share-copy-btn" class="header-btn">Copy</button>
+            </div>
+            <p class="share-hint">This is a read-only snapshot of the current conversation.</p>
+            <button id="share-close-btn" class="header-btn">Close</button>
+        </div>
+    </div>
+    <script src="/app.js?v=6"></script>
 </body>
 </html>

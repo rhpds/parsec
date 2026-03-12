@@ -23,6 +23,24 @@ document.getElementById("new-chat-btn").addEventListener("click", function() {
     window.location.reload();
 });
 
+// Share modal handlers
+document.getElementById("share-copy-btn").addEventListener("click", function() {
+    var input = document.getElementById("share-link-input");
+    navigator.clipboard.writeText(input.value).then(function() {
+        var btn = document.getElementById("share-copy-btn");
+        btn.textContent = "Copied!";
+        setTimeout(function() { btn.textContent = "Copy"; }, 2000);
+    });
+});
+
+document.getElementById("share-close-btn").addEventListener("click", function() {
+    document.getElementById("share-modal").style.display = "none";
+});
+
+document.getElementById("share-modal").addEventListener("click", function(e) {
+    if (e.target === this) this.style.display = "none";
+});
+
 // Theme toggle — preference is applied in <head> to prevent flash
 document.getElementById("theme-toggle-btn").addEventListener("click", function() {
     var current = document.documentElement.getAttribute("data-theme");
@@ -92,8 +110,49 @@ marked.setOptions({ renderer: renderer });
     );
     contentEl.appendChild(textEl);
 
-    // Auto-submit if ?q= URL parameter is present (e.g. from Slack alert links)
+    // Restore previous conversation from localStorage (e.g. after "Continue Investigation")
+    if (conversationHistory.length > 0) {
+        renderSharedMessages(conversationHistory);
+        scrollToBottom();
+    }
+
+    // Check for shared session link
     const urlParams = new URLSearchParams(window.location.search);
+    const shareId = urlParams.get("share");
+    if (shareId) {
+        try {
+            var shareResp = await fetch("/api/share/" + encodeURIComponent(shareId));
+            if (shareResp.ok) {
+                var shareData = await shareResp.json();
+                document.getElementById("shared-banner").style.display = "flex";
+                document.getElementById("query-form").style.display = "none";
+                renderSharedMessages(shareData.messages);
+
+                // Continue Investigation button
+                document.getElementById("continue-btn").addEventListener("click", function() {
+                    conversationHistory = shareData.messages;
+                    try { localStorage.setItem("parsec_history", JSON.stringify(conversationHistory)); } catch (e) {}
+                    window.location.href = window.location.pathname;
+                });
+                return;
+            } else {
+                var shareErr = await shareResp.json().catch(function() { return {}; });
+                var errEl = document.createElement("div");
+                errEl.className = "error-message";
+                errEl.textContent = shareErr.detail || "Shared session not found";
+                messagesEl.appendChild(errEl);
+                return;
+            }
+        } catch (e) {
+            var errEl2 = document.createElement("div");
+            errEl2.className = "error-message";
+            errEl2.textContent = "Failed to load shared session: " + e.message;
+            messagesEl.appendChild(errEl2);
+            return;
+        }
+    }
+
+    // Auto-submit if ?q= URL parameter is present (e.g. from Slack alert links)
     const injectedQuery = urlParams.get("q");
     if (injectedQuery) {
         // Clear the URL parameter so refreshes don't re-submit
@@ -610,8 +669,39 @@ function createResponseExportBar(messageEl) {
     pdfBtn.textContent = "Export PDF";
     pdfBtn.addEventListener("click", function() { exportResponseAsPDF(messageEl); });
 
+    var shareBtn = document.createElement("button");
+    shareBtn.className = "response-export-btn";
+    shareBtn.textContent = "Share";
+    shareBtn.addEventListener("click", async function() {
+        if (conversationHistory.length === 0) return;
+        shareBtn.disabled = true;
+        shareBtn.textContent = "Sharing...";
+        try {
+            var resp = await fetch("/api/share", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ messages: conversationHistory }),
+            });
+            if (!resp.ok) {
+                var err = await resp.json().catch(function() { return {}; });
+                alert(err.detail || "Failed to create share link");
+                return;
+            }
+            var data = await resp.json();
+            var shareUrl = window.location.origin + "/?share=" + data.id;
+            document.getElementById("share-link-input").value = shareUrl;
+            document.getElementById("share-modal").style.display = "flex";
+        } catch (e) {
+            alert("Failed to create share link: " + e.message);
+        } finally {
+            shareBtn.disabled = false;
+            shareBtn.textContent = "Share";
+        }
+    });
+
     bar.appendChild(mdBtn);
     bar.appendChild(pdfBtn);
+    bar.appendChild(shareBtn);
     return bar;
 }
 
@@ -723,6 +813,85 @@ function exportResponseAsPDF(messageEl) {
 
         var timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
         doc.save("parsec-" + timestamp + ".pdf");
+    });
+}
+
+function renderSharedMessages(messages) {
+    messages.forEach(function(msg) {
+        if (msg.role === "user") {
+            var text = msg.content;
+            if (Array.isArray(text)) {
+                text = text.map(function(b) { return b.text || ""; }).join("");
+            }
+            addMessage("user", text);
+        } else if (msg.role === "assistant") {
+            var el = addMessage("assistant", "");
+            var contentEl = el.querySelector(".content");
+            var content = msg.content;
+            if (typeof content === "string") {
+                var textDiv = document.createElement("div");
+                textDiv.className = "md-text";
+                textDiv.innerHTML = marked.parse(content);
+                contentEl.appendChild(textDiv);
+                return;
+            }
+            if (!Array.isArray(content)) return;
+
+            var toolCalls = [];
+            var textParts = [];
+
+            content.forEach(function(block) {
+                if (block.type === "text" && block.text) {
+                    textParts.push(block.text);
+                } else if (block.type === "tool_use") {
+                    toolCalls.push(block);
+                }
+            });
+
+            // Show tool calls as collapsed summary
+            if (toolCalls.length > 0) {
+                var wrapper = document.createElement("details");
+                wrapper.className = "tool-calls-summary";
+                var summary = document.createElement("summary");
+                summary.textContent = toolCalls.length === 1
+                    ? "1 query executed"
+                    : toolCalls.length + " queries executed";
+                wrapper.appendChild(summary);
+                var inner = document.createElement("div");
+                inner.className = "tool-calls-inner";
+                toolCalls.forEach(function(tc) {
+                    var tcEl = document.createElement("details");
+                    tcEl.className = "tool-call";
+                    var tcSummary = document.createElement("summary");
+                    var nameSpan = document.createElement("span");
+                    nameSpan.className = "tool-name";
+                    nameSpan.textContent = tc.name || "tool";
+                    var statusSpan = document.createElement("span");
+                    statusSpan.className = "tool-status done";
+                    statusSpan.textContent = "done";
+                    tcSummary.appendChild(nameSpan);
+                    tcSummary.appendChild(statusSpan);
+                    tcEl.appendChild(tcSummary);
+                    var body = document.createElement("div");
+                    body.className = "tool-body";
+                    body.textContent = JSON.stringify(tc.input || {}, null, 2);
+                    tcEl.appendChild(body);
+                    inner.appendChild(tcEl);
+                });
+                wrapper.appendChild(inner);
+                contentEl.appendChild(wrapper);
+            }
+
+            // Render text content (marked.parse output — same pattern as existing streaming code)
+            var fullText = textParts.join("");
+            if (fullText.trim()) {
+                var textDiv2 = document.createElement("div");
+                textDiv2.className = "md-text";
+                textDiv2.innerHTML = marked.parse(fullText);  // safe: server-generated markdown
+                contentEl.appendChild(textDiv2);
+            }
+        }
+        // Skip tool_result messages — internal
     });
 }
 

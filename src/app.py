@@ -16,6 +16,7 @@ from src.connections.postgres import close_pool, init_pool
 from src.routes.alert import router as alert_router
 from src.routes.health import router as health_router
 from src.routes.query import router as query_router
+from src.routes.share import router as share_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -78,6 +79,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(alert_router)
 app.include_router(query_router)
+app.include_router(share_router)
 
 # Serve static frontend files
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

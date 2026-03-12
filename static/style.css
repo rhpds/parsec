@@ -762,8 +762,100 @@ footer {
     border-color: rgba(212, 64, 80, 0.2);
 }
 
+[data-theme="light"] .shared-banner {
+    background: var(--accent-dim);
+    color: var(--text-bright);
+}
+
+[data-theme="light"] .modal-overlay {
+    background: rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="light"] .modal-content {
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+
 [data-theme="light"] ::selection {
     background: rgba(59, 111, 216, 0.2);
+}
+
+/* ─── Shared session banner ─── */
+.shared-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 8px 20px;
+    background: var(--accent-dim);
+    color: var(--text-bright);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+/* ─── Share modal ─── */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+.modal-content {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 28px 32px;
+    max-width: 520px;
+    width: 90%;
+    box-shadow: var(--shadow-md);
+}
+
+.modal-content h3 {
+    color: var(--text-bright);
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.modal-content p {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin: 8px 0;
+}
+
+.share-link-row {
+    display: flex;
+    gap: 8px;
+    margin: 14px 0;
+}
+
+.share-link-row input {
+    flex: 1;
+    padding: 9px 14px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-bright);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    outline: none;
+}
+
+.share-hint {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-style: italic;
+}
+
+.modal-content #share-close-btn {
+    margin-top: 14px;
+    display: block;
+    margin-left: auto;
 }
 
 /* Theme toggle icon */
