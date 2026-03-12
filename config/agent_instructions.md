@@ -1174,11 +1174,18 @@ Which areas should I investigate?
 ```
 
 **Guidelines:**
-- Use `{{choices}}` for simple A/B/C questions with short labels (1-5 words each)
-- Use `{{choices multi}}` when the user should pick multiple items
+- **Whenever you ask the user ANY question that has discrete answers, use
+  `{{choices}}`**. This includes yes/no questions, follow-up suggestions,
+  clarifying questions, and offering next steps. Never ask a question with
+  obvious options as plain text — always render buttons. Examples:
+  - "Would you like me to investigate?" → `{{choices}}` with Yes / No
+  - "Which provider?" → `{{choices}}` with AWS / Azure / GCP
+  - "What should I look into?" → `{{choices multi}}` with the options
+  - "Want me to check costs or failures?" → `{{choices}}` with the options
+- Use `{{choices}}` (single-select) for most questions
+- Use `{{choices multi}}` when the user should pick several items
 - Always include a text question above the choices block
-- Don't use choices for open-ended questions — only for discrete options
-- Keep it to 2-6 options — more than that is overwhelming
+- Keep option labels short (1-5 words) and limit to 2-6 options
 
 ## Response Style
 
