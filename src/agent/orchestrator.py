@@ -28,6 +28,7 @@ from src.agent.streaming import (
 from src.agent.system_prompt import ALERT_INVESTIGATION_PROMPT, SYSTEM_PROMPT
 from src.agent.tool_definitions import SUBMIT_ALERT_VERDICT_TOOL, TOOLS
 from src.config import get_config
+from src.tools.aap2 import query_aap2
 from src.tools.aws_account import query_aws_account
 from src.tools.aws_accounts import query_aws_account_db
 from src.tools.aws_capacity_manager import query_aws_capacity_manager
@@ -52,6 +53,7 @@ _SLOW_TOOL_LABELS = {
     "query_cloudtrail": "Scanning CloudTrail Lake",
     "query_aws_account": "Querying AWS account",
     "query_babylon_catalog": "Querying Babylon cluster",
+    "query_aap2": "Querying AAP2 controller",
 }
 
 
@@ -164,6 +166,20 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
             env_type=tool_input.get("env_type", ""),
             account_id=tool_input.get("account_id", ""),
             guid=tool_input.get("guid", ""),
+            max_results=tool_input.get("max_results", 50),
+        )
+
+    elif tool_name == "query_aap2":
+        return await query_aap2(
+            action=tool_input["action"],
+            controller=tool_input.get("controller", ""),
+            job_id=tool_input.get("job_id"),
+            failed_only=tool_input.get("failed_only", False),
+            changed_only=tool_input.get("changed_only", False),
+            status=tool_input.get("status", ""),
+            created_after=tool_input.get("created_after", ""),
+            created_before=tool_input.get("created_before", ""),
+            template_name=tool_input.get("template_name", ""),
             max_results=tool_input.get("max_results", 50),
         )
 

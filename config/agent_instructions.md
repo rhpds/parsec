@@ -18,6 +18,7 @@ provisioning activity and cloud costs by querying real data sources.
 12. **query_marketplace_agreements** — Query the pre-enriched marketplace agreement inventory (DynamoDB)
 13. **query_aws_account_db** — Query the sandbox account pool (DynamoDB) for account metadata, owners, and availability
 14. **query_babylon_catalog** — Query Babylon clusters for catalog definitions, active deployments, and provisioning state
+15. **query_aap2** — Query AAP2 controllers for job metadata, execution events, and job search
 
 ## Provision Database Schema
 
@@ -694,6 +695,40 @@ how many instances will be needed.
 **"What deployments are active for GUID xyz?"**
 1. Search AnarchySubjects: `query_babylon_catalog(action="list_anarchy_subjects", guid="xyz")`
 2. Or search ResourceClaims if you know the namespace
+
+## AAP2 Job Investigation
+
+The `query_aap2` tool queries AAP2 (Ansible Automation Platform) controllers for job
+metadata and execution events. Use this to investigate provisioning failures, slow jobs,
+and retry patterns.
+
+### Investigation Flow
+
+1. Get the provision GUID from the user's question or the provision DB
+2. Use `query_babylon_catalog` with `list_anarchy_subjects` + guid filter to find
+   the AnarchySubject
+3. Read `status.towerJobs` to get the `towerHost` and `deployerJob` (job ID)
+4. Call `query_aap2` with `get_job` to get job status, duration, env_type
+5. If the job failed, call `query_aap2` with `get_job_events` + `failed_only=true`
+   to see the error details
+6. Report findings: what task failed, on which host, with what error message
+
+### Available Controllers
+
+- east: aap2-prod-us-east-2 (primary production)
+- west: aap2-prod-us-west-2 (secondary production)
+- event0: event controller on ocpv-infra01
+- partner0: partner Babylon controller
+
+### Tips
+
+- The job name encodes the catalog item and GUID:
+  `RHPDS agd-v2.sovereign-cloud.prod-gm5ld-2-provision-...`
+- Use `find_jobs` with `status=failed` to find recent failures across all controllers
+- Failed events include the error message in `error_msg` — this is usually the root cause
+- Job `elapsed` is wall-clock seconds; long durations may suggest retries or waiting
+- The `controller` parameter accepts both short names (`east`) and full hostnames
+  from `towerHost` — so you can pass the value directly from the AnarchySubject
 
 ## Abuse Indicators
 

@@ -58,6 +58,17 @@ babylon:
   #   west:
   #     kubeconfig: "~/secrets/babylon-west.kubeconfig"
 
+aap2:
+  # AAP2 controller connections for job investigation.
+  # Each controller needs a URL and credentials (username/password).
+  # Set credentials in config.local.yaml or via env vars
+  # (PARSEC_AAP2__CLUSTERS__EAST__PASSWORD, etc.).
+  clusters: {}
+  #   east:
+  #     url: "https://aap2-prod-us-east-2.aap.infra.demo.redhat.com"
+  #     username: "monitor"
+  #     password: ""
+
 alert_api_key: ""
 
 auth:

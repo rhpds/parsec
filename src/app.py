@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from src.config import get_config
+from src.connections.aap2 import init_aap2
 from src.connections.aws import init_aws
 from src.connections.azure import init_azure
 from src.connections.babylon import init_babylon
@@ -44,6 +45,7 @@ async def lifespan(app: FastAPI):
         ("Azure", init_azure),
         ("GCP", init_gcp),
         ("Babylon", init_babylon),
+        ("AAP2", init_aap2),
     ]:
         try:
             init_fn()

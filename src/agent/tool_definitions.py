@@ -697,4 +697,92 @@ TOOLS = [
             "required": ["title", "content"],
         },
     },
+    {
+        "name": "query_aap2",
+        "description": (
+            "Query an AAP2 (Ansible Automation Platform) controller for job details, "
+            "execution events, and job search. Use this to investigate provisioning "
+            "failures, slow jobs, and retry patterns. The controller hostname comes "
+            "from AnarchySubject status.towerJobs.<action>.towerHost (get it from "
+            "query_babylon_catalog first). The job ID comes from "
+            "status.towerJobs.<action>.deployerJob."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["get_job", "get_job_events", "find_jobs"],
+                    "description": (
+                        "Action to perform. "
+                        "get_job: Get job metadata, status, duration, extra_vars, "
+                        "and git context for a specific job ID. "
+                        "get_job_events: Get execution events for a job. Use "
+                        "failed_only=true to see only errors. "
+                        "find_jobs: Search for jobs by status, time range, or "
+                        "template name across one or all controllers."
+                    ),
+                },
+                "controller": {
+                    "type": "string",
+                    "description": (
+                        "AAP2 controller to query. Can be a short name (east, west, "
+                        "partner0, event0) or the full hostname from "
+                        "AnarchySubject towerHost. Required for get_job and "
+                        "get_job_events. For find_jobs, omit to search all controllers."
+                    ),
+                },
+                "job_id": {
+                    "type": "integer",
+                    "description": (
+                        "AAP2 job ID. Required for get_job and get_job_events. "
+                        "Get this from AnarchySubject status.towerJobs.<action>.deployerJob."
+                    ),
+                },
+                "failed_only": {
+                    "type": "boolean",
+                    "description": (
+                        "For get_job_events: only return failed events. Default: false."
+                    ),
+                },
+                "changed_only": {
+                    "type": "boolean",
+                    "description": (
+                        "For get_job_events: only return events that made changes. "
+                        "Default: false."
+                    ),
+                },
+                "status": {
+                    "type": "string",
+                    "description": (
+                        "For find_jobs: filter by job status "
+                        "(failed, successful, running, canceled, error)."
+                    ),
+                },
+                "created_after": {
+                    "type": "string",
+                    "description": (
+                        "For find_jobs: ISO timestamp or YYYY-MM-DD. "
+                        "Only jobs created after this."
+                    ),
+                },
+                "created_before": {
+                    "type": "string",
+                    "description": (
+                        "For find_jobs: ISO timestamp or YYYY-MM-DD. "
+                        "Only jobs created before this."
+                    ),
+                },
+                "template_name": {
+                    "type": "string",
+                    "description": ("For find_jobs: filter by template name (contains match)."),
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": ("Maximum results to return. Default: 50, max: 200."),
+                },
+            },
+            "required": ["action"],
+        },
+    },
 ]
