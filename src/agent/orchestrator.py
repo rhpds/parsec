@@ -524,8 +524,15 @@ async def run_agent(
         # the SSE connection drops before the final response.
         yield sse_event("history", {"messages": _serialize_messages(messages)})
 
-    # If we exhausted max rounds
-    yield sse_text("\n\n_Reached maximum tool call rounds. Please refine your question._")
+    # If we exhausted max rounds, ask the user whether to continue
+    yield sse_text(
+        "\n\nI've used all my planned tool calls but haven't finished the "
+        "investigation yet. Would you like me to keep going?\n\n"
+        "{{choices}}\n"
+        "Keep investigating\n"
+        "That's enough, thanks\n"
+        "{{/choices}}"
+    )
     yield sse_event("history", {"messages": _serialize_messages(messages)})
     yield sse_done()
 
