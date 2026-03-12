@@ -171,6 +171,9 @@ form.addEventListener("submit", async (e) => {
     input.value = "";
     sendBtn.disabled = true;
 
+    // Collapse any active choice buttons from previous messages
+    collapseActiveChoices("Skipped");
+
     addMessage("user", question);
 
     const assistantEl = addMessage("assistant", "");
@@ -364,6 +367,21 @@ form.addEventListener("submit", async (e) => {
                 const liveEl = contentEl.querySelector(".md-text-live");
                 if (liveEl) {
                     liveEl.className = "md-text";
+                }
+
+                // Extract and render choice buttons from {{choices}} blocks
+                var choicesResult = extractChoices(currentChunk || fullText);
+                if (choicesResult) {
+                    // Re-render the cleaned text (without choices block)
+                    // Note: marked.parse is used throughout this file for server-generated
+                    // markdown from Claude responses — same trust model as the existing
+                    // renderCurrentText() and renderSharedMessages() functions.
+                    var mdTextEl = contentEl.querySelector(".md-text");
+                    if (mdTextEl) {
+                        mdTextEl.innerHTML = marked.parse(choicesResult.cleanedText);
+                    }
+                    var choicesEl = renderChoices(choicesResult.options, choicesResult.multi);
+                    contentEl.appendChild(choicesEl);
                 }
 
                 // Store export data and add export buttons
@@ -898,4 +916,88 @@ function renderSharedMessages(messages) {
 function scrollToBottom() {
     const chat = document.getElementById("chat");
     chat.scrollTop = chat.scrollHeight;
+}
+
+// ─── Choice buttons ───
+
+function extractChoices(text) {
+    // Match {{choices}} or {{choices multi}} ... {{/choices}}
+    var match = text.match(/\{\{choices(\s+multi)?\}\}\s*\n([\s\S]*?)\{\{\/choices\}\}/);
+    if (!match) return null;
+
+    var multi = !!match[1];
+    var block = match[2];
+    var options = [];
+    block.split("\n").forEach(function(line) {
+        var trimmed = line.replace(/^\s*-\s*/, "").trim();
+        if (trimmed) options.push(trimmed);
+    });
+
+    if (options.length === 0) return null;
+
+    var cleanedText = text.replace(/\{\{choices(\s+multi)?\}\}\s*\n[\s\S]*?\{\{\/choices\}\}/, "").trim();
+    return { options: options, multi: multi, cleanedText: cleanedText };
+}
+
+function renderChoices(options, multi) {
+    var container = document.createElement("div");
+    container.className = "choices-container";
+    container.setAttribute("data-active", "true");
+
+    options.forEach(function(opt) {
+        var btn = document.createElement("button");
+        btn.className = "choice-btn";
+        btn.textContent = opt;
+        btn.addEventListener("click", function() {
+            if (container.getAttribute("data-active") !== "true") return;
+            if (multi) {
+                btn.classList.toggle("selected");
+            } else {
+                // Single-select: submit immediately
+                collapseChoices(container, opt);
+                input.value = opt;
+                form.requestSubmit();
+            }
+        });
+        container.appendChild(btn);
+    });
+
+    if (multi) {
+        var submitBtn = document.createElement("button");
+        submitBtn.className = "choices-submit";
+        submitBtn.textContent = "Submit";
+        submitBtn.addEventListener("click", function() {
+            if (container.getAttribute("data-active") !== "true") return;
+            var selected = [];
+            container.querySelectorAll(".choice-btn.selected").forEach(function(b) {
+                selected.push(b.textContent);
+            });
+            if (selected.length === 0) return;
+            var text = selected.join(", ");
+            collapseChoices(container, text);
+            input.value = text;
+            form.requestSubmit();
+        });
+        container.appendChild(submitBtn);
+    }
+
+    return container;
+}
+
+function collapseChoices(container, selectedText) {
+    container.setAttribute("data-active", "false");
+    var summary = document.createElement("div");
+    summary.className = "choices-summary";
+    summary.innerHTML = 'Selected: <span class="choices-selected-values"></span>';
+    summary.querySelector(".choices-selected-values").textContent = selectedText;
+    container.replaceWith(summary);
+}
+
+function collapseActiveChoices(label) {
+    document.querySelectorAll('.choices-container[data-active="true"]').forEach(function(c) {
+        var summary = document.createElement("div");
+        summary.className = "choices-summary";
+        summary.textContent = label;
+        c.replaceWith(summary);
+    });
 }
