@@ -297,6 +297,29 @@ async def k8s_get_resource(
     return resp.json()
 
 
+async def k8s_list_cluster_wide(
+    cluster_name: str,
+    group: str,
+    version: str,
+    plural: str,
+    label_selector: str = "",
+    limit: int = 0,
+) -> dict:
+    """List custom resources across all namespaces (cluster-wide)."""
+    path = f"/apis/{group}/{version}/{plural}"
+
+    params: dict[str, str | int] = {}
+    if label_selector:
+        params["labelSelector"] = label_selector
+    if limit:
+        params["limit"] = limit
+
+    client = await _get_client(cluster_name)
+    resp = await client.get(path, params=params)
+    resp.raise_for_status()
+    return resp.json()
+
+
 async def close_clients() -> None:
     """Close all httpx clients."""
     for client in _clients.values():

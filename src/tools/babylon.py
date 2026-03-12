@@ -9,6 +9,7 @@ from src.connections.babylon import (
     get_configured_clusters,
     k8s_get_resource,
     k8s_list,
+    k8s_list_cluster_wide,
     resolve_cluster_from_comment,
 )
 
@@ -529,6 +530,13 @@ async def query_babylon_catalog(
     target_cluster = cluster
     if not target_cluster and sandbox_comment:
         target_cluster = resolve_cluster_from_comment(sandbox_comment)
+
+    # For GUID-based searches, search all clusters until found
+    if not target_cluster and guid and action in ("list_anarchy_subjects", "list_anarchy_actions"):
+        return await _search_all_clusters_for_guid(
+            action, configured, namespace, search, guid, max_results
+        )
+
     if not target_cluster:
         return {
             "error": "Could not determine which Babylon cluster to query. "
@@ -570,6 +578,45 @@ async def query_babylon_catalog(
     except Exception as e:
         logger.exception("Babylon query failed: action=%s cluster=%s", action, target_cluster)
         return {"error": f"Babylon query failed: {e}", "cluster": target_cluster}
+
+
+async def _search_all_clusters_for_guid(
+    action: str,
+    clusters: list[str],
+    namespace: str,
+    search: str,
+    guid: str,
+    max_results: int,
+) -> dict:
+    """Search all configured clusters for a GUID, stopping when found."""
+    errors: list[str] = []
+
+    for cluster_name in clusters:
+        try:
+            if action == "list_anarchy_subjects":
+                result = await _list_anarchy_subjects(
+                    cluster_name, namespace, search, guid, max_results
+                )
+            else:
+                result = await _list_anarchy_actions(
+                    cluster_name, namespace, search, guid, max_results
+                )
+
+            items_key = "subjects" if action == "list_anarchy_subjects" else "actions"
+            if result.get(items_key):
+                return result
+            if result.get("errors"):
+                errors.extend(f"{cluster_name}: {e}" for e in result["errors"])
+        except Exception as e:
+            errors.append(f"{cluster_name}: {e}")
+
+    return {
+        "clusters_searched": clusters,
+        "subjects" if action == "list_anarchy_subjects" else "actions": [],
+        "count": 0,
+        "truncated": False,
+        "errors": errors if errors else None,
+    }
 
 
 async def _search_catalog(cluster: str, search: str, env_type: str, max_results: int) -> dict:
@@ -753,38 +800,46 @@ async def _list_anarchy_subjects(
     guid: str,
     max_results: int,
 ) -> dict:
-    """List AnarchySubjects (active provisions)."""
-    # AnarchySubjects live in anarchy operator namespaces
-    namespaces = (
-        [namespace]
-        if namespace
-        else [
-            "babylon-anarchy-0",
-            "babylon-anarchy-1",
-            "babylon-anarchy-2",
-            "anarchy-operator",
-        ]
-    )
+    """List AnarchySubjects (active provisions).
 
-    all_subjects: list[tuple[str, dict]] = []
+    When searching by GUID or search term, uses cluster-wide listing for
+    efficiency (works across all babylon-anarchy-* namespaces automatically).
+    When a specific namespace is given, queries only that namespace.
+    """
+    all_subjects: list[dict] = []
     errors: list[str] = []
+    namespaces_searched: list[str] | str = "all (cluster-wide)"
 
-    for ns in namespaces:
+    if namespace:
+        # Scoped to a specific namespace
+        namespaces_searched = [namespace]
         try:
             result = await k8s_list(
-                cluster, ANARCHY_SUBJECT_GROUP, ANARCHY_SUBJECT_VERSION, ANARCHY_SUBJECT_PLURAL, ns
+                cluster,
+                ANARCHY_SUBJECT_GROUP,
+                ANARCHY_SUBJECT_VERSION,
+                ANARCHY_SUBJECT_PLURAL,
+                namespace,
             )
-            for item in result.get("items", []):
-                all_subjects.append((ns, item))
+            all_subjects.extend(result.get("items", []))
         except Exception as e:
-            errors.append(f"{ns}: {e}")
+            errors.append(f"{namespace}: {e}")
+    else:
+        # Cluster-wide listing — covers all anarchy namespaces automatically
+        try:
+            result = await k8s_list_cluster_wide(
+                cluster, ANARCHY_SUBJECT_GROUP, ANARCHY_SUBJECT_VERSION, ANARCHY_SUBJECT_PLURAL
+            )
+            all_subjects.extend(result.get("items", []))
+        except Exception as e:
+            errors.append(f"cluster-wide: {e}")
 
     # Apply filters
     search_lower = search.lower() if search else ""
     guid_str = guid or ""
     filtered = []
 
-    for _ns, item in all_subjects:
+    for item in all_subjects:
         info = _extract_anarchy_subject_info(item)
 
         if (
@@ -798,10 +853,12 @@ async def _list_anarchy_subjects(
             if iv.get("guid", "") != guid_str and guid_str not in info["name"]:
                 continue
 
-        # Only include started/stopped subjects (skip completed ones)
-        state = info.get("current_state", "")
-        if state not in ("started", "stopped", "starting", "stopping", "provisioning"):
-            continue
+        # When searching by GUID, include all states (including destroy-failed).
+        # Otherwise, skip fully completed subjects to reduce noise.
+        if not guid_str:
+            state = info.get("current_state", "")
+            if state in ("destroyed",):
+                continue
 
         filtered.append(info)
         if len(filtered) >= max_results:
@@ -812,7 +869,7 @@ async def _list_anarchy_subjects(
         "subjects": filtered,
         "count": len(filtered),
         "truncated": len(filtered) >= max_results,
-        "namespaces_searched": namespaces,
+        "namespaces_searched": namespaces_searched,
         "errors": errors if errors else None,
     }
 
@@ -907,29 +964,31 @@ async def _list_anarchy_actions(
     max_results: int,
 ) -> dict:
     """List AnarchyActions (provision/start/stop/destroy lifecycle events)."""
-    namespaces = (
-        [namespace]
-        if namespace
-        else [
-            "babylon-anarchy-0",
-            "babylon-anarchy-1",
-            "babylon-anarchy-2",
-            "anarchy-operator",
-        ]
-    )
-
     all_actions: list[dict] = []
     errors: list[str] = []
+    namespaces_searched: list[str] | str = "all (cluster-wide)"
 
-    for ns in namespaces:
+    if namespace:
+        namespaces_searched = [namespace]
         try:
             result = await k8s_list(
-                cluster, ANARCHY_ACTION_GROUP, ANARCHY_ACTION_VERSION, ANARCHY_ACTION_PLURAL, ns
+                cluster,
+                ANARCHY_ACTION_GROUP,
+                ANARCHY_ACTION_VERSION,
+                ANARCHY_ACTION_PLURAL,
+                namespace,
             )
-            for item in result.get("items", []):
-                all_actions.append(item)
+            all_actions.extend(result.get("items", []))
         except Exception as e:
-            errors.append(f"{ns}: {e}")
+            errors.append(f"{namespace}: {e}")
+    else:
+        try:
+            result = await k8s_list_cluster_wide(
+                cluster, ANARCHY_ACTION_GROUP, ANARCHY_ACTION_VERSION, ANARCHY_ACTION_PLURAL
+            )
+            all_actions.extend(result.get("items", []))
+        except Exception as e:
+            errors.append(f"cluster-wide: {e}")
 
     search_lower = search.lower() if search else ""
     guid_str = guid or ""
@@ -957,7 +1016,7 @@ async def _list_anarchy_actions(
         "actions": filtered,
         "count": len(filtered),
         "truncated": len(filtered) >= max_results,
-        "namespaces_searched": namespaces,
+        "namespaces_searched": namespaces_searched,
         "errors": errors if errors else None,
     }
 

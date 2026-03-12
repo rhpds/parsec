@@ -557,8 +557,11 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "Babylon cluster name to query. If empty, resolved from "
-                        "sandbox_comment or uses the default cluster. "
-                        "Use query_aws_account_db to get the comment field first."
+                        "sandbox_comment. For list_anarchy_subjects and "
+                        "list_anarchy_actions with a guid, omit cluster to "
+                        "automatically search ALL configured clusters until the "
+                        "GUID is found. Use query_aws_account_db to get the "
+                        "comment field first when cluster is unknown."
                     ),
                 },
                 "name": {
