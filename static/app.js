@@ -112,7 +112,7 @@ marked.setOptions({ renderer: renderer });
 
     // Restore previous conversation from localStorage (e.g. after "Continue Investigation")
     if (conversationHistory.length > 0) {
-        renderSharedMessages(conversationHistory);
+        renderSharedMessages(conversationHistory, true);
         scrollToBottom();
     }
 
@@ -835,8 +835,8 @@ function exportResponseAsPDF(messageEl) {
     });
 }
 
-function renderSharedMessages(messages) {
-    messages.forEach(function(msg) {
+function renderSharedMessages(messages, interactive) {
+    messages.forEach(function(msg, msgIdx) {
         if (msg.role === "user") {
             var text = msg.content;
             if (Array.isArray(text)) {
@@ -911,10 +911,15 @@ function renderSharedMessages(messages) {
                     textDiv2.innerHTML = marked.parse(renderText);  // safe: server-generated markdown
                     contentEl.appendChild(textDiv2);
                     if (sharedChoices) {
-                        var choicesSummary = document.createElement("div");
-                        choicesSummary.className = "choices-summary";
-                        choicesSummary.textContent = "Choices were presented";
-                        contentEl.appendChild(choicesSummary);
+                        var isLastMsg = (msgIdx === messages.length - 1);
+                        if (interactive && isLastMsg) {
+                            contentEl.appendChild(renderChoices(sharedChoices.options, sharedChoices.multi));
+                        } else {
+                            var choicesSummary = document.createElement("div");
+                            choicesSummary.className = "choices-summary";
+                            choicesSummary.textContent = "Choices were presented";
+                            contentEl.appendChild(choicesSummary);
+                        }
                     }
                 }
             }
