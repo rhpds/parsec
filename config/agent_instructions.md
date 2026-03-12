@@ -382,6 +382,28 @@ access to read-only operations. No write actions are possible.
   services in "stopped" state have their EC2 instances stopped, not
   terminated — they still exist and will restart when the user starts the
   service.
+
+  **IMPORTANT — Region discovery:** `describe_instances` only queries ONE
+  region at a time (default: us-east-1). Instances may be in ANY region.
+  Before calling `describe_instances`, determine which regions to check:
+  1. Query CloudTrail Lake for RunInstances events on the account to find
+     all regions where instances were launched:
+     ```sql
+     SELECT DISTINCT awsRegion, COUNT(*) as launch_count
+     FROM cloudtrail_events
+     WHERE recipientAccountId = '<account_id>'
+       AND eventName = 'RunInstances'
+       AND eventTime > '<sandbox_allocated_time>'
+       AND eventTime < '<sandbox_deallocated_time_or_now>'
+     GROUP BY awsRegion
+     ```
+     Use the sandbox allocation/deallocation timestamps from the provision
+     DB or sandbox pool (`query_aws_account_db`) to scope the time window.
+     If the sandbox is still allocated, use the current time as the end.
+  2. Call `describe_instances` for EACH region returned by the query.
+  3. If CloudTrail Lake returns no results (e.g., account too old for the
+     event data store), fall back to checking common regions: us-east-1,
+     us-east-2, us-west-2, eu-west-1, ap-southeast-1.
 - `lookup_events` — Recent CloudTrail events in the account (last few hours).
   Filters: `{event_name: "RunInstances"}`. Use for recent activity.
 - `list_users` — IAM users and their access keys. No filters. Use to check
