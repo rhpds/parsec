@@ -60,22 +60,18 @@ body::before {
     position: relative;
     z-index: 1;
     display: flex;
-    flex-direction: row;
-    height: 100%;
-    max-width: 1220px;
-    margin: 0 auto;
-}
-
-.main-col {
-    display: flex;
     flex-direction: column;
-    flex: 1;
-    min-width: 0;
+    height: 100%;
     max-width: 960px;
+    margin: 0 auto;
 }
 
 /* ─── Sidebar ─── */
 .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
     width: 0;
     overflow: hidden;
     background: var(--bg-elevated);
@@ -83,7 +79,7 @@ body::before {
     display: flex;
     flex-direction: column;
     transition: width var(--transition);
-    flex-shrink: 0;
+    z-index: 50;
 }
 
 .sidebar.open {
@@ -191,23 +187,29 @@ body::before {
     color: var(--error);
 }
 
-.sidebar-toggle {
-    margin-left: 0 !important;
-    margin-right: 4px;
-    font-size: 16px;
-    padding: 6px 10px;
+.sidebar-tab {
+    display: none;
+    position: fixed;
+    top: 12px;
+    left: 0;
+    z-index: 49;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-left: none;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: var(--font-sans);
+    letter-spacing: 0.02em;
+    transition: color var(--transition), background var(--transition);
 }
 
-@media (max-width: 700px) {
-    .sidebar.open {
-        position: fixed;
-        top: 0;
-        left: 0;
-        bottom: 0;
-        width: 260px;
-        z-index: 50;
-        box-shadow: var(--shadow-md);
-    }
+.sidebar-tab:hover {
+    color: var(--text-bright);
+    background: var(--bg-surface);
 }
 
 /* ─── Header ─── */

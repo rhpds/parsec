@@ -744,11 +744,15 @@ and retry patterns.
    importantly `git_url`/`git_branch` (the agnosticd repo and ref used)
 5. If the job failed, call `query_aap2` with `get_job_events` + `failed_only=true`
    to see the error details
-6. **Trace the failure to source code** — use the role name and task name from the
-   failed event along with the git context to identify the exact playbook/role
-   (see "Tracing Failures to Source Code" below)
-7. Report findings: what task failed, in which role, the error message, and where
-   the source code lives
+6. **Present findings immediately.** After steps 1-5 you have the root cause:
+   what task failed, in which role, the error message, and the error details.
+   Present this to the user and ask if they want to dig deeper (e.g., view
+   source code, check the AgnosticV definition, look at retry history).
+   Do NOT automatically fetch source code, check provision jobs, or browse
+   the AgnosticD repo unless the user asks for it.
+7. If the user wants to trace the failure to source code, use the role name
+   and task name from the failed event along with the git context to identify
+   the exact playbook/role (see "Tracing Failures to Source Code" below)
 
 **If the AnarchySubject is gone** (already cleaned up after retirement), skip
 further Babylon searches and go directly to AAP2:
@@ -839,6 +843,16 @@ AgnosticVComponent definition including:
 Use this to understand what a catalog item deploys and where its source code lives,
 even without an AAP2 job to reference.
 
+### Common Resolutions for AgnosticD Failures
+
+When the failing code has been fixed in the agnosticd repo's development branch
+but the AgnosticVComponent's `scm_ref` points to an older tag/commit:
+- **Resolution**: Create a new tag in the agnosticd repo that includes the fix,
+  then update the AgnosticVComponent's `scm_ref` to point to the new tag.
+- The `scm_ref` from `get_component` or `get_job` tells you what ref the
+  deployment is pinned to. If it's a tag and the fix is only on `development`
+  or `main`, the deployment won't pick up the fix until the ref is updated.
+
 ## Abuse Indicators
 
 When investigating potential abuse, look for these patterns:
@@ -890,6 +904,23 @@ But these must be sequential (second depends on first):
 - `query_provisions_db` (to get account_ids) → then `query_aws_costs` (with those IDs)
 - `query_provisions_db` (to get sandbox_names) → then `query_azure_costs` (with those names)
 - `query_cost_monitor(breakdown)` → then `query_cost_monitor(drilldown)` on a top account
+
+### Avoiding Duplicate and Wasteful Calls
+
+**NEVER call the same tool with the same parameters twice in a conversation.**
+You already have the result — use it. Common mistakes to avoid:
+- Re-fetching an AnarchySubject you already retrieved earlier
+- Re-fetching an AAP2 job you already have metadata for
+- Listing a directory you already listed via `get_config` or `get_file`
+- Fetching the provision job when investigating a destroy failure (unless asked)
+
+**When browsing agnosticd source**, batch your file fetches. If you need to look
+at multiple files in the same repo, call `query_agnosticd_source` for each in
+parallel rather than sequentially.
+
+**Stop investigating when you have the answer.** Present your findings and let
+the user decide whether to dig deeper. Don't speculatively fetch source code,
+check unrelated jobs, or browse repo directories unless the user asks.
 
 ### Handling Tool Results
 
