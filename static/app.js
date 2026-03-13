@@ -211,6 +211,8 @@ function saveConversation() {
         currentConversationId = data.id;
         try { localStorage.setItem("parsec_conv_id", data.id); } catch (e) {}
         loadConversationList();
+        // Refresh learnings count after background analysis has time to complete
+        setTimeout(refreshLearningsCount, 20000);
     }).catch(function() {});
 }
 
