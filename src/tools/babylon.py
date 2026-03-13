@@ -877,10 +877,13 @@ async def _list_anarchy_subjects(
         except Exception as e:
             errors.append(f"{namespace}: {e}")
     else:
-        # Cluster-wide listing — covers all anarchy namespaces automatically
+        # Cluster-wide listing — covers all anarchy namespaces automatically.
         try:
             result = await k8s_list_cluster_wide(
-                cluster, ANARCHY_SUBJECT_GROUP, ANARCHY_SUBJECT_VERSION, ANARCHY_SUBJECT_PLURAL
+                cluster,
+                ANARCHY_SUBJECT_GROUP,
+                ANARCHY_SUBJECT_VERSION,
+                ANARCHY_SUBJECT_PLURAL,
             )
             all_subjects.extend(result.get("items", []))
         except Exception as e:
@@ -1036,7 +1039,11 @@ async def _list_anarchy_actions(
     else:
         try:
             result = await k8s_list_cluster_wide(
-                cluster, ANARCHY_ACTION_GROUP, ANARCHY_ACTION_VERSION, ANARCHY_ACTION_PLURAL
+                cluster,
+                ANARCHY_ACTION_GROUP,
+                ANARCHY_ACTION_VERSION,
+                ANARCHY_ACTION_PLURAL,
+                limit=500,
             )
             all_actions.extend(result.get("items", []))
         except Exception as e:

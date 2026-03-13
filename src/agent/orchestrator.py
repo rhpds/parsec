@@ -45,8 +45,10 @@ from src.tools.provision_db import execute_query
 
 logger = logging.getLogger(__name__)
 
-# Directory for saved reports
-REPORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "reports")
+# Directory for saved reports (on shared PVC so all pods can serve them)
+REPORTS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "reports"
+)
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
 # Status labels for tools that take >10s (shown in keepalive SSE events)

@@ -922,6 +922,26 @@ parallel rather than sequentially.
 the user decide whether to dig deeper. Don't speculatively fetch source code,
 check unrelated jobs, or browse repo directories unless the user asks.
 
+### Minimizing Data Volume (Memory-Sensitive)
+
+Babylon cluster-wide queries pull large amounts of data. Follow these rules to
+avoid excessive memory usage:
+
+1. **Always resolve the cluster first.** Use `query_aws_account_db` to get the
+   sandbox `comment` field, then pass `sandbox_comment` to `query_babylon_catalog`.
+   This targets a single cluster instead of searching all 6.
+2. **Provide a GUID or namespace when possible.** Never do an unfiltered
+   `list_anarchy_subjects` or `list_anarchy_actions` without a `guid` or
+   `namespace` parameter — it pulls thousands of objects.
+3. **Prefer targeted actions over broad searches.** Use `get_deployment` or
+   `get_component` (single-object lookups) over `list_deployments` or
+   `list_anarchy_subjects` when you know the name.
+4. **Don't search all clusters speculatively.** If you already know which cluster
+   manages the sandbox (from the comment field or previous results), specify it
+   explicitly with the `cluster` parameter.
+5. **Use `list_deployments` with `account_id` filter** rather than listing an
+   entire namespace and scanning the results manually.
+
 ### Handling Tool Results
 
 - **Truncated results** (`"truncated": true`): The query hit the 500-row limit. Narrow

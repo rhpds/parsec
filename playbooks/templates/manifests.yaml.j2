@@ -237,8 +237,6 @@ spec:
             - name: gcp-billing-credentials
               mountPath: /app/gcp-billing
               readOnly: true
-            - name: reports
-              mountPath: /app/reports
             - name: pricing-cache
               mountPath: /app/data
             - name: babylon-kubeconfigs
@@ -292,8 +290,6 @@ spec:
             secretName: gcp-billing-credentials
             defaultMode: 0400
             optional: true
-        - name: reports
-          emptyDir: {}
         - name: pricing-cache
           persistentVolumeClaim:
             claimName: parsec-pricing-cache
@@ -315,6 +311,50 @@ spec:
   resources:
     requests:
       storage: 3Gi
+---
+{% if deployment_hpa_enabled | default(false) %}
+# HorizontalPodAutoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: parsec
+  labels:
+    app: parsec
+    component: api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: parsec
+  minReplicas: {{ deployment_hpa_min | default(2) }}
+  maxReplicas: {{ deployment_hpa_max | default(4) }}
+  metrics:
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+{% endif %}
 ---
 # CronJob — EC2 pricing refresh (weekly)
 apiVersion: batch/v1
