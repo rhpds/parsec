@@ -617,6 +617,51 @@ TOOLS = [
         },
     },
     {
+        "name": "fetch_github_file",
+        "description": (
+            "Fetch a file or directory listing from a GitHub repository. Use this to "
+            "retrieve configuration files when investigating AAP2 job failures — "
+            "specifically agnosticv config files (common.yaml, prod.yaml, dev.yaml) and "
+            "agnosticd env_type configs (default_vars.yml, playbooks). "
+            "Also useful for checking any rhpds repo content. "
+            "Supports fetching specific git refs (branches, tags, commit SHAs)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "owner": {
+                    "type": "string",
+                    "description": "Repository owner or organization (e.g. 'rhpds', 'redhat-cop').",
+                },
+                "repo": {
+                    "type": "string",
+                    "description": (
+                        "Repository name (e.g. 'agnosticv', 'partner-agnosticv', "
+                        "'agnosticd-v2', 'agnosticd')."
+                    ),
+                },
+                "path": {
+                    "type": "string",
+                    "description": (
+                        "Path to a file or directory within the repo. "
+                        "Examples: 'sandboxes-gpte/OCP4_AWS/common.yaml', "
+                        "'ansible/configs/ocp4-cluster/default_vars.yml'."
+                    ),
+                },
+                "ref": {
+                    "type": "string",
+                    "description": (
+                        "Optional git ref — branch name, tag, or commit SHA. "
+                        "Use the job's Revision SHA or the scm_ref from agnosticv "
+                        "to fetch the exact code version that ran. "
+                        "If omitted, fetches from the repo's default branch."
+                    ),
+                },
+            },
+            "required": ["owner", "repo", "path"],
+        },
+    },
+    {
         "name": "render_chart",
         "description": (
             "Render a chart in the chat UI. Use this to visualize cost data, "

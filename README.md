@@ -27,6 +27,7 @@ Natural language cloud cost and provisioning investigation tool for the RHDP pla
 | `query_marketplace_agreements` | DynamoDB | Marketplace subscription inventory |
 | `query_aws_account_db` | DynamoDB | Sandbox account pool metadata |
 | `query_babylon_catalog` | Babylon K8s clusters | Catalog definitions, active deployments, workshops, resource pools |
+| `fetch_github_file` | GitHub API (via MCP sidecar) | Fetch agnosticv/agnosticd config files for AAP2 job failure investigation |
 
 Claude can chain multiple tools — for example, querying the provision DB for account IDs, checking Babylon for expected instance types, then comparing against actual AWS instances.
 
@@ -45,6 +46,8 @@ Ask for a report in the chat and Claude will generate a formatted Markdown or As
 - GCP service account for BigQuery billing export
 - Vertex AI credentials (or Anthropic API key)
 - Babylon cluster kubeconfigs (`rhdp-readonly` SA)
+- GitHub PAT with `repo` scope (for agnosticv/agnosticd private repos)
+- Node.js 22+ (for the GitHub MCP sidecar, local dev only)
 
 ### Local Development
 
@@ -100,6 +103,29 @@ Set allowed users (comma-separated emails) in:
 
 Empty value = group-based auth only (OpenShift groups).
 
+## AAP2 Job Failure Investigation
+
+Paste AAP2 job details and logs into the chat, and Parsec will trace the failure through the agnosticv/agnosticd config hierarchy:
+
+1. Parses the job template name to find the agnosticv config path
+2. Fetches config files from GitHub repos (agnosticv, partner-agnosticv, etc.)
+3. Resolves component chains (virtual CI and chained CI patterns)
+4. Fetches the agnosticd env_type config at the exact git revision
+5. Analyzes the job log for error patterns
+6. Cross-references with provision DB and Babylon for full context
+
+### GitHub MCP Sidecar
+
+The `fetch_github_file` tool uses a sidecar container running the GitHub MCP server behind [supergateway](https://github.com/supercorp-ai/supergateway). In OpenShift, this runs automatically as part of the pod. For local dev:
+
+```bash
+export GITHUB_PERSONAL_ACCESS_TOKEN=ghp_...
+export GITHUB_READ_ONLY=true
+npx -y supergateway --stdio "npx -y @modelcontextprotocol/server-github" --port 3000
+```
+
+Then set `github.mcp_url: "http://localhost:3000/sse"` in `config/config.local.yaml`.
+
 ## Babylon Integration
 
 Parsec queries Babylon clusters to understand what catalog items should deploy and what's currently running. This enables comparing expected vs actual resources during cost investigation.
@@ -122,12 +148,13 @@ Parsec queries Babylon clusters to understand what catalog items should deploy a
 - **Provision DB**: Read-only PostgreSQL user, SELECT-only SQL validation, 30s statement timeout, 500-row limit
 - **Cloud APIs**: Structured parameters with no injection surface
 - **Babylon**: Read-only SA, secrets auto-stripped from all results
+- **GitHub**: Read-only MCP server (`GITHUB_READ_ONLY=true`), secrets auto-redacted from fetched files
 - **Web UI**: OAuth proxy sidecar with group-based access control
 - **Reports**: Served from server-side filesystem, behind same auth
 
 ## Tech Stack
 
-- **Backend**: FastAPI, asyncpg, Anthropic SDK, boto3, azure-storage-blob, google-cloud-bigquery, httpx
+- **Backend**: FastAPI, asyncpg, Anthropic SDK, boto3, azure-storage-blob, google-cloud-bigquery, httpx, MCP Python SDK
 - **Frontend**: Plain HTML/CSS/JS with marked.js for Markdown rendering
 - **Config**: Dynaconf (YAML + env var overrides)
 - **Deployment**: Ansible playbook, Jinja2 manifests, UBI 9 container on OpenShift

@@ -73,6 +73,12 @@ github:
   # GitHub PAT for accessing private agnosticv repos (read-only)
   # Set via PARSEC_GITHUB__TOKEN env var or parsec-secrets secret
   token: ""
+  # GitHub MCP sidecar URL (supergateway SSE endpoint).
+  # The sidecar runs github-mcp-server behind supergateway for file lookups.
+  # In OpenShift, this is a sidecar container in the same pod (localhost:3000).
+  # For local dev, run supergateway manually and set this URL.
+  mcp_url: ""
+  #   mcp_url: "http://localhost:3000/sse"
 
 alert_api_key: ""
 

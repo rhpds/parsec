@@ -13,3 +13,6 @@ oauth_enabled: true
 
 # See dev.yml.example for all available variables.
 # Production values follow the same structure.
+
+# GitHub PAT for MCP sidecar (repo scope, for rhpds private repos)
+github_pat: "ghp_..."

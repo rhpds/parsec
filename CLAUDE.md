@@ -1,6 +1,6 @@
 # Parsec
 
-Natural language cloud cost investigation tool. Investigators type questions in a chat UI, and Claude queries the provision DB, AWS Cost Explorer, Azure billing CSVs, GCP BigQuery, CloudTrail Lake, individual AWS member accounts, and Babylon clusters to answer them.
+Natural language cloud cost investigation tool. Investigators type questions in a chat UI, and Claude queries the provision DB, AWS Cost Explorer, Azure billing CSVs, GCP BigQuery, CloudTrail Lake, individual AWS member accounts, Babylon clusters, and GitHub repos to answer them.
 
 ## Project Structure
 
@@ -26,6 +26,7 @@ src/
     babylon.py               # Babylon cluster catalog/deployment queries
     aap2.py                  # AAP2 controller job queries (REST API)
     agnosticd.py             # AgnosticD GitHub source code lookup
+    github_files.py          # GitHub file/directory fetching via MCP sidecar
   agent/
     learnings.py             # Post-conversation AI analysis and learning
   connections/
@@ -35,6 +36,7 @@ src/
     gcp.py                   # BigQuery client
     babylon.py               # Babylon cluster K8s API clients (httpx-based)
     aap2.py                  # AAP2 controller REST API clients (httpx-based)
+    github_mcp.py            # GitHub MCP sidecar SSE client
   routes/
     query.py                 # GET /api/auth/check, POST /api/query (SSE), GET /api/reports/{filename}
     alert.py                 # POST /api/alert/investigate (alert investigation API for cloud-slack-alerts)
@@ -413,6 +415,82 @@ Auto-detected from `scm_url` parameter. Falls back to the other repo on 404 when
 2. Get failed role/task from AAP2 job events
 3. Call `query_agnosticd_source(action="get_role", role="bookbag", task_file="remove_workload", scm_url=git_url)`
 
+## GitHub MCP Sidecar
+
+The `fetch_github_file` tool fetches files and directory listings from GitHub repositories via a sidecar container running the GitHub MCP server behind supergateway.
+
+### How It Works
+
+- A sidecar container in the Parsec pod runs `supergateway` wrapping `@modelcontextprotocol/server-github`
+- Supergateway bridges the MCP server's stdio transport to SSE over HTTP on port 3000
+- Parsec connects via the Python `mcp` SDK's SSE client (`mcp.client.sse.sse_client`)
+- Each tool call opens a fresh SSE connection (sidecar is localhost, overhead is negligible)
+- `GITHUB_READ_ONLY=true` restricts the MCP server to read-only tools
+
+### Use Cases
+
+- **AAP2 job failure investigation**: Fetching agnosticv config files (common.yaml, prod.yaml) and agnosticd env_type configs (default_vars.yml) to trace provisioning failures
+- **Catalog item inspection**: Reading catalog item definitions from agnosticv repos
+- **Code tracing**: Fetching specific Ansible roles or tasks from agnosticd when debugging failures
+
+### Configuration
+
+```yaml
+# config.local.yaml
+github:
+  mcp_url: "http://localhost:3000/sse"
+```
+
+For local dev, run the sidecar manually:
+
+```bash
+export GITHUB_PERSONAL_ACCESS_TOKEN=ghp_...
+export GITHUB_READ_ONLY=true
+npx -y supergateway --stdio "npx -y @modelcontextprotocol/server-github" --port 3000
+```
+
+For OpenShift deployment, the PAT is stored in `parsec-secrets` (key: `github-pat`) and the sidecar is defined in the Ansible manifests template.
+
+## AAP2 Job Failure Investigation
+
+Parsec can investigate AAP2 (Ansible Automation Platform 2) job failures when users paste job details and logs into the chat. Claude traces the failure through the agnosticv/agnosticd config hierarchy using `fetch_github_file`.
+
+### Investigation Flow
+
+1. User pastes AAP2 job details (job template name, project, revision) and job log
+2. Claude parses the job template name to derive the agnosticv path
+3. `fetch_github_file` fetches config files from agnosticv repos (rhpds/agnosticv, etc.)
+4. Claude resolves components if present (virtual CI or chained CI patterns)
+5. Claude extracts env_type and scm_ref, then fetches agnosticd config
+6. Claude analyzes the job log for error patterns
+7. Claude cross-references with Parsec's existing tools (provision DB, Babylon, AWS)
+
+### Job Template Name Parsing
+
+Format: `RHPDS {account}.{catalog-item}.{stage}-{guid}-{action} {uuid}`
+
+Example: `RHPDS sandboxes-gpte.ans-bu-wksp-rhel-90.prod-zhkrm-provision 54ca9081...`
+- Account: `sandboxes-gpte`
+- Catalog item path: `ANS_BU_WKSP_RHEL_90` (dashes → underscores, uppercase)
+- Stage: `prod`
+- AgnosticV path: `sandboxes-gpte/ANS_BU_WKSP_RHEL_90/prod.yaml`
+
+### AgnosticV Repos (searched in order)
+
+| Repo | Owner | Description |
+|------|-------|-------------|
+| `agnosticv` | `rhpds` | Primary catalog (most items) |
+| `partner-agnosticv` | `rhpds` | Partner subset (configs usually identical to agnosticv) |
+| `zt-ansiblebu-agnosticv` | `rhpds` | Zero-touch Ansible BU catalog |
+| `zt-rhelbu-agnosticv` | `rhpds` | Zero-touch RHEL BU catalog |
+
+### AgnosticD Repos
+
+| Project URL | Version | Owner | Repo |
+|-------------|---------|-------|------|
+| `https://github.com/redhat-cop/agnosticd.git` | v1 | `redhat-cop` | `agnosticd` |
+| `https://github.com/rhpds/agnosticd-v2.git` | v2 | `rhpds` | `agnosticd-v2` |
+
 ## Conversation History
 
 Conversations are persisted as JSON files in `data/conversations/` on the shared PVC. Each file includes an `owner` field (authenticated user's email) for per-user filtering.
@@ -620,5 +698,7 @@ annotation auto-triggers a rollout. Monitor with `oc get builds -n <namespace>`.
 - **CloudTrail Lake**: The event data store ID is environment-specific — set via local config overrides (`config.local.yaml`) or Ansible vars (`playbooks/vars/<env>.yml`), not hardcoded. The tool substitutes `cloudtrail_events` in FROM clauses with the real ID so the agent never sees it. CloudTrail Lake charges per byte scanned — always include `eventTime >` filters. `responseElements` often comes as Java-style `{key=value}` instead of JSON; the tool auto-parses these.
 - **Alert investigation API**: The `/api/alert/investigate` endpoint uses API key auth (`X-API-Key` header), not OAuth. The OAuth proxy's `-skip-auth-regex` bypasses SSO for `/api/alert/` paths. The agent loop is non-streaming (synchronous JSON response, not SSE) and excludes `render_chart`/`generate_report` tools. Claude calls `submit_alert_verdict` to submit its verdict; if it never calls the tool, the endpoint defaults to `should_alert=true`. Investigation typically takes 30-90 seconds depending on how many tools Claude calls.
 - **Cross-account access**: Uses STS AssumeRole into `OrganizationAccountAccessRole` with an inline session policy for read-only enforcement. The session policy (not the IAM role) is the security boundary — even though `OrganizationAccountAccessRole` has admin, the inline policy limits to `ec2:Describe*`, `iam:List*/Get*`, etc. Credentials are cached per account ID at module level. The `marketplace-agreement` SDK client calls IAM actions under the `aws-marketplace:` prefix, not `marketplace-agreement:` — the session policy must use `aws-marketplace:DescribeAgreement` explicitly.
+- **GitHub MCP sidecar**: Uses supergateway to bridge the GitHub MCP server's stdio transport to SSE over HTTP. The sidecar runs `node:22-alpine` with `HOME=/tmp` and `npm_config_cache=/tmp/.npm` to work with OpenShift's random UID assignment. `GITHUB_READ_ONLY=true` restricts to read-only operations. The Python `mcp` SDK connects via `mcp.client.sse.sse_client`. Each tool call opens a fresh SSE connection (no persistent session to manage). The PAT needs `repo` scope for access to rhpds private repos.
+- **AAP2 investigation**: Users paste job details and logs into the chat. The investigation workflow (job template parsing, agnosticv config resolution, component tracing, agnosticd version detection) is encoded in `config/agent_instructions.md`. No direct AAP2 Controller API connection — paste-based input only for now.
 
 See `docs/TODO.md` for the full project backlog.
