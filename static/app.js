@@ -6,22 +6,140 @@ const input = document.getElementById("question");
 const sendBtn = document.getElementById("send-btn");
 
 let conversationHistory = [];
+let currentConversationId = null;
 
 // Restore conversation history from localStorage (survives page refresh)
 try {
     const saved = localStorage.getItem("parsec_history");
     if (saved) conversationHistory = JSON.parse(saved);
+    currentConversationId = localStorage.getItem("parsec_conv_id") || null;
 } catch (e) {
     // Ignore corrupt data
 }
 
-// New Chat button — clears conversation and reloads
+// New Chat button — saves current, clears, and reloads
 document.getElementById("new-chat-btn").addEventListener("click", function() {
     conversationHistory = [];
+    currentConversationId = null;
     localStorage.removeItem("parsec_history");
-    messagesEl.innerHTML = "";
+    localStorage.removeItem("parsec_conv_id");
+    messagesEl.textContent = "";
     window.location.reload();
 });
+
+// ─── Sidebar ───
+
+var sidebarEl = document.getElementById("sidebar");
+var sidebarListEl = document.getElementById("sidebar-list");
+
+document.getElementById("sidebar-toggle-btn").addEventListener("click", function() {
+    sidebarEl.classList.toggle("open");
+    if (sidebarEl.classList.contains("open")) loadConversationList();
+});
+
+document.getElementById("sidebar-close-btn").addEventListener("click", function() {
+    sidebarEl.classList.remove("open");
+});
+
+function loadConversationList() {
+    fetch("/api/conversations").then(function(resp) {
+        if (!resp.ok) return;
+        return resp.json();
+    }).then(function(data) {
+        if (!data) return;
+        renderConversationList(data.conversations || []);
+    }).catch(function() {});
+}
+
+function renderConversationList(conversations) {
+    sidebarListEl.textContent = "";
+    if (conversations.length === 0) {
+        var empty = document.createElement("div");
+        empty.className = "sidebar-empty";
+        empty.textContent = "No previous conversations";
+        sidebarListEl.appendChild(empty);
+        return;
+    }
+    conversations.forEach(function(conv) {
+        var item = document.createElement("div");
+        item.className = "sidebar-item";
+        if (conv.id === currentConversationId) item.classList.add("active");
+
+        var titleEl = document.createElement("div");
+        titleEl.className = "sidebar-item-title";
+        titleEl.textContent = conv.title;
+
+        var metaEl = document.createElement("div");
+        metaEl.className = "sidebar-item-meta";
+        var date = new Date(conv.updated_at);
+        metaEl.textContent = date.toLocaleDateString() + " \u00b7 " + conv.message_count + " msgs";
+
+        var deleteBtn = document.createElement("button");
+        deleteBtn.className = "sidebar-item-delete";
+        deleteBtn.textContent = "\u00d7";
+        deleteBtn.title = "Delete conversation";
+        deleteBtn.addEventListener("click", function(e) {
+            e.stopPropagation();
+            if (!confirm("Delete this conversation?")) return;
+            fetch("/api/conversations/" + conv.id, { method: "DELETE" }).then(function(resp) {
+                if (resp.ok) {
+                    item.remove();
+                    if (conv.id === currentConversationId) {
+                        currentConversationId = null;
+                        localStorage.removeItem("parsec_conv_id");
+                    }
+                }
+            });
+        });
+
+        item.appendChild(deleteBtn);
+        item.appendChild(titleEl);
+        item.appendChild(metaEl);
+
+        item.addEventListener("click", function() {
+            loadConversation(conv.id);
+        });
+
+        sidebarListEl.appendChild(item);
+    });
+}
+
+function loadConversation(convId) {
+    fetch("/api/conversations/" + convId).then(function(resp) {
+        if (!resp.ok) throw new Error("Failed to load");
+        return resp.json();
+    }).then(function(data) {
+        conversationHistory = data.messages || [];
+        currentConversationId = data.id;
+        try {
+            localStorage.setItem("parsec_history", JSON.stringify(conversationHistory));
+            localStorage.setItem("parsec_conv_id", currentConversationId);
+        } catch (e) {}
+        window.location.href = window.location.pathname;
+    }).catch(function(err) {
+        alert("Failed to load conversation: " + err.message);
+    });
+}
+
+function saveConversation() {
+    if (conversationHistory.length === 0) return;
+    var body = {
+        messages: conversationHistory,
+    };
+    if (currentConversationId) body.id = currentConversationId;
+    fetch("/api/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    }).then(function(resp) {
+        if (!resp.ok) return;
+        return resp.json();
+    }).then(function(data) {
+        if (!data) return;
+        currentConversationId = data.id;
+        try { localStorage.setItem("parsec_conv_id", data.id); } catch (e) {}
+    }).catch(function() {});
+}
 
 // Share modal handlers
 document.getElementById("share-copy-btn").addEventListener("click", function() {
@@ -309,6 +427,8 @@ form.addEventListener("submit", async (e) => {
                 // Store full message history (includes tool calls/results)
                 conversationHistory = data.messages;
                 try { localStorage.setItem("parsec_history", JSON.stringify(conversationHistory)); } catch (e) {}
+                // Auto-save conversation to server
+                saveConversation();
                 break;
 
             case "done": {

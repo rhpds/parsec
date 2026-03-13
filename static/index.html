@@ -22,35 +22,45 @@
 </head>
 <body>
     <div id="app">
-        <header>
-            <img src="/logo.png" alt="Parsec" class="header-logo" height="44">
-            <button id="theme-toggle-btn" class="header-btn" title="Toggle light/dark theme" aria-label="Toggle theme"></button>
-            <a href="https://cost-monitor.apps.ocpv-infra01.dal12.infra.demo.redhat.com" target="_blank" rel="noopener" class="header-link">Cost Monitor</a>
-        </header>
-        <div id="shared-banner" class="shared-banner" style="display: none;">
-            <span>Viewing a shared investigation</span>
-            <button id="continue-btn" class="header-btn">Continue Investigation</button>
+        <aside id="sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <span class="sidebar-title">History</span>
+                <button id="sidebar-close-btn" class="sidebar-close" title="Close sidebar">&times;</button>
+            </div>
+            <div id="sidebar-list" class="sidebar-list"></div>
+        </aside>
+        <div id="main-col" class="main-col">
+            <header>
+                <button id="sidebar-toggle-btn" class="header-btn sidebar-toggle" title="Chat history" aria-label="Chat history">&#9776;</button>
+                <img src="/logo.png" alt="Parsec" class="header-logo" height="44">
+                <button id="theme-toggle-btn" class="header-btn" title="Toggle light/dark theme" aria-label="Toggle theme"></button>
+                <a href="https://cost-monitor.apps.ocpv-infra01.dal12.infra.demo.redhat.com" target="_blank" rel="noopener" class="header-link">Cost Monitor</a>
+            </header>
+            <div id="shared-banner" class="shared-banner" style="display: none;">
+                <span>Viewing a shared investigation</span>
+                <button id="continue-btn" class="header-btn">Continue Investigation</button>
+            </div>
+            <main id="chat">
+                <div id="messages"></div>
+            </main>
+            <footer>
+                <form id="query-form">
+                    <input
+                        type="search"
+                        id="question"
+                        placeholder="Ask a question — e.g. &quot;show me external users with 50+ provisions since December&quot;"
+                        autocomplete="off"
+                        autofocus
+                        data-lpignore="true"
+                        data-1p-ignore
+                        data-form-type="other"
+                        data-keeper-lock="true"
+                    >
+                    <button type="submit" id="send-btn">Send</button>
+                    <button type="button" id="new-chat-btn" class="header-btn" title="Clear conversation and start fresh">New Chat</button>
+                </form>
+            </footer>
         </div>
-        <main id="chat">
-            <div id="messages"></div>
-        </main>
-        <footer>
-            <form id="query-form">
-                <input
-                    type="search"
-                    id="question"
-                    placeholder="Ask a question — e.g. &quot;show me external users with 50+ provisions since December&quot;"
-                    autocomplete="off"
-                    autofocus
-                    data-lpignore="true"
-                    data-1p-ignore
-                    data-form-type="other"
-                    data-keeper-lock="true"
-                >
-                <button type="submit" id="send-btn">Send</button>
-                <button type="button" id="new-chat-btn" class="header-btn" title="Clear conversation and start fresh">New Chat</button>
-            </form>
-        </footer>
     </div>
     <div id="share-modal" class="modal-overlay" style="display: none;">
         <div class="modal-content">
@@ -64,6 +74,6 @@
             <button id="share-close-btn" class="header-btn">Close</button>
         </div>
     </div>
-    <script src="/app.js?v=6"></script>
+    <script src="/app.js?v=7"></script>
 </body>
 </html>
