@@ -47,6 +47,72 @@ sidebarTab.addEventListener("click", function() {
 // Load conversation list on page load (sidebar starts open)
 loadConversationList();
 
+// ─── Learnings panel (admin only) ───
+
+(function initLearnings() {
+    fetch("/api/learnings/check").then(function(resp) {
+        if (!resp.ok) return;
+        return resp.json();
+    }).then(function(data) {
+        if (!data || !data.is_admin) return;
+        var panel = document.getElementById("learnings-panel");
+        panel.style.display = "block";
+        refreshLearningsCount();
+    }).catch(function() {});
+})();
+
+function refreshLearningsCount() {
+    fetch("/api/learnings").then(function(resp) {
+        if (!resp.ok) return;
+        return resp.json();
+    }).then(function(data) {
+        if (!data) return;
+        var countEl = document.getElementById("learnings-count");
+        if (data.has_learnings) {
+            var entries = (data.content.match(/^- /gm) || []).length;
+            countEl.textContent = entries + " entries";
+        } else {
+            countEl.textContent = "empty";
+        }
+    }).catch(function() {});
+}
+
+document.getElementById("learnings-view-btn").addEventListener("click", function() {
+    fetch("/api/learnings").then(function(resp) {
+        if (!resp.ok) return;
+        return resp.json();
+    }).then(function(data) {
+        if (!data) return;
+        var textarea = document.getElementById("learnings-text");
+        textarea.value = data.content || "(no learnings yet)";
+        document.getElementById("learnings-modal").style.display = "flex";
+    }).catch(function() {});
+});
+
+document.getElementById("learnings-copy-btn").addEventListener("click", function() {
+    var textarea = document.getElementById("learnings-text");
+    navigator.clipboard.writeText(textarea.value).then(function() {
+        var btn = document.getElementById("learnings-copy-btn");
+        btn.textContent = "Copied!";
+        setTimeout(function() { btn.textContent = "Copy All"; }, 2000);
+    });
+});
+
+document.getElementById("learnings-modal-close").addEventListener("click", function() {
+    document.getElementById("learnings-modal").style.display = "none";
+});
+
+document.getElementById("learnings-modal").addEventListener("click", function(e) {
+    if (e.target === this) this.style.display = "none";
+});
+
+document.getElementById("learnings-clear-btn").addEventListener("click", function() {
+    if (!confirm("Delete all learnings? (Make sure you copied what you need first)")) return;
+    fetch("/api/learnings", { method: "DELETE" }).then(function(resp) {
+        if (resp.ok) refreshLearningsCount();
+    });
+});
+
 function loadConversationList() {
     fetch("/api/conversations").then(function(resp) {
         if (!resp.ok) return;

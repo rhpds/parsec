@@ -25,7 +25,7 @@ from src.agent.streaming import (
     sse_tool_result,
     sse_tool_start,
 )
-from src.agent.system_prompt import ALERT_INVESTIGATION_PROMPT, SYSTEM_PROMPT
+from src.agent.system_prompt import ALERT_INVESTIGATION_PROMPT, get_system_prompt
 from src.agent.tool_definitions import SUBMIT_ALERT_VERDICT_TOOL, TOOLS
 from src.config import get_config
 from src.tools.aap2 import query_aap2
@@ -432,7 +432,7 @@ async def run_agent(
 
     # Inject today's date so Claude knows the current date
     today = datetime.now(UTC).strftime("%Y-%m-%d")
-    system = f"{SYSTEM_PROMPT}\n\nToday's date is {today}."
+    system = f"{get_system_prompt()}\n\nToday's date is {today}."
 
     incoming_history = conversation_history or []
     messages = _trim_history(incoming_history)
@@ -586,7 +586,7 @@ async def run_alert_investigation(
 
     # Build system prompt: base instructions + alert investigation addendum
     today = datetime.now(UTC).strftime("%Y-%m-%d")
-    system = f"{SYSTEM_PROMPT}\n\nToday's date is {today}.\n{ALERT_INVESTIGATION_PROMPT}"
+    system = f"{get_system_prompt()}\n\nToday's date is {today}.\n{ALERT_INVESTIGATION_PROMPT}"
 
     # Build tools list: standard tools + verdict tool (exclude render_chart, generate_report)
     alert_tools = [t for t in TOOLS if t["name"] not in ("render_chart", "generate_report")]

@@ -1,5 +1,6 @@
 """Conversation persistence — save/load/list/delete chat sessions as JSON files."""
 
+import asyncio
 import json
 import logging
 import os
@@ -107,7 +108,20 @@ async def save_conversation(
     with open(fpath, "w") as f:
         json.dump(conv_data, f)
 
+    # Kick off background learning analysis (fire-and-forget)
+    asyncio.create_task(_background_learn(body.messages))
+
     return {"id": conv_id, "title": title}
+
+
+async def _background_learn(messages: list) -> None:
+    """Run learning analysis in the background, never blocking the response."""
+    try:
+        from src.agent.learnings import analyze_and_learn
+
+        await analyze_and_learn(messages)
+    except Exception:
+        logger.exception("Background learning analysis failed (non-fatal)")
 
 
 @router.get("/conversations")

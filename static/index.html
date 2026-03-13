@@ -28,6 +28,16 @@
                 <button id="sidebar-close-btn" class="sidebar-close" title="Close sidebar">&laquo;</button>
             </div>
             <div id="sidebar-list" class="sidebar-list"></div>
+            <div id="learnings-panel" class="learnings-panel" style="display: none;">
+                <div class="learnings-header">
+                    <span class="learnings-title">Agent Learnings</span>
+                    <span id="learnings-count" class="learnings-count"></span>
+                </div>
+                <div class="learnings-actions">
+                    <button id="learnings-view-btn" class="learnings-btn">View / Copy</button>
+                    <button id="learnings-clear-btn" class="learnings-btn learnings-btn-danger">Clear</button>
+                </div>
+            </div>
         </aside>
         <button id="sidebar-tab" class="sidebar-tab">History &raquo;</button>
         <header>
@@ -72,6 +82,17 @@
             <button id="share-close-btn" class="header-btn">Close</button>
         </div>
     </div>
-    <script src="/app.js?v=11"></script>
+    <div id="learnings-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content learnings-modal-content">
+            <h3>Agent Learnings</h3>
+            <p>Copy useful entries to <code>config/agent_instructions.md</code> and commit.</p>
+            <textarea id="learnings-text" class="learnings-text" readonly></textarea>
+            <div class="learnings-modal-actions">
+                <button id="learnings-copy-btn" class="header-btn">Copy All</button>
+                <button id="learnings-modal-close" class="header-btn">Close</button>
+            </div>
+        </div>
+    </div>
+    <script src="/app.js?v=12"></script>
 </body>
 </html>

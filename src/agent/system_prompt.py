@@ -1,6 +1,9 @@
-"""System prompt loader — reads from config/system_prompt.md."""
+"""System prompt loader — reads from config/agent_instructions.md + data/agent_learnings.md."""
 
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 _PROMPT_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
@@ -8,11 +11,61 @@ _PROMPT_PATH = os.path.join(
     "agent_instructions.md",
 )
 
+_LEARNINGS_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "data",
+    "agent_learnings.md",
+)
+
+# Cache for the combined prompt
+_cached_prompt: str = ""
+_cached_instructions_mtime: float = 0
+_cached_learnings_mtime: float = 0
+
+
+def _get_mtime(path: str) -> float:
+    """Get file mtime, returning 0 if file doesn't exist."""
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0
+
 
 def get_system_prompt() -> str:
-    """Load the system prompt from the markdown file."""
+    """Load the system prompt, including learnings if available.
+
+    Hot-reloads when either file changes (checked via mtime).
+    """
+    global _cached_prompt, _cached_instructions_mtime, _cached_learnings_mtime
+
+    inst_mtime = _get_mtime(_PROMPT_PATH)
+    learn_mtime = _get_mtime(_LEARNINGS_PATH)
+
+    if (
+        _cached_prompt
+        and inst_mtime == _cached_instructions_mtime
+        and learn_mtime == _cached_learnings_mtime
+    ):
+        return _cached_prompt
+
     with open(_PROMPT_PATH) as f:
-        return f.read()
+        prompt = f.read()
+
+    # Append learnings if available
+    if learn_mtime > 0:
+        try:
+            with open(_LEARNINGS_PATH) as f:
+                learnings = f.read().strip()
+            if learnings:
+                prompt += "\n\n" + learnings
+                logger.info("System prompt updated with learnings (%d chars)", len(learnings))
+        except Exception:
+            pass
+
+    _cached_prompt = prompt
+    _cached_instructions_mtime = inst_mtime
+    _cached_learnings_mtime = learn_mtime
+    return prompt
 
 
 # For backward compatibility
