@@ -874,4 +874,54 @@ TOOLS = [
             "required": ["action"],
         },
     },
+    {
+        "name": "query_agnosticv_repo",
+        "description": (
+            "Fetch catalog item configuration from AgnosticV GitHub repositories "
+            "(private). Use this to look up runtime, lifespan, and variable "
+            "definitions for a catalog item. Get the agnosticv_repo and path from "
+            "the AgnosticVComponent (spec.agnosticvRepo and spec.path) returned by "
+            "query_babylon_catalog's get_component action."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["get_config", "get_file"],
+                    "description": (
+                        "Action to perform. "
+                        "get_config: Fetch the catalog item config file (and "
+                        "common.yaml from the same directory). "
+                        "get_file: Fetch any file or list a directory."
+                    ),
+                },
+                "agnosticv_repo": {
+                    "type": "string",
+                    "description": (
+                        "The agnosticvRepo value from the AgnosticVComponent "
+                        "spec (e.g. 'rhpds-agnosticv', 'zt-ansiblebu-agnosticv', "
+                        "'zt-rhelbu-agnosticv'). This determines which GitHub "
+                        "repo to query. Required."
+                    ),
+                },
+                "path": {
+                    "type": "string",
+                    "description": (
+                        "For get_config: the spec.path from the AgnosticVComponent "
+                        "(e.g. 'ansiblebu/AAP2_WORKSHOP_NETWORKING_AUTOMATION/"
+                        "prod.yaml'). For get_file: any path within the repo."
+                    ),
+                },
+                "ref": {
+                    "type": "string",
+                    "description": (
+                        "Git ref (branch/tag). Default: 'main'. Only override "
+                        "if you need a specific version."
+                    ),
+                },
+            },
+            "required": ["action", "agnosticv_repo", "path"],
+        },
+    },
 ]

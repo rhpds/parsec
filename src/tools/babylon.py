@@ -716,8 +716,13 @@ async def _get_component(cluster: str, name: str) -> dict:
             result = await k8s_get_resource(
                 cluster, AVC_GROUP, AVC_VERSION, AVC_PLURAL, AVC_NAMESPACE, candidate
             )
-            defn = result.get("spec", {}).get("definition", {})
+            spec = result.get("spec", {})
+            defn = spec.get("definition", {})
             sanitized = _strip_secrets(defn)
+
+            # AgnosticV repo reference (for query_agnosticv_repo)
+            agnosticv_repo = spec.get("agnosticvRepo", "")
+            agnosticv_path = spec.get("path", "")
 
             # Extract instance info
             expected_instances = _extract_instance_info(sanitized)
@@ -748,6 +753,12 @@ async def _get_component(cluster: str, name: str) -> dict:
                 component_result["scm_url"] = scm_url
             if scm_ref:
                 component_result["scm_ref"] = scm_ref
+
+            # Add agnosticv repo reference for config lookup
+            if agnosticv_repo:
+                component_result["agnosticv_repo"] = agnosticv_repo
+            if agnosticv_path:
+                component_result["agnosticv_path"] = agnosticv_path
 
             # Extract component composition from __meta__.components
             components = meta.get("components", [])

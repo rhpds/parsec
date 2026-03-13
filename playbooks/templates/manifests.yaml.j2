@@ -201,6 +201,12 @@ spec:
                   name: parsec-secrets
                   key: alert-api-key
                   optional: true
+            - name: PARSEC_GITHUB__TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: parsec-secrets
+                  key: github-token
+                  optional: true
             - name: PARSEC_AUTH__ALLOWED_USERS
               valueFrom:
                 configMapKeyRef:

@@ -69,6 +69,11 @@ aap2:
   #     username: "monitor"
   #     password: ""
 
+github:
+  # GitHub PAT for accessing private agnosticv repos (read-only)
+  # Set via PARSEC_GITHUB__TOKEN env var or parsec-secrets secret
+  token: ""
+
 alert_api_key: ""
 
 learnings:

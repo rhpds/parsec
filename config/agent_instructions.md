@@ -25,6 +25,7 @@ plain text. See the "Interactive Choice Buttons" section for syntax.**
 14. **query_babylon_catalog** — Query Babylon clusters for catalog definitions, active deployments, and provisioning state
 15. **query_aap2** — Query AAP2 controllers for job metadata, execution events, and job search
 16. **query_agnosticd_source** — Fetch source code from AgnosticD GitHub repos to trace failures to Ansible roles/configs
+17. **query_agnosticv_repo** — Fetch catalog item config from AgnosticV repos (runtime, lifespan, variables). Use `agnosticv_repo` and `agnosticv_path` from `get_component` results
 
 ## Provision Database Schema
 
@@ -888,7 +889,8 @@ of compromised accounts (instances created through the AWS console by attackers)
 - For IAM investigation → use `query_aws_account` with `list_users` or `lookup_events`
 - For recent activity on a specific account → use `query_aws_account` with `lookup_events` (fast, seconds) — NOT `query_cloudtrail` (slow, scans entire org)
 - For org-wide API event searches across all accounts → use `query_cloudtrail`
-- For catalog item definitions (what SHOULD deploy) → use `query_babylon_catalog` with `get_component`
+- For catalog item definitions (what SHOULD deploy) → use `query_babylon_catalog` with `get_component`. The result includes `agnosticv_repo` and `agnosticv_path` — pass these to `query_agnosticv_repo` to see the full config (runtime, lifespan, variables)
+- For catalog item config files (runtime, lifespan, variables) → use `query_agnosticv_repo` with `agnosticv_repo` and `path` from the `get_component` result
 - For active deployments on Babylon (what IS deployed) → use `query_babylon_catalog` with `list_deployments`
 - For comparing expected vs actual resources → combine `query_babylon_catalog` + `query_aws_account`
 - For tracing provisioning failures to source code → use `query_agnosticd_source` with the role/task from AAP2 events and the `git_url` from the job metadata

@@ -30,6 +30,7 @@ from src.agent.tool_definitions import SUBMIT_ALERT_VERDICT_TOOL, TOOLS
 from src.config import get_config
 from src.tools.aap2 import query_aap2
 from src.tools.agnosticd import query_agnosticd_source
+from src.tools.agnosticv import query_agnosticv_repo
 from src.tools.aws_account import query_aws_account
 from src.tools.aws_accounts import query_aws_account_db
 from src.tools.aws_capacity_manager import query_aws_capacity_manager
@@ -195,6 +196,14 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
             cloud_provider=tool_input.get("cloud_provider", ""),
             file_path=tool_input.get("file_path", ""),
             scm_url=tool_input.get("scm_url", ""),
+            ref=tool_input.get("ref", ""),
+        )
+
+    elif tool_name == "query_agnosticv_repo":
+        return await query_agnosticv_repo(
+            action=tool_input["action"],
+            agnosticv_repo=tool_input.get("agnosticv_repo", ""),
+            path=tool_input.get("path", ""),
             ref=tool_input.get("ref", ""),
         )
 
