@@ -25,6 +25,9 @@ src/
     gcp_costs.py             # GCP BigQuery billing queries
     babylon.py               # Babylon cluster catalog/deployment queries
     aap2.py                  # AAP2 controller job queries (REST API)
+    agnosticd.py             # AgnosticD GitHub source code lookup
+  agent/
+    learnings.py             # Post-conversation AI analysis and learning
   connections/
     postgres.py              # asyncpg pool
     aws.py                   # boto3 session
@@ -35,6 +38,8 @@ src/
   routes/
     query.py                 # GET /api/auth/check, POST /api/query (SSE), GET /api/reports/{filename}
     alert.py                 # POST /api/alert/investigate (alert investigation API for cloud-slack-alerts)
+    conversations.py         # Conversation persistence (save/load/list/delete)
+    learnings.py             # Admin API for agent learnings (view/clear)
     health.py                # GET /api/health, /api/health/ready
 static/                      # Chat UI (plain HTML/CSS/JS, no build step)
 config/
@@ -384,6 +389,75 @@ For OpenShift deployment, store credentials in a secret and inject via env vars 
 ### Secret Stripping
 
 Extra vars from AAP2 jobs often contain AWS keys, passwords, and tokens. The tool strips these using the same `_SECRET_PATTERNS` and `_SECRET_KEYS` as the Babylon tool before returning results.
+
+## AgnosticD Source Lookup
+
+The `query_agnosticd_source` tool fetches Ansible role/config source code from the agnosticd GitHub repositories via the GitHub Contents API. Used to trace AAP2 job failures back to their exact source code.
+
+### Repos
+
+- **agnosticd-v2** (current): `agnosticd/agnosticd-v2`, default ref: `main`
+- **agnosticd** (legacy): `redhat-cop/agnosticd`, default ref: `development`
+
+Auto-detected from `scm_url` parameter. Falls back to the other repo on 404 when no `scm_url` specified.
+
+### Actions
+
+- `get_role` — Fetch role task files from `ansible/roles/{role}/tasks/`
+- `get_config` — Fetch env_type defaults from `ansible/configs/{env_type}/`
+- `get_file` — Arbitrary file or directory listing
+
+### Investigation Flow
+
+1. Get `git_url`/`git_branch` from AAP2 job metadata, or `scm_url`/`scm_ref` from AgnosticVComponent
+2. Get failed role/task from AAP2 job events
+3. Call `query_agnosticd_source(action="get_role", role="bookbag", task_file="remove_workload", scm_url=git_url)`
+
+## Conversation History
+
+Conversations are persisted as JSON files in `data/conversations/` on the shared PVC. Each file includes an `owner` field (authenticated user's email) for per-user filtering.
+
+### API
+
+- `POST /api/conversations` — Save/update a conversation
+- `GET /api/conversations` — List conversations for the current user
+- `GET /api/conversations/{id}` — Load a specific conversation
+- `DELETE /api/conversations/{id}` — Delete a conversation
+
+### UI
+
+- Left sidebar shows conversation history (open by default)
+- `«` button collapses sidebar; `History »` tab reopens it
+- Click a conversation to resume; `×` to delete
+- Auto-saves after each agent response
+
+## Self-Learning
+
+After each conversation save, a background task analyzes the conversation using Claude and extracts 1-3 actionable learnings (wasteful tool calls, better sequences, resolution patterns).
+
+### How It Works
+
+- Background `asyncio.create_task` after conversation save — never blocks the UI
+- Sends a compact conversation summary to Claude with an analysis prompt
+- Extracts learnings as a JSON array of strings
+- Merges with existing learnings (60% word overlap = duplicate → increment count)
+- Saves to `data/agent_learnings.md`, capped at 50 entries
+- System prompt hot-reloads learnings file (mtime check) — next conversation benefits immediately
+
+### Admin UI
+
+- Learnings panel at bottom of sidebar (visible to `learnings.admin_users` only)
+- **View/Copy** button opens modal with full learnings content
+- **Clear** button deletes the learnings file after copying
+- Workflow: review learnings → copy useful ones → paste into `config/agent_instructions.md` → commit → clear
+
+### Configuration
+
+```yaml
+learnings:
+  admin_users: "prutledg@redhat.com"
+  allow_anonymous_admin: false  # set true in config.local.yaml for local dev
+```
 
 ## CloudTrail Lake
 
