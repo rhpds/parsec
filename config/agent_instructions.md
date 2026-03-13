@@ -815,6 +815,11 @@ the source is at `ansible/roles/bookbag/tasks/remove_workload.yaml` (for destroy
 actions) in the repo identified by `git_url`.
 
 **How to use this information:**
+- **Always pass `scm_url`** when calling `query_agnosticd_source`. Get it from:
+  1. The AAP2 job's `git_url` field (from `get_job` response), OR
+  2. The AgnosticVComponent's `scm_url` field (from `get_component` response)
+  This ensures you look in the correct repo. Do NOT call `query_agnosticd_source`
+  without `scm_url` unless you have no other option.
 - When reporting a failure, include the role name, task name, and the repo path
   so the investigator knows exactly where to look
 - The `env_type` from the job metadata maps to `ansible/configs/{env_type}/` —

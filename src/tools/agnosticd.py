@@ -48,6 +48,12 @@ def _resolve_repo(scm_url: str = "", repo: str = "") -> tuple[str, str, str]:
     return r["owner"], r["repo"], r["default_ref"]
 
 
+def _fallback_repo(owner: str, repo_name: str) -> tuple[str, str, str]:
+    """Return the other agnosticd repo for fallback on 404."""
+    r = _REPOS["agnosticd"] if repo_name == "agnosticd-v2" else _REPOS["agnosticd-v2"]
+    return r["owner"], r["repo"], r["default_ref"]
+
+
 async def _github_get(owner: str, repo: str, path: str, ref: str) -> dict:
     """Fetch a file or directory listing from the GitHub Contents API."""
     url = f"{_GITHUB_API}/repos/{owner}/{repo}/contents/{path}"
@@ -269,17 +275,27 @@ async def query_agnosticd_source(
     """Main entry point for the query_agnosticd_source tool."""
     owner, repo_name, default_ref = _resolve_repo(scm_url, repo)
     effective_ref = ref or default_ref
+    # Whether to try the other repo on 404 (only when no explicit repo was specified)
+    should_fallback = not scm_url and not repo
 
     try:
         if action == "get_role":
             if not role:
                 return {"error": "role is required for get_role"}
-            return await _get_role(owner, repo_name, effective_ref, role, task_file)
+            result = await _get_role(owner, repo_name, effective_ref, role, task_file)
+            if result.get("error") and should_fallback:
+                fb_owner, fb_repo, fb_ref = _fallback_repo(owner, repo_name)
+                result = await _get_role(fb_owner, fb_repo, fb_ref, role, task_file)
+            return result
 
         elif action == "get_config":
             if not env_type:
                 return {"error": "env_type is required for get_config"}
-            return await _get_config(owner, repo_name, effective_ref, env_type, cloud_provider)
+            result = await _get_config(owner, repo_name, effective_ref, env_type, cloud_provider)
+            if result.get("error") and should_fallback:
+                fb_owner, fb_repo, fb_ref = _fallback_repo(owner, repo_name)
+                result = await _get_config(fb_owner, fb_repo, fb_ref, env_type, cloud_provider)
+            return result
 
         elif action == "get_file":
             if not file_path:
