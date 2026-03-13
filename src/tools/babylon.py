@@ -352,6 +352,8 @@ def _extract_anarchy_subject_info(subject: dict) -> dict:
     as_vars = spec.get("vars", {})
     jv = as_vars.get("job_vars", {})
 
+    annotations = metadata.get("annotations", {})
+
     result: dict[str, Any] = {
         "name": metadata.get("name", ""),
         "namespace": metadata.get("namespace", ""),
@@ -360,6 +362,15 @@ def _extract_anarchy_subject_info(subject: dict) -> dict:
         "desired_state": as_vars.get("desired_state", ""),
         "healthy": as_vars.get("healthy"),
     }
+
+    # Extract ResourceClaim reference from poolboy annotations
+    claim_name = annotations.get("poolboy.gpte.redhat.com/resource-claim-name", "")
+    claim_ns = annotations.get("poolboy.gpte.redhat.com/resource-claim-namespace", "")
+    if claim_name:
+        result["resource_claim"] = {"name": claim_name, "namespace": claim_ns}
+    requester = annotations.get("poolboy.gpte.redhat.com/resource-requester-email", "")
+    if requester:
+        result["requester_email"] = requester
 
     instance_vars = _filter_job_vars(jv)
     result["instance_vars"] = instance_vars

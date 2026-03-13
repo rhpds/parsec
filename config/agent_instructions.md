@@ -722,7 +722,10 @@ how many instances will be needed.
 
 **"What deployments are active for GUID xyz?"**
 1. Search AnarchySubjects: `query_babylon_catalog(action="list_anarchy_subjects", guid="xyz")`
-2. Or search ResourceClaims if you know the namespace
+2. The AnarchySubject result includes `resource_claim.name` and `resource_claim.namespace` —
+   use these to fetch the ResourceClaim: `query_babylon_catalog(action="get_deployment", name=claim_name, namespace=claim_namespace)`
+3. **ResourceClaims live in user namespaces** (e.g. `user-jdoe-redhat-com`), NOT in
+   `babylon-anarchy-*` namespaces. Never try to get a ResourceClaim from an anarchy namespace.
 
 ## AAP2 Job Investigation
 

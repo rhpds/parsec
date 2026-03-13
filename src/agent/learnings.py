@@ -260,6 +260,8 @@ async def _analyze_direct(cfg: dict, model: str, prompt: str) -> list[dict]:
 
 async def _analyze_vertex(cfg: dict, model: str, prompt: str) -> list[dict]:
     """Analyze using Vertex AI."""
+    import os
+
     import anthropic
 
     project_id = cfg.anthropic.get("vertex_project_id", "")  # type: ignore[attr-defined]
@@ -267,7 +269,18 @@ async def _analyze_vertex(cfg: dict, model: str, prompt: str) -> list[dict]:
     if not project_id:
         return []
 
-    client = anthropic.AsyncAnthropicVertex(project_id=project_id, region=region)
+    kwargs: dict = {"project_id": project_id, "region": region}
+    creds_path = cfg.anthropic.get("vertex_credentials_path", "")  # type: ignore[attr-defined]
+    if creds_path and os.path.isfile(creds_path):
+        from google.oauth2 import service_account
+
+        credentials = service_account.Credentials.from_service_account_file(
+            creds_path,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+        kwargs["credentials"] = credentials
+
+    client = anthropic.AsyncAnthropicVertex(**kwargs)
     resp = await client.messages.create(
         model=model,
         max_tokens=1024,
