@@ -347,6 +347,7 @@ def _extract_anarchy_subject_info(subject: dict) -> dict:
     """Extract key info from an AnarchySubject, stripping secrets."""
     metadata = subject.get("metadata", {})
     spec = subject.get("spec", {})
+    status = subject.get("status", {})
 
     as_vars = spec.get("vars", {})
     jv = as_vars.get("job_vars", {})
@@ -362,6 +363,26 @@ def _extract_anarchy_subject_info(subject: dict) -> dict:
 
     instance_vars = _filter_job_vars(jv)
     result["instance_vars"] = instance_vars
+
+    # Extract towerJobs from status — contains controller hostname and job IDs
+    # for each lifecycle action (provision, destroy, stop, start)
+    tower_jobs = status.get("towerJobs", {})
+    if tower_jobs and isinstance(tower_jobs, dict):
+        parsed_jobs: dict[str, Any] = {}
+        for action_name, job_info in tower_jobs.items():
+            if not isinstance(job_info, dict):
+                continue
+            entry: dict[str, Any] = {}
+            if job_info.get("towerHost"):
+                entry["towerHost"] = job_info["towerHost"]
+            if job_info.get("deployerJob"):
+                entry["deployerJob"] = job_info["deployerJob"]
+            if job_info.get("completeJob"):
+                entry["completeJob"] = job_info["completeJob"]
+            if entry:
+                parsed_jobs[action_name] = entry
+        if parsed_jobs:
+            result["tower_jobs"] = parsed_jobs
 
     return result
 
@@ -690,16 +711,47 @@ async def _get_component(cluster: str, name: str) -> dict:
             # Extract instance info
             expected_instances = _extract_instance_info(sanitized)
 
+            # Extract deployer info from __meta__
+            meta = sanitized.get("__meta__", {})
+            deployer = meta.get("deployer", {}) or {}
+            scm_url = deployer.get("scm_url", "") or sanitized.get("scm_url", "") or ""
+            scm_ref = (
+                deployer.get("scm_ref", "")
+                or deployer.get("scm_branch", "")
+                or sanitized.get("scm_ref", "")
+                or ""
+            )
+
             # Get key fields
-            return {
+            component_result: dict[str, Any] = {
                 "cluster": cluster,
                 "name": candidate,
                 "cloud_provider": sanitized.get("cloud_provider", ""),
                 "env_type": sanitized.get("env_type", ""),
                 "platform": sanitized.get("platform", ""),
                 "expected_instances": expected_instances,
-                "definition": sanitized,
             }
+
+            # Add deployer/source info if available
+            if scm_url:
+                component_result["scm_url"] = scm_url
+            if scm_ref:
+                component_result["scm_ref"] = scm_ref
+
+            # Extract component composition from __meta__.components
+            components = meta.get("components", [])
+            if components and isinstance(components, list):
+                component_result["sub_components"] = [
+                    {
+                        "name": c.get("name", ""),
+                        "item": c.get("item", ""),
+                    }
+                    for c in components
+                    if isinstance(c, dict)
+                ]
+
+            component_result["definition"] = sanitized
+            return component_result
         except Exception as e:
             last_error = e
             continue

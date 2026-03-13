@@ -788,4 +788,90 @@ TOOLS = [
             "required": ["action"],
         },
     },
+    {
+        "name": "query_agnosticd_source",
+        "description": (
+            "Fetch source code from AgnosticD GitHub repositories to trace "
+            "provisioning failures to their exact Ansible role or config. Use this "
+            "after finding a failed AAP2 job event — the event's role and task fields "
+            "tell you where the failure occurred, and this tool fetches the actual "
+            "source code. The git_url from the AAP2 job identifies which repo to use."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["get_role", "get_config", "get_file"],
+                    "description": (
+                        "Action to perform. "
+                        "get_role: Fetch task files from ansible/roles/{role}/tasks/. "
+                        "Returns the role's available task files and their content. "
+                        "get_config: Fetch default_vars for an env_type from "
+                        "ansible/configs/{env_type}/. "
+                        "get_file: Fetch an arbitrary file or list a directory."
+                    ),
+                },
+                "role": {
+                    "type": "string",
+                    "description": (
+                        "For get_role: Ansible role name (e.g. 'bookbag', "
+                        "'ocp4_workload_machinesets'). Get this from the 'role' "
+                        "field in AAP2 job events."
+                    ),
+                },
+                "task_file": {
+                    "type": "string",
+                    "description": (
+                        "For get_role: specific task file to fetch (e.g. "
+                        "'remove_workload', 'workload'). Without this, fetches "
+                        "main.yml and workload-related files. The AAP2 job action "
+                        "(provision vs destroy) hints at which file: destroy → "
+                        "remove_workload, provision → workload."
+                    ),
+                },
+                "env_type": {
+                    "type": "string",
+                    "description": (
+                        "For get_config: environment type (e.g. 'ocp4-cluster', "
+                        "'cloud-vms-base'). Maps to ansible/configs/{env_type}/."
+                    ),
+                },
+                "cloud_provider": {
+                    "type": "string",
+                    "description": (
+                        "For get_config: cloud provider for cloud-specific defaults "
+                        "(e.g. 'ec2', 'azure', 'openshift_cnv'). Fetches "
+                        "ansible/configs/{env_type}/{cloud_provider}/default_vars.yml."
+                    ),
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": (
+                        "For get_file: path within the repo (e.g. "
+                        "'ansible/roles/bookbag/tasks/remove_workload.yml')."
+                    ),
+                },
+                "scm_url": {
+                    "type": "string",
+                    "description": (
+                        "Git URL to auto-detect which repo to use. Pass the "
+                        "git_url from the AAP2 job metadata or scm_url from "
+                        "the AgnosticVComponent. If it contains 'agnosticd-v2', "
+                        "uses agnosticd/agnosticd-v2; otherwise uses "
+                        "redhat-cop/agnosticd."
+                    ),
+                },
+                "ref": {
+                    "type": "string",
+                    "description": (
+                        "Git ref (branch/tag/commit). Pass the git_branch or "
+                        "git_revision from the AAP2 job metadata. Default: "
+                        "'main' for agnosticd-v2, 'development' for legacy."
+                    ),
+                },
+            },
+            "required": ["action"],
+        },
+    },
 ]
