@@ -32,6 +32,8 @@ data:
     cloudtrail:
       event_data_store_id: "{{ cloudtrail_event_data_store_id | default('') }}"
     alert_api_key: ""
+    learnings:
+      admin_users: "{{ learnings_admin_users | default('') }}"
     auth:
       allowed_groups: "{{ oauth_allowed_groups }}"
       allowed_users: ""
