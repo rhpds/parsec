@@ -35,6 +35,32 @@ def _resolve_github_repo(agnosticv_repo: str) -> str:
     return _REPO_NAME_MAP.get(agnosticv_repo, agnosticv_repo)
 
 
+# Cache default branches to avoid repeated API calls
+_default_branch_cache: dict[str, str] = {}
+
+
+async def _get_default_branch(owner: str, repo: str, token: str) -> str:
+    """Fetch the default branch for a repo from the GitHub API."""
+    cache_key = f"{owner}/{repo}"
+    if cache_key in _default_branch_cache:
+        return _default_branch_cache[cache_key]
+
+    url = f"{_GITHUB_API}/repos/{owner}/{repo}"
+    headers: dict[str, str] = {"Accept": "application/vnd.github.v3+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+            branch = resp.json().get("default_branch", "main")
+            _default_branch_cache[cache_key] = branch
+            return branch
+    except Exception:
+        return "main"
+
+
 async def _github_get(owner: str, repo: str, path: str, ref: str, token: str) -> dict:
     """Fetch a file or directory listing from the GitHub Contents API."""
     url = f"{_GITHUB_API}/repos/{owner}/{repo}/contents/{path}"
@@ -92,7 +118,7 @@ async def query_agnosticv_repo(
 
     owner = "rhpds"
     repo_name = _resolve_github_repo(agnosticv_repo)
-    effective_ref = ref or "main"
+    effective_ref = ref or await _get_default_branch(owner, repo_name, token)
 
     try:
         if action == "get_config":
