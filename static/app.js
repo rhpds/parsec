@@ -31,15 +31,21 @@ document.getElementById("new-chat-btn").addEventListener("click", function() {
 
 var sidebarEl = document.getElementById("sidebar");
 var sidebarListEl = document.getElementById("sidebar-list");
-
-document.getElementById("sidebar-toggle-btn").addEventListener("click", function() {
-    sidebarEl.classList.toggle("open");
-    if (sidebarEl.classList.contains("open")) loadConversationList();
-});
+var sidebarTab = document.getElementById("sidebar-tab");
 
 document.getElementById("sidebar-close-btn").addEventListener("click", function() {
     sidebarEl.classList.remove("open");
+    sidebarTab.style.display = "block";
 });
+
+sidebarTab.addEventListener("click", function() {
+    sidebarEl.classList.add("open");
+    sidebarTab.style.display = "none";
+    loadConversationList();
+});
+
+// Load conversation list on page load (sidebar starts open)
+loadConversationList();
 
 function loadConversationList() {
     fetch("/api/conversations").then(function(resp) {
@@ -138,6 +144,7 @@ function saveConversation() {
         if (!data) return;
         currentConversationId = data.id;
         try { localStorage.setItem("parsec_conv_id", data.id); } catch (e) {}
+        loadConversationList();
     }).catch(function() {});
 }
 
