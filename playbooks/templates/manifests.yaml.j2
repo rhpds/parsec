@@ -302,7 +302,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: parsec-secrets
-                  key: github-pat
+                  key: github-token
                   optional: true
             - name: GITHUB_READ_ONLY
               value: "true"

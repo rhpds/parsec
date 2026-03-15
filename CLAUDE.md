@@ -449,7 +449,7 @@ export GITHUB_READ_ONLY=true
 npx -y supergateway --stdio "npx -y @modelcontextprotocol/server-github" --port 3000
 ```
 
-For OpenShift deployment, the PAT is stored in `parsec-secrets` (key: `github-pat`) and the sidecar is defined in the Ansible manifests template.
+For OpenShift deployment, the PAT is stored in `parsec-secrets` (key: `github-token`) — shared with the agnosticd source tool — and the sidecar is defined in the Ansible manifests template.
 
 ## AAP2 Job Failure Investigation
 

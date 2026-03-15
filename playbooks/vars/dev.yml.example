@@ -64,8 +64,9 @@ aap2_partner0_url: https://aap2-partner0-prod-us-east-2.aap.infra.partner.demo.r
 aap2_partner0_username: monitor
 aap2_partner0_password: ""
 
-# GitHub PAT for MCP sidecar (repo scope, for rhpds private repos)
-github_pat: "ghp_..."
+# GitHub PAT (repo scope, for rhpds private repos)
+# Used by both the agnosticd source tool and the MCP sidecar
+github_token: "ghp_..."
 
 # Allowed users (comma-separated emails, empty = group-based auth only)
 allowed_users: ""
