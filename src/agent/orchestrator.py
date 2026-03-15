@@ -41,8 +41,8 @@ from src.tools.babylon import query_babylon_catalog
 from src.tools.cloudtrail import query_cloudtrail
 from src.tools.cost_monitor import query_cost_monitor
 from src.tools.gcp_costs import query_gcp_costs
-from src.tools.marketplace_agreements import query_marketplace_agreements
 from src.tools.github_files import fetch_github_file
+from src.tools.marketplace_agreements import query_marketplace_agreements
 from src.tools.provision_db import execute_query
 
 logger = logging.getLogger(__name__)
