@@ -6,8 +6,12 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./config/config.local.yaml:/app/config/config.local.yaml:ro
-      - ./reports:/app/reports
+      - ./config/config.local.yaml:/app/config/config.local.yaml:ro,z
+      - ./reports:/app/reports:z
+    env_file:
+      - .env
     environment:
       - PARSEC_ANTHROPIC__API_KEY=${ANTHROPIC_API_KEY:-}
+      - PARSEC_AUTH__ALLOWED_GROUPS=
+      - PARSEC_AUTH__ALLOWED_USERS=
     restart: unless-stopped
