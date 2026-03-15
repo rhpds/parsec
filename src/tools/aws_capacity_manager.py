@@ -286,9 +286,9 @@ def _query_inventory(
         persistent.append(
             {
                 "reservation_id": res_id,
-                "avg_utilization_pct": round(sum(util_vals) / len(util_vals), 1)
-                if util_vals
-                else None,
+                "avg_utilization_pct": (
+                    round(sum(util_vals) / len(util_vals), 1) if util_vals else None
+                ),
                 "unused_estimated_cost_usd": unused_cost,
                 "hours_active": hours_active,
             }
