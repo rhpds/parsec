@@ -9,7 +9,8 @@ services:
       - ./config/config.local.yaml:/app/config/config.local.yaml:ro,z
       - ./reports:/app/reports:z
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       - PARSEC_ANTHROPIC__API_KEY=${ANTHROPIC_API_KEY:-}
       - PARSEC_AUTH__ALLOWED_GROUPS=
