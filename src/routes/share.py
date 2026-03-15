@@ -1,5 +1,6 @@
 """Share endpoint — POST /api/share + GET /api/share/{id}."""
 
+import asyncio
 import json
 import logging
 import os
@@ -17,10 +18,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["share"])
 
 SHARES_DIR = os.path.join("data", "shares")
-os.makedirs(SHARES_DIR, exist_ok=True)
+
+
+def ensure_shares_dir() -> None:
+    """Create the shares directory if it doesn't exist."""
+    os.makedirs(SHARES_DIR, exist_ok=True)
+
 
 _SHARE_TTL_DAYS = 90
 _UUID_RE = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
+
+
+def _read_json(fpath: str) -> dict:
+    with open(fpath) as f:
+        return json.load(f)
+
+
+def _write_json(fpath: str, data: dict) -> None:
+    with open(fpath, "w") as f:
+        json.dump(data, f)
 
 
 class ShareRequest(BaseModel):
@@ -100,13 +116,12 @@ async def create_share(
     }
 
     fpath = os.path.join(SHARES_DIR, f"{share_id}.json")
-    with open(fpath, "w") as f:
-        json.dump(share_data, f)
+    await asyncio.to_thread(_write_json, fpath, share_data)
 
     logger.info("Share created: %s by %s (%s)", share_id, user, title[:60])
 
-    # Lazy cleanup of old shares
-    _cleanup_old_shares()
+    # Lazy cleanup in background — don't block the response
+    asyncio.get_event_loop().run_in_executor(None, _cleanup_old_shares)
 
     # Build URL from request
     base_url = str(request.base_url).rstrip("/")
@@ -133,5 +148,4 @@ async def get_share(
     if not os.path.isfile(fpath):
         raise HTTPException(status_code=404, detail="Shared session not found")
 
-    with open(fpath) as f:
-        return json.load(f)
+    return await asyncio.to_thread(_read_json, fpath)
