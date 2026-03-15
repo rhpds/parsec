@@ -13,6 +13,20 @@ _GITHUB_API = "https://api.github.com"
 _MAX_FILE_SIZE = 50_000
 _TIMEOUT = 15.0
 
+_client: httpx.AsyncClient | None = None
+
+
+def _get_http_client(token: str) -> httpx.AsyncClient:
+    """Get or create a reusable httpx client for GitHub API requests."""
+    global _client  # noqa: PLW0603
+    if _client is None:
+        headers: dict[str, str] = {"Accept": "application/vnd.github.v3+json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        _client = httpx.AsyncClient(timeout=_TIMEOUT, headers=headers)
+    return _client
+
+
 # Map agnosticvRepo names (from AgnosticVComponent spec) to GitHub repos.
 # Most repos are under the rhpds org. The main repo has a name mismatch:
 # AgnosticVComponent uses "rhpds-agnosticv" but the GitHub repo is "agnosticv".
@@ -46,17 +60,14 @@ async def _get_default_branch(owner: str, repo: str, token: str) -> str:
         return _default_branch_cache[cache_key]
 
     url = f"{_GITHUB_API}/repos/{owner}/{repo}"
-    headers: dict[str, str] = {"Accept": "application/vnd.github.v3+json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.get(url, headers=headers)
-            resp.raise_for_status()
-            branch = resp.json().get("default_branch", "main")
-            _default_branch_cache[cache_key] = branch
-            return branch
+        client = _get_http_client(token)
+        resp = await client.get(url)
+        resp.raise_for_status()
+        branch = resp.json().get("default_branch", "main")
+        _default_branch_cache[cache_key] = branch
+        return branch
     except Exception:
         return "main"
 
@@ -65,24 +76,21 @@ async def _github_get(owner: str, repo: str, path: str, ref: str, token: str) ->
     """Fetch a file or directory listing from the GitHub Contents API."""
     url = f"{_GITHUB_API}/repos/{owner}/{repo}/contents/{path}"
     params = {"ref": ref}
-    headers: dict[str, str] = {"Accept": "application/vnd.github.v3+json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
 
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        resp = await client.get(url, params=params, headers=headers)
-        resp.raise_for_status()
-        return resp.json()
+    client = _get_http_client(token)
+    resp = await client.get(url, params=params)
+    resp.raise_for_status()
+    return resp.json()
 
 
-def _decode_file_content(data: dict) -> str:
+def _decode_file_content(data: dict, max_size: int = _MAX_FILE_SIZE) -> str:
     """Decode base64 file content from GitHub API response."""
     content = data.get("content", "")
     encoding = data.get("encoding", "")
     if encoding == "base64" and content:
         decoded = base64.b64decode(content).decode("utf-8", errors="replace")
-        if len(decoded) > _MAX_FILE_SIZE:
-            return decoded[:_MAX_FILE_SIZE] + f"\n... [truncated at {_MAX_FILE_SIZE} chars]"
+        if len(decoded) > max_size:
+            return decoded[:max_size] + f"\n... [truncated at {max_size} chars]"
         return decoded
     return content
 
