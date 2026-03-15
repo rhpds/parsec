@@ -202,7 +202,10 @@ async def query(
     )
 
     async def event_stream():
-        async for event in run_agent(body.question, body.conversation_history):
+        async for event in run_agent(
+            body.question,
+            body.conversation_history,
+        ):
             yield event
 
     return StreamingResponse(

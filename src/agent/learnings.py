@@ -6,6 +6,8 @@ import os
 import re
 from datetime import UTC, datetime
 
+from anthropic.types import TextBlock
+
 from src.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -255,7 +257,10 @@ async def _analyze_direct(cfg: dict, model: str, prompt: str) -> list[dict]:
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}],
     )
-    return _parse_analysis_response(resp.content[0].text)
+    block = resp.content[0]
+    if not isinstance(block, TextBlock):
+        return []
+    return _parse_analysis_response(block.text)
 
 
 async def _analyze_vertex(cfg: dict, model: str, prompt: str) -> list[dict]:
@@ -286,7 +291,10 @@ async def _analyze_vertex(cfg: dict, model: str, prompt: str) -> list[dict]:
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}],
     )
-    return _parse_analysis_response(resp.content[0].text)
+    block = resp.content[0]
+    if not isinstance(block, TextBlock):
+        return []
+    return _parse_analysis_response(block.text)
 
 
 async def _analyze_bedrock(cfg: dict, model: str, prompt: str) -> list[dict]:
@@ -301,7 +309,10 @@ async def _analyze_bedrock(cfg: dict, model: str, prompt: str) -> list[dict]:
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}],
     )
-    return _parse_analysis_response(resp.content[0].text)
+    block = resp.content[0]
+    if not isinstance(block, TextBlock):
+        return []
+    return _parse_analysis_response(block.text)
 
 
 def _parse_analysis_response(text: str) -> list[dict]:

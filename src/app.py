@@ -13,6 +13,7 @@ from src.connections.aws import init_aws
 from src.connections.azure import init_azure
 from src.connections.babylon import init_babylon
 from src.connections.gcp import init_gcp
+from src.connections.github_mcp import init_github_mcp
 from src.connections.postgres import close_pool, init_pool
 from src.routes.alert import router as alert_router
 from src.routes.conversations import router as conversations_router
@@ -48,6 +49,7 @@ async def lifespan(app: FastAPI):
         ("GCP", init_gcp),
         ("Babylon", init_babylon),
         ("AAP2", init_aap2),
+        ("GitHub MCP", init_github_mcp),
     ]:
         try:
             init_fn()

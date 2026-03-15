@@ -26,6 +26,7 @@ plain text. See the "Interactive Choice Buttons" section for syntax.**
 15. **query_aap2** — Query AAP2 controllers for job metadata, execution events, and job search
 16. **query_agnosticd_source** — Fetch source code from AgnosticD GitHub repos to trace failures to Ansible roles/configs
 17. **query_agnosticv_repo** — Fetch catalog item config from AgnosticV repos (runtime, lifespan, variables). Use `agnosticv_repo` and `agnosticv_path` from `get_component` results
+18. **fetch_github_file** — Fetch files and directories from GitHub repositories (agnosticv, agnosticd config files for AAP2 investigation)
 
 ## Provision Database Schema
 
@@ -1217,6 +1218,223 @@ When a user asks about AWS Marketplace subscriptions (e.g. "when was Ansible ord
 
 Marketplace subscriptions are NOT tracked in the provision DB. Do NOT query the
 provision DB for marketplace information — use CloudTrail Lake and account inspection.
+
+### Investigate AAP2 Job Failures
+
+When a user pastes AAP2 job details, uploads a job log, or asks about a failed AAP2
+job, follow this workflow. The workflow combines live AAP2 API queries (via
+`query_aap2`) with pasted/uploaded content for a complete investigation.
+
+**Possible inputs from the user:**
+- **Job Details** — copy-pasted from the AAP2 job details page
+- **Job Log** — pasted log content or uploaded log file (attached to the message)
+- **Job ID + controller** — direct reference to a job
+- **GUID or catalog item name** — enough to search for the job
+
+#### Step 1: Parse Job Details and Query AAP2
+
+Extract key fields from any pasted job details:
+
+| Field | What to Extract |
+|-------|-----------------|
+| Job Template | Parse to get GUID, account, catalog item, stage (see rules below) |
+| Job ID | The numeric job ID (if visible in the pasted details or URL) |
+| Project | Determines agnosticd version (v1 or v2) |
+| Revision | Git commit SHA for agnosticd |
+| Status | Failed, Error, etc. |
+
+**Always query the AAP2 API for structured data.** After extracting the GUID or job
+ID from the pasted details:
+
+1. **If you have a job ID and controller**: Call `query_aap2(action="get_job",
+   controller=<controller>, job_id=<id>)` directly to get structured metadata
+   (status, duration, git context, env_type, extra_vars).
+2. **If you have a GUID but no job ID**: Call `query_aap2(action="find_jobs",
+   template_name="<guid>")` to search all controllers. This returns the job ID
+   and controller automatically.
+3. **If the job is found**: Use the API response for metadata instead of parsing
+   pasted text — it's more reliable and includes parsed extra_vars with env_type,
+   cloud_provider, git_url, and git_branch.
+4. **If the AAP2 API is unreachable or returns no results**: Fall back to parsing
+   the pasted job details and log content directly.
+
+#### Step 2: Parse the Job Template Name
+
+Job Template format: `RHPDS {account}.{catalog-item}.{stage}-{guid}-{action} {uuid}`
+
+**Example:** `RHPDS sandboxes-gpte.ans-bu-wksp-rhel-90.prod-zhkrm-provision 54ca9081-c13c-5b44-9e8a-5b6c162c719a`
+
+**Parsing rules:**
+1. **Account**: First segment after `RHPDS ` (e.g., `sandboxes-gpte`)
+2. **Catalog Item**: Second segment, convert dashes to underscores and UPPERCASE
+   (e.g., `ans-bu-wksp-rhel-90` → `ANS_BU_WKSP_RHEL_90`)
+3. **Stage**: Third segment before the GUID pattern — one of `prod`, `dev`, `test`, `event`
+   (e.g., `prod-zhkrm-provision` → `prod`)
+
+**Resulting agnosticv path:** `{account}/{CATALOG_ITEM}/{stage}.yaml`
+- Example: `sandboxes-gpte/ANS_BU_WKSP_RHEL_90/prod.yaml`
+
+#### Step 3: Locate AgnosticV Config
+
+Use `fetch_github_file` to find the catalog item config. Search these repos in order
+(all owned by `rhpds`):
+
+1. `agnosticv` (primary catalog — most items are here)
+2. `partner-agnosticv` (partner subset — configs are usually identical to `agnosticv`)
+3. `zt-ansiblebu-agnosticv`
+4. `zt-rhelbu-agnosticv`
+
+For each repo, first try to list the catalog item directory:
+`fetch_github_file(owner="rhpds", repo="{repo}", path="{account}/{CATALOG_ITEM}")`
+
+Once you find the correct repo, fetch these files:
+- `{account}/{CATALOG_ITEM}/{stage}.yaml` — stage-specific overrides
+- `{account}/{CATALOG_ITEM}/common.yaml` — base configuration (contains `env_type`)
+
+#### Step 4: Resolve Components
+
+Check if `__meta__.components` is present in `common.yaml`. There are two patterns:
+
+**Pattern A — Virtual CI** (`deployer.type: null`): The parent has no deployer. All
+actual config lives in the component's files. The AAP job template references the
+component path, not the parent.
+
+```yaml
+__meta__:
+  components:
+  - name: ai-driven-automation
+    item: openshift_cnv/ai-driven-automation
+  deployer:
+    type: null
+```
+
+**Pattern B — Chained CI** (own deployer + components): The catalog item has
+components for infrastructure AND its own deployer for workloads on top. A failure
+could be in either the component's job (infrastructure) or the catalog item's own
+job (workloads) — check the job template name.
+
+```yaml
+config: openshift-workloads
+__meta__:
+  components:
+  - name: openshift
+    item: agd-v2/ocp-cluster-cnv-pools/prod
+    propagate_provision_data:
+    - name: openshift_api_url
+      var: openshift_api_url
+  deployer:
+    scm_url: https://github.com/agnosticd/agnosticd-v2
+    scm_ref: main
+```
+
+**Component resolution rules:**
+1. The `item` field is a path to a folder in the **same agnosticv repo**
+2. Stage propagates from parent to component (`prod` → component's `prod.yaml`)
+3. Components can have sub-components — follow the chain
+4. Fetch component configs: `fetch_github_file(owner="rhpds", repo="{repo}", path="{item}/common.yaml")`
+
+#### Step 5: Extract env_type and scm_ref
+
+Find `env_type` (agnosticd v1) or `config` (agnosticd v2):
+- **Virtual CI (Pattern A):** from the **component's** `common.yaml`
+- **Chained CI (Pattern B):** from the **catalog item's own** `common.yaml`
+- **No components:** from the catalog item's `common.yaml` directly
+
+Also extract `__meta__.deployer.scm_ref` — check stage file first, then `common.yaml`:
+- `prod.yaml` typically pins a release tag (e.g., `scm_ref: rosa-mobb-1.9.3`)
+- `dev.yaml` typically uses `development` branch
+
+#### Step 6: Determine AgnosticD Version and Fetch Config
+
+Parse the Project field from the job details:
+
+| Project Pattern | Version | GitHub Owner | GitHub Repo |
+|----------------|---------|--------------|-------------|
+| `https://github.com/redhat-cop/agnosticd.git` | v1 | `redhat-cop` | `agnosticd` |
+| `https://github.com/rhpds/agnosticd-v2.git` | v2 | `rhpds` | `agnosticd-v2` |
+
+Use the `ref` parameter when fetching agnosticd files:
+1. **If the job has a Revision SHA** — use it to fetch the exact commit that ran
+2. **Otherwise** — use the `scm_ref` from agnosticv (a tag or branch name)
+
+Fetch the env_type config:
+- `fetch_github_file(owner="{owner}", repo="{repo}", path="ansible/configs/{env_type}", ref="{ref}")`
+- `fetch_github_file(owner="{owner}", repo="{repo}", path="ansible/configs/{env_type}/default_vars.yml", ref="{ref}")`
+
+When tracing a failure to a specific role:
+- `fetch_github_file(owner="{owner}", repo="{repo}", path="ansible/roles/{role_name}/tasks/main.yml", ref="{ref}")`
+
+#### Step 7: Analyze the Failure
+
+**Prefer structured API data over raw log parsing.** If the AAP2 API is available:
+1. Call `query_aap2(action="get_job_events", controller=<controller>,
+   job_id=<id>, failed_only=true)` to get structured error events with
+   `role`, `task`, `host`, `error_msg`, and `stdout` fields.
+2. The structured events are more reliable than parsing raw logs — use them
+   as the primary source for identifying which role/task failed and why.
+
+**Use the uploaded/pasted log for additional context** when:
+- The AAP2 API is unreachable or not configured
+- You need the full PLAY RECAP or timing details not in the API events
+- The API events are truncated (stdout is capped at 500 chars) and you need
+  the full error output from the log
+
+Common failure patterns in raw logs:
+
+| Pattern | Likely Cause |
+|---------|--------------|
+| `FAILED! => {"msg": "..."}` | Task failure with error message |
+| `fatal: [host]: UNREACHABLE!` | SSH/connectivity issues |
+| `ERROR! No inventory` | Inventory generation failed |
+| `Unable to resolve DNS` | DNS or network issues |
+| `cloud_provider error` | Cloud API quota/limits/credentials |
+| `timeout` | Resource provisioning timeout |
+| `Vault password` | Missing vault credentials |
+
+Examine these sections in raw logs:
+1. **PLAY RECAP** — summary of hosts and status
+2. **fatal** or **FAILED** tasks — actual error messages
+3. **TASK [role_name : task_name]** — identify which role/task failed
+4. **Cloud provider errors** — AWS/Azure/GCP specific errors
+
+#### Step 8: Cross-Reference with Parsec Data
+
+Combine GitHub config analysis with Parsec's existing tools:
+- **AAP2 retries**: Use `query_aap2(action="find_jobs", template_name="<guid>")`
+  to find retry jobs and related provision/destroy jobs across all controllers
+- **Provision DB**: Look up the GUID to find the user, account, and provision history
+- **Babylon**: Query the catalog item definition and active deployment state
+- **AWS account**: Check running instances if the failure is infrastructure-related
+- **Cost data**: Check recent costs if the failure may be quota/budget-related
+
+#### AAP2 Output Format
+
+Present your findings in this structure:
+
+**Job Analysis:** Job ID, status, duration
+**Configuration Trace:**
+
+| Layer | Location | Key Values |
+|-------|----------|------------|
+| AgnosticV Stage | `{account}/{catalog_item}/{stage}.yaml` | deployer settings |
+| AgnosticV Common | `{account}/{catalog_item}/common.yaml` | env_type, components |
+| Component (if used) | `{component_item}/common.yaml` | actual env_type, scm_ref |
+| AgnosticD Config | `ansible/configs/{env_type}/` | playbook structure |
+
+**Failure Analysis:** Failed task, host, error message
+**Root Cause & Recommendations:** Immediate cause, underlying reason, fix suggestions
+**Relevant Files:** Links to the agnosticv and agnosticd files reviewed
+
+#### Quick Reference: Common AAP2 Fixes
+
+| Error Type | Common Fix |
+|------------|------------|
+| DNS resolution | Check VPC/subnet configuration |
+| Cloud quota | Request quota increase or use different region |
+| SSH unreachable | Check security groups, bastion access |
+| Timeout | Increase timeout in deployer settings or reduce scope |
+| Vault errors | Verify vault credentials are available |
+| Package install | Check repo configuration, satellite access |
 
 ## Charts
 

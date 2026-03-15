@@ -280,11 +280,20 @@ marked.setOptions({ renderer: renderer });
 
     // Authorized (or local dev with no proxy) — show welcome
     const el = addMessage("assistant", "");
+    el.id = "welcome-message";
     const contentEl = el.querySelector(".content");
-    const textEl = document.createElement("div");
-    textEl.className = "md-text";
-    textEl.innerHTML = marked.parse(
-        "**Hi, I'm Parsec** — a natural language investigation assistant for RHDP cloud costs and provisioning.\n\n" +
+
+    var welcomeShort = document.createElement("div");
+    welcomeShort.className = "md-text welcome-short";
+    welcomeShort.innerHTML = marked.parse(
+        "**Hi, I'm Parsec** — a natural language investigation assistant for RHDP cloud costs and provisioning. " +
+        "Ask me anything about costs, provisions, sandboxes, or usage."
+    );
+    contentEl.appendChild(welcomeShort);
+
+    var welcomeFull = document.createElement("div");
+    welcomeFull.className = "md-text welcome-full";
+    welcomeFull.innerHTML = marked.parse(
         "I can help you with things like:\n" +
         "- \"What services does user@redhat.com have?\"\n" +
         "- \"What instances should clusterplatform.ocp4-aws.prod be running?\"\n" +
@@ -301,7 +310,16 @@ marked.setOptions({ renderer: renderer });
         "in the [parsec repo](https://github.com/rhpds/parsec) " +
         "— PRs welcome \uD83D\uDE01"
     );
-    contentEl.appendChild(textEl);
+    contentEl.appendChild(welcomeFull);
+
+    var welcomeToggle = document.createElement("button");
+    welcomeToggle.className = "welcome-toggle";
+    welcomeToggle.textContent = "Show examples";
+    welcomeToggle.addEventListener("click", function() {
+        var isExpanded = el.classList.toggle("welcome-expanded");
+        welcomeToggle.textContent = isExpanded ? "Hide examples" : "Show examples";
+    });
+    contentEl.appendChild(welcomeToggle);
 
     // Restore previous conversation from localStorage (e.g. after "Continue Investigation")
     if (conversationHistory.length > 0) {
@@ -363,6 +381,14 @@ form.addEventListener("submit", async (e) => {
 
     input.value = "";
     sendBtn.disabled = true;
+
+    // Collapse welcome message on first send
+    var welcomeEl = document.getElementById("welcome-message");
+    if (welcomeEl && welcomeEl.classList.contains("welcome-expanded")) {
+        welcomeEl.classList.remove("welcome-expanded");
+        var toggle = welcomeEl.querySelector(".welcome-toggle");
+        if (toggle) toggle.textContent = "Show examples";
+    }
 
     // Collapse any active choice buttons from previous messages
     collapseActiveChoices("Skipped");
@@ -594,13 +620,14 @@ form.addEventListener("submit", async (e) => {
     }
 
     try {
+        const payload = {
+            question,
+            conversation_history: conversationHistory.length > 0 ? conversationHistory : null,
+        };
         const response = await fetch("/api/query", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                question,
-                conversation_history: conversationHistory.length > 0 ? conversationHistory : null,
-            }),
+            body: JSON.stringify(payload),
         });
 
         if (!response.ok) {

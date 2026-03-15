@@ -41,6 +41,7 @@ from src.tools.babylon import query_babylon_catalog
 from src.tools.cloudtrail import query_cloudtrail
 from src.tools.cost_monitor import query_cost_monitor
 from src.tools.gcp_costs import query_gcp_costs
+from src.tools.github_files import fetch_github_file
 from src.tools.marketplace_agreements import query_marketplace_agreements
 from src.tools.provision_db import execute_query
 
@@ -204,6 +205,14 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
             action=tool_input["action"],
             agnosticv_repo=tool_input.get("agnosticv_repo", ""),
             path=tool_input.get("path", ""),
+            ref=tool_input.get("ref", ""),
+        )
+
+    elif tool_name == "fetch_github_file":
+        return await fetch_github_file(
+            owner=tool_input["owner"],
+            repo=tool_input["repo"],
+            path=tool_input["path"],
             ref=tool_input.get("ref", ""),
         )
 
@@ -418,7 +427,8 @@ def _serialize_messages(messages: list) -> list:
 
 
 async def run_agent(
-    question: str, conversation_history: list | None = None
+    question: str,
+    conversation_history: list | None = None,
 ) -> AsyncGenerator[str, None]:
     """Run the Claude tool-use loop and yield SSE events.
 
