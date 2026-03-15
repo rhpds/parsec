@@ -68,8 +68,6 @@ async def _get_user_groups(user: str) -> set[str]:
 class QueryRequest(BaseModel):
     question: str
     conversation_history: list | None = None
-    attachment_content: str | None = None
-    attachment_name: str | None = None
 
 
 def _log_identity_debug(request: Request) -> None:
@@ -207,8 +205,6 @@ async def query(
         async for event in run_agent(
             body.question,
             body.conversation_history,
-            attachment_content=body.attachment_content,
-            attachment_name=body.attachment_name,
         ):
             yield event
 
