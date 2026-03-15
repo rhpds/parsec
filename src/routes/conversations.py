@@ -17,8 +17,17 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["conversations"])
 
+# Strong references to background tasks so they aren't garbage-collected mid-execution.
+# See https://docs.python.org/3/library/asyncio-task.html#creating-tasks
+_background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
 CONVERSATIONS_DIR = os.path.join("data", "conversations")
-os.makedirs(CONVERSATIONS_DIR, exist_ok=True)
+
+
+def ensure_conversations_dir() -> None:
+    """Create the conversations directory if it doesn't exist."""
+    os.makedirs(CONVERSATIONS_DIR, exist_ok=True)
+
 
 _UUID_RE = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
 
@@ -65,6 +74,18 @@ def _count_user_messages(messages: list) -> int:
     )
 
 
+def _read_json(fpath: str) -> dict:
+    """Read and parse a JSON file (blocking — call via asyncio.to_thread)."""
+    with open(fpath) as f:
+        return json.load(f)
+
+
+def _write_json(fpath: str, data: dict) -> None:
+    """Write a dict as JSON to a file (blocking — call via asyncio.to_thread)."""
+    with open(fpath, "w") as f:
+        json.dump(data, f)
+
+
 @router.post("/conversations")
 async def save_conversation(
     body: SaveConversationRequest,
@@ -83,11 +104,9 @@ async def save_conversation(
     if not _UUID_RE.match(conv_id):
         raise HTTPException(status_code=422, detail="Invalid conversation ID format")
 
-    # If updating, verify ownership
     fpath = os.path.join(CONVERSATIONS_DIR, f"{conv_id}.json")
     if os.path.isfile(fpath):
-        with open(fpath) as f:
-            existing = json.load(f)
+        existing = await asyncio.to_thread(_read_json, fpath)
         if existing.get("owner") != owner:
             raise HTTPException(status_code=403, detail="Not your conversation")
         created_at = existing.get("created_at", now)
@@ -105,11 +124,13 @@ async def save_conversation(
         "messages": body.messages,
     }
 
-    with open(fpath, "w") as f:
-        json.dump(conv_data, f)
+    await asyncio.to_thread(_write_json, fpath, conv_data)
 
-    # Kick off background learning analysis (fire-and-forget)
-    asyncio.create_task(_background_learn(body.messages))
+    # Kick off background learning analysis (fire-and-forget).
+    # Store the task reference to prevent garbage collection.
+    task = asyncio.create_task(_background_learn(body.messages))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
     return {"id": conv_id, "title": title}
 
@@ -124,17 +145,11 @@ async def _background_learn(messages: list) -> None:
         logger.exception("Background learning analysis failed (non-fatal)")
 
 
-@router.get("/conversations")
-async def list_conversations(
-    request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
-):
-    """List conversations for the current user, newest first."""
-    user = x_forwarded_email or x_forwarded_user
-    await _check_user_allowed(request, user)
-    owner = user or "anonymous"
+def _list_conversations_sync(owner: str) -> list[dict]:
+    """Scan conversations directory and return summaries for the given owner.
 
+    Blocking I/O — always call via asyncio.to_thread.
+    """
     conversations: list[dict] = []
     try:
         for fname in os.listdir(CONVERSATIONS_DIR):
@@ -161,6 +176,21 @@ async def list_conversations(
         pass
 
     conversations.sort(key=lambda c: c.get("updated_at", ""), reverse=True)
+    return conversations
+
+
+@router.get("/conversations")
+async def list_conversations(
+    request: Request,
+    x_forwarded_user: str | None = Header(None),
+    x_forwarded_email: str | None = Header(None),
+):
+    """List conversations for the current user, newest first."""
+    user = x_forwarded_email or x_forwarded_user
+    await _check_user_allowed(request, user)
+    owner = user or "anonymous"
+
+    conversations = await asyncio.to_thread(_list_conversations_sync, owner)
     return {"conversations": conversations}
 
 
@@ -183,8 +213,7 @@ async def get_conversation(
     if not os.path.isfile(fpath):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    with open(fpath) as f:
-        data = json.load(f)
+    data = await asyncio.to_thread(_read_json, fpath)
 
     if data.get("owner") != owner:
         raise HTTPException(status_code=403, detail="Not your conversation")
@@ -211,8 +240,7 @@ async def delete_conversation(
     if not os.path.isfile(fpath):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    with open(fpath) as f:
-        data = json.load(f)
+    data = await asyncio.to_thread(_read_json, fpath)
 
     if data.get("owner") != owner:
         raise HTTPException(status_code=403, detail="Not your conversation")
