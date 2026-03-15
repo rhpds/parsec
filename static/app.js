@@ -4,6 +4,14 @@ const messagesEl = document.getElementById("messages");
 const form = document.getElementById("query-form");
 const input = document.getElementById("question");
 const sendBtn = document.getElementById("send-btn");
+const fileInput = document.getElementById("file-upload");
+const uploadBtn = document.getElementById("upload-btn");
+const attachmentIndicator = document.getElementById("attachment-indicator");
+const attachmentNameEl = document.getElementById("attachment-name");
+const attachmentRemoveBtn = document.getElementById("attachment-remove");
+
+const MAX_UPLOAD_SIZE = 2 * 1024 * 1024; // 2 MB
+let pendingAttachment = null; // { name, content }
 
 let conversationHistory = [];
 let currentConversationId = null;
@@ -25,6 +33,34 @@ document.getElementById("new-chat-btn").addEventListener("click", function() {
     localStorage.removeItem("parsec_conv_id");
     messagesEl.textContent = "";
     window.location.reload();
+});
+
+// ─── File upload ───
+uploadBtn.addEventListener("click", () => fileInput.click());
+
+fileInput.addEventListener("change", () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    if (file.size > MAX_UPLOAD_SIZE) {
+        alert("File too large — maximum size is 2 MB.");
+        fileInput.value = "";
+        return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+        pendingAttachment = { name: file.name, content: reader.result };
+        attachmentNameEl.textContent = file.name;
+        attachmentIndicator.style.display = "flex";
+        uploadBtn.classList.add("has-file");
+    };
+    reader.readAsText(file);
+});
+
+attachmentRemoveBtn.addEventListener("click", () => {
+    pendingAttachment = null;
+    fileInput.value = "";
+    attachmentIndicator.style.display = "none";
+    uploadBtn.classList.remove("has-file");
 });
 
 // ─── Sidebar ───
@@ -393,7 +429,16 @@ form.addEventListener("submit", async (e) => {
     // Collapse any active choice buttons from previous messages
     collapseActiveChoices("Skipped");
 
-    addMessage("user", question);
+    const attachment = pendingAttachment;
+    pendingAttachment = null;
+    fileInput.value = "";
+    attachmentIndicator.style.display = "none";
+    uploadBtn.classList.remove("has-file");
+
+    const displayText = attachment
+        ? question + "\n\n📎 *" + attachment.name + "*"
+        : question;
+    addMessage("user", displayText);
 
     const assistantEl = addMessage("assistant", "");
     const contentEl = assistantEl.querySelector(".content");
@@ -620,13 +665,18 @@ form.addEventListener("submit", async (e) => {
     }
 
     try {
+        const payload = {
+            question,
+            conversation_history: conversationHistory.length > 0 ? conversationHistory : null,
+        };
+        if (attachment) {
+            payload.attachment_content = attachment.content;
+            payload.attachment_name = attachment.name;
+        }
         const response = await fetch("/api/query", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                question,
-                conversation_history: conversationHistory.length > 0 ? conversationHistory : null,
-            }),
+            body: JSON.stringify(payload),
         });
 
         if (!response.ok) {

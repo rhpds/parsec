@@ -427,13 +427,19 @@ def _serialize_messages(messages: list) -> list:
 
 
 async def run_agent(
-    question: str, conversation_history: list | None = None
+    question: str,
+    conversation_history: list | None = None,
+    *,
+    attachment_content: str | None = None,
+    attachment_name: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Run the Claude tool-use loop and yield SSE events.
 
     Args:
         question: The user's natural language question.
         conversation_history: Optional prior messages for multi-turn context.
+        attachment_content: Optional text content of an uploaded file.
+        attachment_name: Original filename of the uploaded file.
 
     Yields:
         SSE-formatted strings.
@@ -461,7 +467,16 @@ async def run_agent(
         len(incoming_history),
         len(messages),
     )
-    messages.append({"role": "user", "content": question})
+    if attachment_content:
+        user_content = (
+            f"{question}\n\n"
+            f'<attached_file name="{attachment_name or "upload"}">\n'
+            f"{attachment_content}\n"
+            f"</attached_file>"
+        )
+    else:
+        user_content = question
+    messages.append({"role": "user", "content": user_content})
 
     for _round in range(max_rounds):
         try:

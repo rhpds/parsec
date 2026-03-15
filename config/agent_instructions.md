@@ -1221,24 +1221,42 @@ provision DB for marketplace information — use CloudTrail Lake and account ins
 
 ### Investigate AAP2 Job Failures
 
-When a user pastes AAP2 job details and/or job logs, follow this workflow to trace
-the failure through agnosticv config and agnosticd code.
+When a user pastes AAP2 job details, uploads a job log, or asks about a failed AAP2
+job, follow this workflow. The workflow combines live AAP2 API queries (via
+`query_aap2`) with pasted/uploaded content for a complete investigation.
 
-**Required inputs from the user:**
-1. **Job Details** — copy-pasted from the AAP2 job details page
-2. **Job Log** — pasted log content or downloaded log file
+**Possible inputs from the user:**
+- **Job Details** — copy-pasted from the AAP2 job details page
+- **Job Log** — pasted log content or uploaded log file (attached to the message)
+- **Job ID + controller** — direct reference to a job
+- **GUID or catalog item name** — enough to search for the job
 
-#### Step 1: Parse Job Details
+#### Step 1: Parse Job Details and Query AAP2
 
-Extract key fields from the pasted job details:
+Extract key fields from any pasted job details:
 
 | Field | What to Extract |
 |-------|-----------------|
-| Job Template | Parse to get agnosticv path (see parsing rules below) |
+| Job Template | Parse to get GUID, account, catalog item, stage (see rules below) |
+| Job ID | The numeric job ID (if visible in the pasted details or URL) |
 | Project | Determines agnosticd version (v1 or v2) |
 | Revision | Git commit SHA for agnosticd |
-| Playbook | Usually `ansible/main.yml` |
 | Status | Failed, Error, etc. |
+
+**Always query the AAP2 API for structured data.** After extracting the GUID or job
+ID from the pasted details:
+
+1. **If you have a job ID and controller**: Call `query_aap2(action="get_job",
+   controller=<controller>, job_id=<id>)` directly to get structured metadata
+   (status, duration, git context, env_type, extra_vars).
+2. **If you have a GUID but no job ID**: Call `query_aap2(action="find_jobs",
+   template_name="<guid>")` to search all controllers. This returns the job ID
+   and controller automatically.
+3. **If the job is found**: Use the API response for metadata instead of parsing
+   pasted text — it's more reliable and includes parsed extra_vars with env_type,
+   cloud_provider, git_url, and git_branch.
+4. **If the AAP2 API is unreachable or returns no results**: Fall back to parsing
+   the pasted job details and log content directly.
 
 #### Step 2: Parse the Job Template Name
 
@@ -1346,9 +1364,22 @@ Fetch the env_type config:
 When tracing a failure to a specific role:
 - `fetch_github_file(owner="{owner}", repo="{repo}", path="ansible/roles/{role_name}/tasks/main.yml", ref="{ref}")`
 
-#### Step 7: Analyze the Job Log
+#### Step 7: Analyze the Failure
 
-Common failure patterns:
+**Prefer structured API data over raw log parsing.** If the AAP2 API is available:
+1. Call `query_aap2(action="get_job_events", controller=<controller>,
+   job_id=<id>, failed_only=true)` to get structured error events with
+   `role`, `task`, `host`, `error_msg`, and `stdout` fields.
+2. The structured events are more reliable than parsing raw logs — use them
+   as the primary source for identifying which role/task failed and why.
+
+**Use the uploaded/pasted log for additional context** when:
+- The AAP2 API is unreachable or not configured
+- You need the full PLAY RECAP or timing details not in the API events
+- The API events are truncated (stdout is capped at 500 chars) and you need
+  the full error output from the log
+
+Common failure patterns in raw logs:
 
 | Pattern | Likely Cause |
 |---------|--------------|
@@ -1360,7 +1391,7 @@ Common failure patterns:
 | `timeout` | Resource provisioning timeout |
 | `Vault password` | Missing vault credentials |
 
-Examine these sections:
+Examine these sections in raw logs:
 1. **PLAY RECAP** — summary of hosts and status
 2. **fatal** or **FAILED** tasks — actual error messages
 3. **TASK [role_name : task_name]** — identify which role/task failed
@@ -1369,6 +1400,8 @@ Examine these sections:
 #### Step 8: Cross-Reference with Parsec Data
 
 Combine GitHub config analysis with Parsec's existing tools:
+- **AAP2 retries**: Use `query_aap2(action="find_jobs", template_name="<guid>")`
+  to find retry jobs and related provision/destroy jobs across all controllers
 - **Provision DB**: Look up the GUID to find the user, account, and provision history
 - **Babylon**: Query the catalog item definition and active deployment state
 - **AWS account**: Check running instances if the failure is infrastructure-related
