@@ -76,8 +76,7 @@ def init_db(db_path: str) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
 
-    conn.executescript(
-        """
+    conn.executescript("""
         CREATE TABLE IF NOT EXISTS billing_rows (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             subscription_name TEXT NOT NULL,
@@ -109,8 +108,7 @@ def init_db(db_path: str) -> sqlite3.Connection:
             key TEXT PRIMARY KEY,
             value TEXT
         );
-    """
-    )
+    """)
 
     conn.execute(
         "INSERT OR REPLACE INTO cache_metadata (key, value) VALUES ('schema_version', ?)",

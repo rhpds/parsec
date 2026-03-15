@@ -136,9 +136,7 @@ async def api_get_text(cluster_name: str, path: str, params: dict | None = None)
     Overrides the default Accept header to request text/plain.
     """
     client = await _get_client(cluster_name)
-    resp = await client.get(
-        path, params=params or {}, headers={"Accept": "text/plain"}
-    )
+    resp = await client.get(path, params=params or {}, headers={"Accept": "text/plain"})
     _check_response(resp, cluster_name, path)
     return resp.text
 

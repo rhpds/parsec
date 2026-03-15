@@ -11,9 +11,7 @@ from __future__ import annotations
 import json
 import re
 
-_TIMESTAMP_RE = re.compile(
-    r"^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s+\d+"
-)
+_TIMESTAMP_RE = re.compile(r"^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s+\d+")
 
 _RETRY_RE = re.compile(r"FAILED - RETRYING:.*\((\d+) retries left\)")
 
@@ -41,7 +39,7 @@ def _extract_json_errors(line: str) -> str | None:
     if start == -1:
         return None
 
-    json_str = line[start + 3:].strip()
+    json_str = line[start + 3 :].strip()
     try:
         data = json.loads(json_str)
     except (json.JSONDecodeError, ValueError):
@@ -71,11 +69,7 @@ def _truncate_line(line: str) -> str:
     errors = _extract_json_errors(line)
     prefix = line[:800]
     if errors:
-        return (
-            f"{prefix}... "
-            f"[extracted: {errors}] "
-            f"[truncated from {len(line):,} chars]"
-        )
+        return f"{prefix}... " f"[extracted: {errors}] " f"[truncated from {len(line):,} chars]"
     return f"{prefix}... [truncated from {len(line):,} chars]"
 
 
@@ -136,9 +130,7 @@ def trim_ansible_log(content: str) -> str:
                     retry_count += 1
                 continue
             if prev_was_retry and retry_count > 0:
-                result.append(
-                    f"  [... retried {retry_count} times before failing]"
-                )
+                result.append(f"  [... retried {retry_count} times before failing]")
                 prev_was_retry = False
                 retry_count = 0
             result.append(_truncate_line(line))
@@ -161,9 +153,7 @@ def trim_ansible_log(content: str) -> str:
             else:
                 retry_count += 1
             if retries_left <= 1:
-                result.append(
-                    f"  [... retried {retry_count} times before failing]"
-                )
+                result.append(f"  [... retried {retry_count} times before failing]")
                 prev_was_retry = False
                 retry_count = 0
             continue
