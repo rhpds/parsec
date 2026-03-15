@@ -110,6 +110,15 @@ async def _get_client(cluster_name: str) -> httpx.AsyncClient:
     return client
 
 
+def _check_response(resp: httpx.Response, cluster_name: str, path: str) -> None:
+    """Raise clear errors for common HTTP failure codes."""
+    if resp.status_code == 401:
+        raise PermissionError(f"Authentication failed for controller '{cluster_name}' (HTTP 401)")
+    if resp.status_code == 404:
+        raise LookupError(f"Not found on controller '{cluster_name}': {path} (HTTP 404)")
+    resp.raise_for_status()
+
+
 async def api_get(cluster_name: str, path: str, params: dict | None = None) -> dict:
     """Make a GET request to the AAP2 REST API.
 
@@ -117,14 +126,21 @@ async def api_get(cluster_name: str, path: str, params: dict | None = None) -> d
     """
     client = await _get_client(cluster_name)
     resp = await client.get(path, params=params or {})
-
-    if resp.status_code == 401:
-        raise PermissionError(f"Authentication failed for controller '{cluster_name}' (HTTP 401)")
-    if resp.status_code == 404:
-        raise LookupError(f"Not found on controller '{cluster_name}': {path} (HTTP 404)")
-
-    resp.raise_for_status()
+    _check_response(resp, cluster_name, path)
     return resp.json()
+
+
+async def api_get_text(cluster_name: str, path: str, params: dict | None = None) -> str:
+    """Make a GET request expecting plain text (e.g. job stdout).
+
+    Overrides the default Accept header to request text/plain.
+    """
+    client = await _get_client(cluster_name)
+    resp = await client.get(
+        path, params=params or {}, headers={"Accept": "text/plain"}
+    )
+    _check_response(resp, cluster_name, path)
+    return resp.text
 
 
 async def api_paginate(

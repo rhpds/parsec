@@ -760,13 +760,16 @@ TOOLS = [
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["get_job", "get_job_events", "find_jobs"],
+                    "enum": ["get_job", "get_job_log", "get_job_events", "find_jobs"],
                     "description": (
                         "Action to perform. "
                         "get_job: Get job metadata, status, duration, extra_vars, "
                         "and git context for a specific job ID. "
-                        "get_job_events: Get execution events for a job. Use "
-                        "failed_only=true to see only errors. "
+                        "get_job_log: Get job metadata AND the full trimmed execution "
+                        "log (PLAY/TASK flow, failures, PLAY RECAP, timing). Best for "
+                        "triage — gives complete context in one call. "
+                        "get_job_events: Get structured execution events for a job. "
+                        "Use failed_only=true to see only errors. "
                         "find_jobs: Search for jobs by status, time range, or "
                         "template name across one or all controllers."
                     ),

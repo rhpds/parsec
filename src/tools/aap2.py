@@ -8,8 +8,10 @@ from typing import Any
 
 import httpx
 
+from src.agent.log_trimmer import is_ansible_log, trim_ansible_log
 from src.connections.aap2 import (
     api_get,
+    api_get_text,
     api_paginate,
     get_configured_controllers,
     resolve_controller,
@@ -172,6 +174,25 @@ async def _get_job(cluster_name: str, job_id: int) -> dict:
     return _parse_job_metadata(data, cluster_name)
 
 
+async def _get_job_log(cluster_name: str, job_id: int) -> dict:
+    """Fetch job metadata and the full trimmed stdout log."""
+    metadata = await _get_job(cluster_name, job_id)
+
+    raw_stdout = await api_get_text(
+        cluster_name, f"/api/v2/jobs/{job_id}/stdout/", {"format": "txt"}
+    )
+
+    if is_ansible_log(raw_stdout):
+        log = trim_ansible_log(raw_stdout)
+    else:
+        log = raw_stdout[:100_000]
+
+    metadata["log"] = log
+    metadata["log_original_size"] = len(raw_stdout)
+    metadata["log_trimmed_size"] = len(log)
+    return metadata
+
+
 async def _get_job_events(
     cluster_name: str,
     job_id: int,
@@ -328,6 +349,14 @@ async def query_aap2(
             cluster_name = resolve_controller(controller)
             return await _get_job(cluster_name, job_id)
 
+        elif action == "get_job_log":
+            if not job_id:
+                return {"error": "job_id is required for get_job_log"}
+            if not controller:
+                return {"error": "controller is required for get_job_log"}
+            cluster_name = resolve_controller(controller)
+            return await _get_job_log(cluster_name, job_id)
+
         elif action == "get_job_events":
             if not job_id:
                 return {"error": "job_id is required for get_job_events"}
@@ -355,7 +384,7 @@ async def query_aap2(
         else:
             return {
                 "error": f"Unknown action: '{action}'. "
-                "Use get_job, get_job_events, or find_jobs."
+                "Use get_job, get_job_log, get_job_events, or find_jobs."
             }
 
     except (ValueError, LookupError, PermissionError) as e:
