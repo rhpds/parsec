@@ -19,6 +19,11 @@ USER 0
 RUN dnf install -y --nodocs libpq && dnf clean all
 
 COPY --from=builder /opt/app-root/venv /opt/app-root/venv
+
+# container-entrypoint sources scl_enable which can override ENV PATH;
+# append our venv activation so it takes final precedence
+RUN echo 'export PATH=/opt/app-root/venv/bin:$PATH' >> /opt/app-root/etc/scl_enable
+
 ENV VIRTUAL_ENV="/opt/app-root/venv" \
     PATH="/opt/app-root/venv/bin:$PATH" \
     PYTHONPATH="/app" \
