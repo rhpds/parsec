@@ -16,10 +16,12 @@ from src.connections.gcp import init_gcp
 from src.connections.github_mcp import init_github_mcp
 from src.connections.postgres import close_pool, init_pool
 from src.routes.alert import router as alert_router
+from src.routes.conversations import ensure_conversations_dir
 from src.routes.conversations import router as conversations_router
 from src.routes.health import router as health_router
 from src.routes.learnings import router as learnings_router
 from src.routes.query import router as query_router
+from src.routes.share import ensure_shares_dir
 from src.routes.share import router as share_router
 
 logging.basicConfig(
@@ -56,6 +58,10 @@ async def lifespan(app: FastAPI):
             logger.info("%s initialized", name)
         except Exception:
             logger.exception("%s initialization failed — will retry on first query", name)
+
+    # Ensure data directories exist
+    ensure_conversations_dir()
+    ensure_shares_dir()
 
     logger.info("Startup complete")
     yield
