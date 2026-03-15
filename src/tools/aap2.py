@@ -182,10 +182,7 @@ async def _get_job_log(cluster_name: str, job_id: int) -> dict:
         cluster_name, f"/api/v2/jobs/{job_id}/stdout/", {"format": "txt"}
     )
 
-    if is_ansible_log(raw_stdout):
-        log = trim_ansible_log(raw_stdout)
-    else:
-        log = raw_stdout[:100_000]
+    log = trim_ansible_log(raw_stdout) if is_ansible_log(raw_stdout) else raw_stdout[:100_000]
 
     metadata["log"] = log
     metadata["log_original_size"] = len(raw_stdout)

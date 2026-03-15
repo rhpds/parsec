@@ -19,6 +19,8 @@ _JSON_ERROR_KEYS = ("msg", "stderr", "message", "error", "reason")
 
 MAX_LINE_CHARS = 1500
 
+_NOISE_PREFIXES = ("skipping:", "changed:", "included:", "ASYNC ", "[WARNING]:")
+
 
 def is_ansible_log(content: str) -> bool:
     """Return True if content looks like an Ansible job log."""
@@ -73,123 +75,55 @@ def _truncate_line(line: str) -> str:
     return f"{prefix}... [truncated from {len(line):,} chars]"
 
 
-def trim_ansible_log(content: str) -> str:
-    """Trim an Ansible job log, keeping only investigation-relevant lines.
-
-    Returns the trimmed content with a metadata header showing compression.
-    """
-    lines = content.splitlines()
-    total_lines = len(lines)
-    original_size = len(content)
-
-    fatal_indices: set[int] = set()
+def _find_fatal_context(lines: list[str]) -> set[int]:
+    """Find line indices near fatal/failed lines (2 before, 3 after)."""
+    total = len(lines)
+    indices: set[int] = set()
     for i, line in enumerate(lines):
         if "fatal:" in line or "FAILED!" in line or line.lstrip().startswith("failed:"):
-            for j in range(max(0, i - 2), min(total_lines, i + 4)):
-                fatal_indices.add(j)
+            for j in range(max(0, i - 2), min(total, i + 4)):
+                indices.add(j)
+    return indices
 
-    recap_start: int | None = None
+
+def _find_recap_start(lines: list[str]) -> int | None:
+    """Find the PLAY RECAP / TASKS RECAP section start index."""
     for i in range(len(lines) - 1, -1, -1):
         stripped = lines[i].strip()
         if stripped.startswith("PLAY RECAP") or stripped.startswith("TASKS RECAP"):
-            recap_start = i
-            break
+            return i
+    return None
 
-    result: list[str] = []
-    prev_was_retry = False
-    retry_count = 0
 
-    for i, line in enumerate(lines):
-        stripped = line.strip()
+def _is_noise_line(stripped: str) -> bool:
+    """Return True for lines that should always be stripped."""
+    if not stripped:
+        return True
+    if any(stripped.startswith(p) for p in _NOISE_PREFIXES):
+        return True
+    if "[WARNING]" in stripped or "[DEPRECATION WARNING]" in stripped:
+        return True
+    return bool(_TIMESTAMP_RE.match(stripped))
 
-        if i < 3:
-            result.append(line)
-            continue
 
-        if recap_start is not None and i >= recap_start:
-            result.append(_truncate_line(line))
-            continue
+def _is_unconditional_keep(stripped: str) -> bool:
+    """Return True for non-structural lines that should always be kept."""
+    if stripped == "...ignoring":
+        return True
+    if "NO MORE HOSTS LEFT" in stripped:
+        return True
+    return stripped.startswith(("Vault password", "Pausing for"))
 
-        if stripped.startswith("PLAY ["):
-            result.append(line)
-            prev_was_retry = False
-            continue
 
-        if stripped.startswith("TASK ["):
-            result.append(line)
-            prev_was_retry = False
-            continue
+def _track_retry(prev_was_retry: bool, retry_count: int) -> tuple[bool, int]:
+    """Track a retry occurrence. Returns updated (prev_was_retry, retry_count)."""
+    if not prev_was_retry:
+        return True, 1
+    return True, retry_count + 1
 
-        if i in fatal_indices:
-            retry_match_in_fatal = _RETRY_RE.search(stripped)
-            if retry_match_in_fatal:
-                if not prev_was_retry:
-                    retry_count = 1
-                    prev_was_retry = True
-                else:
-                    retry_count += 1
-                continue
-            if prev_was_retry and retry_count > 0:
-                result.append(f"  [... retried {retry_count} times before failing]")
-                prev_was_retry = False
-                retry_count = 0
-            result.append(_truncate_line(line))
-            continue
 
-        if "NO MORE HOSTS LEFT" in stripped:
-            result.append(line)
-            continue
-
-        if stripped == "...ignoring":
-            result.append(line)
-            continue
-
-        retry_match = _RETRY_RE.search(stripped)
-        if retry_match:
-            retries_left = int(retry_match.group(1))
-            if not prev_was_retry:
-                retry_count = 1
-                prev_was_retry = True
-            else:
-                retry_count += 1
-            if retries_left <= 1:
-                result.append(f"  [... retried {retry_count} times before failing]")
-                prev_was_retry = False
-                retry_count = 0
-            continue
-
-        if prev_was_retry:
-            prev_was_retry = False
-            retry_count = 0
-
-        if stripped.startswith("skipping:"):
-            continue
-        if stripped.startswith("ok:"):
-            if '"msg"' in stripped and len(stripped) < 500:
-                result.append(line)
-            continue
-        if stripped.startswith("changed:"):
-            continue
-        if stripped.startswith("included:"):
-            continue
-        if "[WARNING]" in stripped or "[DEPRECATION WARNING]" in stripped:
-            continue
-        if stripped.startswith("ASYNC "):
-            continue
-        if _TIMESTAMP_RE.match(stripped):
-            continue
-        if stripped.startswith("Vault password"):
-            result.append(line)
-            continue
-        if stripped.startswith("Pausing for"):
-            result.append(line)
-            continue
-        if stripped.startswith("[WARNING]:"):
-            continue
-
-        if not stripped:
-            continue
-
+def _format_trimmed_output(result: list[str], total_lines: int, original_size: int) -> str:
+    """Build the final output with a metadata header."""
     trimmed_text = "\n".join(result)
     trimmed_size = len(trimmed_text)
     kept_lines = len(result)
@@ -207,3 +141,75 @@ def trim_ansible_log(content: str) -> str:
     )
 
     return f"{header}\n\n{trimmed_text}"
+
+
+def trim_ansible_log(content: str) -> str:
+    """Trim an Ansible job log, keeping only investigation-relevant lines.
+
+    Returns the trimmed content with a metadata header showing compression.
+    """
+    lines = content.splitlines()
+    original_size = len(content)
+
+    fatal_indices = _find_fatal_context(lines)
+    recap_start = _find_recap_start(lines)
+
+    result: list[str] = []
+    prev_was_retry = False
+    retry_count = 0
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+
+        if i < 3:
+            result.append(line)
+            continue
+
+        if recap_start is not None and i >= recap_start:
+            result.append(_truncate_line(line))
+            continue
+
+        if stripped.startswith(("PLAY [", "TASK [")):
+            result.append(line)
+            prev_was_retry = False
+            continue
+
+        if i in fatal_indices:
+            retry_match_in_fatal = _RETRY_RE.search(stripped)
+            if retry_match_in_fatal:
+                prev_was_retry, retry_count = _track_retry(prev_was_retry, retry_count)
+                continue
+            if prev_was_retry and retry_count > 0:
+                result.append(f"  [... retried {retry_count} times before failing]")
+                prev_was_retry = False
+                retry_count = 0
+            result.append(_truncate_line(line))
+            continue
+
+        if _is_unconditional_keep(stripped):
+            result.append(line)
+            continue
+
+        retry_match = _RETRY_RE.search(stripped)
+        if retry_match:
+            retries_left = int(retry_match.group(1))
+            prev_was_retry, retry_count = _track_retry(prev_was_retry, retry_count)
+            if retries_left <= 1:
+                result.append(f"  [... retried {retry_count} times before failing]")
+                prev_was_retry = False
+                retry_count = 0
+            continue
+
+        if prev_was_retry:
+            prev_was_retry = False
+            retry_count = 0
+
+        if stripped.startswith("ok:"):
+            if '"msg"' in stripped and len(stripped) < 500:
+                result.append(line)
+            continue
+
+        if _is_noise_line(stripped):
+            continue
+
+    return _format_trimmed_output(result, len(lines), original_size)
