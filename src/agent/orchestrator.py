@@ -15,6 +15,7 @@ import anthropic
 if TYPE_CHECKING:
     from anthropic import AnthropicBedrock, AnthropicVertex
 
+from src.agent.log_trimmer import is_ansible_log, trim_ansible_log
 from src.agent.streaming import (
     sse_done,
     sse_error,
@@ -468,10 +469,18 @@ async def run_agent(
         len(messages),
     )
     if attachment_content:
+        file_content = attachment_content
+        if is_ansible_log(file_content):
+            file_content = trim_ansible_log(file_content)
+            logger.info(
+                "Trimmed Ansible log attachment: %d → %d chars",
+                len(attachment_content),
+                len(file_content),
+            )
         user_content = (
             f"{question}\n\n"
             f'<attached_file name="{attachment_name or "upload"}">\n'
-            f"{attachment_content}\n"
+            f"{file_content}\n"
             f"</attached_file>"
         )
     else:

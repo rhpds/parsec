@@ -10,7 +10,7 @@ const attachmentIndicator = document.getElementById("attachment-indicator");
 const attachmentNameEl = document.getElementById("attachment-name");
 const attachmentRemoveBtn = document.getElementById("attachment-remove");
 
-const MAX_UPLOAD_SIZE = 2 * 1024 * 1024; // 2 MB
+const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 10 MB
 let pendingAttachment = null; // { name, content }
 
 let conversationHistory = [];
@@ -42,7 +42,7 @@ fileInput.addEventListener("change", () => {
     const file = fileInput.files[0];
     if (!file) return;
     if (file.size > MAX_UPLOAD_SIZE) {
-        alert("File too large — maximum size is 2 MB.");
+        alert("File too large — maximum size is 10 MB.");
         fileInput.value = "";
         return;
     }
