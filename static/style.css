@@ -1231,6 +1231,34 @@ footer {
     font-weight: 500;
 }
 
+/* ─── Collapsible welcome message ─── */
+.welcome-full {
+    display: none;
+    margin-top: 8px;
+}
+
+.welcome-expanded .welcome-full {
+    display: block;
+}
+
+.welcome-toggle {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 500;
+    font-family: var(--font-sans);
+    cursor: pointer;
+    transition: color var(--transition);
+}
+
+.welcome-toggle:hover {
+    color: var(--accent-bright);
+}
+
 #theme-toggle-btn {
     margin-left: auto;
 }
