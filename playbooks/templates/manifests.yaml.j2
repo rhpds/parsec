@@ -35,7 +35,7 @@ data:
     learnings:
       admin_users: "{{ learnings_admin_users | default('') }}"
     github:
-      mcp_url: "http://localhost:3000/sse"
+      mcp_url: "https://api.githubcopilot.com/mcp/"
     auth:
       allowed_groups: "{{ oauth_allowed_groups }}"
       allowed_users: ""
@@ -285,51 +285,6 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 12
-        - name: github-mcp
-          image: node:22-alpine
-          command: ["sh", "-c"]
-          args:
-            - >-
-              npx -y supergateway
-              --stdio "npx -y @modelcontextprotocol/server-github"
-              --port 3000
-          ports:
-            - containerPort: 3000
-              name: mcp
-              protocol: TCP
-          env:
-            - name: GITHUB_PERSONAL_ACCESS_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: parsec-secrets
-                  key: github-token
-                  optional: true
-            - name: GITHUB_READ_ONLY
-              value: "true"
-            - name: HOME
-              value: "/tmp"
-            - name: npm_config_cache
-              value: "/tmp/.npm"
-          resources:
-            requests:
-              memory: "128Mi"
-              cpu: "100m"
-            limits:
-              memory: "512Mi"
-              cpu: "500m"
-          securityContext:
-            allowPrivilegeEscalation: false
-            runAsNonRoot: true
-            capabilities:
-              drop: ["ALL"]
-            seccompProfile:
-              type: RuntimeDefault
-          readinessProbe:
-            tcpSocket:
-              port: 3000
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 5
       volumes:
         - name: config
           configMap:

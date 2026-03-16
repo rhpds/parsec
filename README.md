@@ -114,17 +114,9 @@ Paste AAP2 job details and logs into the chat, and Parsec will trace the failure
 5. Analyzes the job log for error patterns
 6. Cross-references with provision DB and Babylon for full context
 
-### GitHub MCP Sidecar
+### GitHub MCP Integration
 
-The `fetch_github_file` tool uses a sidecar container running the GitHub MCP server behind [supergateway](https://github.com/supercorp-ai/supergateway). In OpenShift, this runs automatically as part of the pod. For local dev:
-
-```bash
-export GITHUB_PERSONAL_ACCESS_TOKEN=ghp_...
-export GITHUB_READ_ONLY=true
-npx -y supergateway --stdio "npx -y @modelcontextprotocol/server-github" --port 3000
-```
-
-Then set `github.mcp_url: "http://localhost:3000/sse"` in `config/config.local.yaml`.
+The `fetch_github_file` tool connects to [GitHub's hosted remote MCP server](https://github.com/github/github-mcp-server) at `https://api.githubcopilot.com/mcp/` via streamable HTTP transport. No sidecar needed — just configure a GitHub PAT with `repo` scope in `github.token`.
 
 ## Babylon Integration
 

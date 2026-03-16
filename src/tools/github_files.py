@@ -35,7 +35,7 @@ async def fetch_github_file(
 ) -> dict:
     """Fetch a file or directory listing from a GitHub repository.
 
-    Uses the GitHub MCP sidecar's get_file_contents tool.
+    Uses the GitHub remote MCP server's get_file_contents tool.
 
     Args:
         owner: Repository owner (e.g. "rhpds")

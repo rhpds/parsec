@@ -26,7 +26,7 @@ src/
     babylon.py               # Babylon cluster catalog/deployment queries
     aap2.py                  # AAP2 controller job queries (REST API)
     agnosticd.py             # AgnosticD GitHub source code lookup
-    github_files.py          # GitHub file/directory fetching via MCP sidecar
+    github_files.py          # GitHub file/directory fetching via remote MCP server
   agent/
     learnings.py             # Post-conversation AI analysis and learning
   connections/
@@ -36,7 +36,7 @@ src/
     gcp.py                   # BigQuery client
     babylon.py               # Babylon cluster K8s API clients (httpx-based)
     aap2.py                  # AAP2 controller REST API clients (httpx-based)
-    github_mcp.py            # GitHub MCP sidecar SSE client
+    github_mcp.py            # GitHub remote MCP server client (streamable HTTP)
   routes/
     query.py                 # GET /api/auth/check, POST /api/query (SSE), GET /api/reports/{filename}
     alert.py                 # POST /api/alert/investigate (alert investigation API for cloud-slack-alerts)
@@ -415,17 +415,16 @@ Auto-detected from `scm_url` parameter. Falls back to the other repo on 404 when
 2. Get failed role/task from AAP2 job events
 3. Call `query_agnosticd_source(action="get_role", role="bookbag", task_file="remove_workload", scm_url=git_url)`
 
-## GitHub MCP Sidecar
+## GitHub MCP Integration
 
-The `fetch_github_file` tool fetches files and directory listings from GitHub repositories via a sidecar container running the GitHub MCP server behind supergateway.
+The `fetch_github_file` tool fetches files and directory listings from GitHub repositories via GitHub's hosted remote MCP server (`https://api.githubcopilot.com/mcp/`).
 
 ### How It Works
 
-- A sidecar container in the Parsec pod runs `supergateway` wrapping `@modelcontextprotocol/server-github`
-- Supergateway bridges the MCP server's stdio transport to SSE over HTTP on port 3000
-- Parsec connects via the Python `mcp` SDK's SSE client (`mcp.client.sse.sse_client`)
-- Each tool call opens a fresh SSE connection (sidecar is localhost, overhead is negligible)
-- `GITHUB_READ_ONLY=true` restricts the MCP server to read-only tools
+- Connects directly to GitHub's remote MCP server — no sidecar or local server needed
+- Uses the MCP streamable HTTP transport (`mcp.client.streamable_http.streamablehttp_client`)
+- Authenticates via `Authorization: Bearer <PAT>` header using the configured `github.token`
+- Each tool call opens a fresh HTTP connection (no persistent session to manage)
 
 ### Use Cases
 
@@ -436,20 +435,13 @@ The `fetch_github_file` tool fetches files and directory listings from GitHub re
 ### Configuration
 
 ```yaml
-# config.local.yaml
+# config.yaml (default)
 github:
-  mcp_url: "http://localhost:3000/sse"
+  mcp_url: "https://api.githubcopilot.com/mcp/"
+  token: ""  # set in config.local.yaml or PARSEC_GITHUB__TOKEN env var
 ```
 
-For local dev, run the sidecar manually:
-
-```bash
-export GITHUB_PERSONAL_ACCESS_TOKEN=ghp_...
-export GITHUB_READ_ONLY=true
-npx -y supergateway --stdio "npx -y @modelcontextprotocol/server-github" --port 3000
-```
-
-For OpenShift deployment, the PAT is stored in `parsec-secrets` (key: `github-token`) — shared with the agnosticd source tool — and the sidecar is defined in the Ansible manifests template.
+The PAT needs `repo` scope for access to rhpds private repos. For OpenShift deployment, the PAT is stored in `parsec-secrets` (key: `github-token`) — shared with the agnosticd source tool.
 
 ## AAP2 Job Failure Investigation
 
@@ -698,7 +690,7 @@ annotation auto-triggers a rollout. Monitor with `oc get builds -n <namespace>`.
 - **CloudTrail Lake**: The event data store ID is environment-specific — set via local config overrides (`config.local.yaml`) or Ansible vars (`playbooks/vars/<env>.yml`), not hardcoded. The tool substitutes `cloudtrail_events` in FROM clauses with the real ID so the agent never sees it. CloudTrail Lake charges per byte scanned — always include `eventTime >` filters. `responseElements` often comes as Java-style `{key=value}` instead of JSON; the tool auto-parses these.
 - **Alert investigation API**: The `/api/alert/investigate` endpoint uses API key auth (`X-API-Key` header), not OAuth. The OAuth proxy's `-skip-auth-regex` bypasses SSO for `/api/alert/` paths. The agent loop is non-streaming (synchronous JSON response, not SSE) and excludes `render_chart`/`generate_report` tools. Claude calls `submit_alert_verdict` to submit its verdict; if it never calls the tool, the endpoint defaults to `should_alert=true`. Investigation typically takes 30-90 seconds depending on how many tools Claude calls.
 - **Cross-account access**: Uses STS AssumeRole into `OrganizationAccountAccessRole` with an inline session policy for read-only enforcement. The session policy (not the IAM role) is the security boundary — even though `OrganizationAccountAccessRole` has admin, the inline policy limits to `ec2:Describe*`, `iam:List*/Get*`, etc. Credentials are cached per account ID at module level. The `marketplace-agreement` SDK client calls IAM actions under the `aws-marketplace:` prefix, not `marketplace-agreement:` — the session policy must use `aws-marketplace:DescribeAgreement` explicitly.
-- **GitHub MCP sidecar**: Uses supergateway to bridge the GitHub MCP server's stdio transport to SSE over HTTP. The sidecar runs `node:22-alpine` with `HOME=/tmp` and `npm_config_cache=/tmp/.npm` to work with OpenShift's random UID assignment. `GITHUB_READ_ONLY=true` restricts to read-only operations. The Python `mcp` SDK connects via `mcp.client.sse.sse_client`. Each tool call opens a fresh SSE connection (no persistent session to manage). The PAT needs `repo` scope for access to rhpds private repos.
+- **GitHub MCP**: Connects to GitHub's hosted remote MCP server at `https://api.githubcopilot.com/mcp/` via streamable HTTP transport (`mcp.client.streamable_http.streamablehttp_client`). No sidecar container needed — replaced the previous supergateway + `@modelcontextprotocol/server-github` sidecar approach. Auth via `Authorization: Bearer <PAT>` header. Each tool call opens a fresh HTTP connection (no persistent session to manage). The PAT needs `repo` scope for access to rhpds private repos.
 - **AAP2 investigation**: Users paste job details and logs into the chat. The investigation workflow (job template parsing, agnosticv config resolution, component tracing, agnosticd version detection) is encoded in `config/agent_instructions.md`. No direct AAP2 Controller API connection — paste-based input only for now.
 
 See `docs/TODO.md` for the full project backlog.
