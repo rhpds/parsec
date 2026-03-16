@@ -54,17 +54,17 @@
         </main>
         <footer>
             <form id="query-form">
-                <input
-                    type="search"
+                <textarea
                     id="question"
                     placeholder="Ask a question — e.g. &quot;show me external users with 50+ provisions since December&quot;"
                     autocomplete="off"
                     autofocus
+                    rows="1"
                     data-lpignore="true"
                     data-1p-ignore
                     data-form-type="other"
                     data-keeper-lock="true"
-                >
+                ></textarea>
                 <button type="submit" id="send-btn">Send</button>
                 <button type="button" id="new-chat-btn" class="header-btn" title="Clear conversation and start fresh">New Chat</button>
             </form>
@@ -93,6 +93,6 @@
             </div>
         </div>
     </div>
-    <script src="/app.js?v=13"></script>
+    <script src="/app.js?v=14"></script>
 </body>
 </html>

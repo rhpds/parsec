@@ -811,6 +811,7 @@ footer {
 #query-form {
     display: flex;
     gap: 10px;
+    align-items: flex-end;
 }
 
 #question {
@@ -823,6 +824,10 @@ footer {
     font-family: var(--font-sans);
     font-size: 14px;
     outline: none;
+    resize: none;
+    overflow-y: auto;
+    line-height: 1.5;
+    max-height: 200px;
     transition: border-color var(--transition), box-shadow var(--transition);
 }
 

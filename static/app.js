@@ -8,6 +8,21 @@ const sendBtn = document.getElementById("send-btn");
 let conversationHistory = [];
 let currentConversationId = null;
 
+// Auto-resize textarea to fit content (up to a max height)
+function autoResizeInput() {
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 200) + "px";
+}
+input.addEventListener("input", autoResizeInput);
+
+// Enter submits, Shift+Enter inserts newline
+input.addEventListener("keydown", function(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        form.requestSubmit();
+    }
+});
+
 // Restore conversation history from localStorage (survives page refresh)
 try {
     const saved = localStorage.getItem("parsec_history");
@@ -380,6 +395,7 @@ form.addEventListener("submit", async (e) => {
     if (!question) return;
 
     input.value = "";
+    input.style.height = "auto";
     sendBtn.disabled = true;
 
     // Collapse welcome message on first send
