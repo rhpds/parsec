@@ -1231,10 +1231,15 @@ provision DB for marketplace information — use CloudTrail Lake and account ins
 ### Investigate AAP2 Job Failures
 
 When a user pastes AAP2 job details, uploads a job log, or asks about a failed AAP2
-job, follow this workflow. **The primary goal is to trace the failure through the
-agnosticv/agnosticd config hierarchy using GitHub** (`fetch_github_file`). The AAP2
-API (`query_aap2`) is a useful enrichment source for structured error events, but
-the config resolution via GitHub is the core investigation — always do it.
+job, follow this workflow.
+
+**MANDATORY: You MUST call `fetch_github_file` during every AAP2 job failure
+investigation.** The primary value you provide is tracing the failure through the
+agnosticv → agnosticd config hierarchy on GitHub. Analyzing the pasted log alone
+is NOT sufficient — the user can read the log themselves. Your job is to resolve
+the config chain (Steps 3-6 below) and cross-reference it with the failure.
+**Do NOT present your final analysis or generate a report until you have fetched
+at least the agnosticv common.yaml and stage config via `fetch_github_file`.**
 
 **Possible inputs from the user:**
 - **Job Details** — copy-pasted from the AAP2 job details page
@@ -1394,8 +1399,12 @@ When tracing a failure to a specific role:
 
 #### Step 7: Analyze the Failure
 
-Combine **all available sources** to identify the root cause — pasted log content,
-pasted job details, and optionally AAP2 API data if available.
+**CHECKPOINT: Before analyzing, verify you have completed Steps 3-6.** You must
+have fetched agnosticv config files (common.yaml, stage file) via `fetch_github_file`.
+If you haven't, go back and do it now. Do NOT skip the GitHub resolution.
+
+Combine **all available sources** to identify the root cause — GitHub config files,
+pasted log content, pasted job details, and optionally AAP2 API data if available.
 
 **Pasted log / job details** (always available — the user provided them):
 - Parse the log for the failing task, role, host, and error message
@@ -1436,10 +1445,11 @@ Combine GitHub config analysis with Parsec's existing tools:
 
 #### AAP2 Output Format
 
-Present your findings in this structure:
+Present your findings in this structure. **The Configuration Trace section is
+mandatory** — if it's empty, you skipped Steps 3-6 and need to go back.
 
 **Job Analysis:** Job ID, status, duration
-**Configuration Trace:**
+**Configuration Trace** (from `fetch_github_file` calls — REQUIRED):
 
 | Layer | Location | Key Values |
 |-------|----------|------------|
