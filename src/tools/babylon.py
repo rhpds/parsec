@@ -720,7 +720,7 @@ async def _get_component(cluster: str, name: str) -> dict:
             defn = spec.get("definition", {})
             sanitized = _strip_secrets(defn)
 
-            # AgnosticV repo reference (for query_agnosticv_repo)
+            # AgnosticV repo reference (for fetch_github_file)
             agnosticv_repo = spec.get("agnosticvRepo", "")
             agnosticv_path = spec.get("path", "")
 

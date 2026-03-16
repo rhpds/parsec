@@ -617,6 +617,58 @@ TOOLS = [
         },
     },
     {
+        "name": "fetch_github_file",
+        "description": (
+            "Fetch a file or directory listing from any GitHub repository. This is "
+            "the single tool for all GitHub file access — agnosticv configs, agnosticd "
+            "source code, and any other repo content. Use this to: "
+            "(1) Fetch agnosticv catalog item configs (common.yaml, prod.yaml) from "
+            "rhpds/agnosticv or zt-*-agnosticv repos. "
+            "(2) Fetch agnosticd Ansible roles (ansible/roles/{role}/tasks/) and "
+            "env_type configs (ansible/configs/{env_type}/default_vars.yml) when "
+            "tracing AAP2 job failures to source code. AgnosticD repos: "
+            "agnosticd/agnosticd-v2 (v2, default ref: main) and "
+            "redhat-cop/agnosticd (legacy, default ref: development). "
+            "(3) List directories to discover folder names before fetching files. "
+            "Supports fetching specific git refs (branches, tags, commit SHAs). "
+            "Secrets in file content are automatically redacted."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "owner": {
+                    "type": "string",
+                    "description": "Repository owner or organization (e.g. 'rhpds', 'redhat-cop').",
+                },
+                "repo": {
+                    "type": "string",
+                    "description": (
+                        "Repository name (e.g. 'agnosticv', 'partner-agnosticv', "
+                        "'agnosticd-v2', 'agnosticd')."
+                    ),
+                },
+                "path": {
+                    "type": "string",
+                    "description": (
+                        "Path to a file or directory within the repo. "
+                        "Examples: 'sandboxes-gpte/OCP4_AWS/common.yaml', "
+                        "'ansible/configs/ocp4-cluster/default_vars.yml'."
+                    ),
+                },
+                "ref": {
+                    "type": "string",
+                    "description": (
+                        "Optional git ref — branch name, tag, or commit SHA. "
+                        "Use the job's Revision SHA or the scm_ref from agnosticv "
+                        "to fetch the exact code version that ran. "
+                        "If omitted, fetches from the repo's default branch."
+                    ),
+                },
+            },
+            "required": ["owner", "repo", "path"],
+        },
+    },
+    {
         "name": "render_chart",
         "description": (
             "Render a chart in the chat UI. Use this to visualize cost data, "
@@ -715,13 +767,16 @@ TOOLS = [
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["get_job", "get_job_events", "find_jobs"],
+                    "enum": ["get_job", "get_job_log", "get_job_events", "find_jobs"],
                     "description": (
                         "Action to perform. "
                         "get_job: Get job metadata, status, duration, extra_vars, "
                         "and git context for a specific job ID. "
-                        "get_job_events: Get execution events for a job. Use "
-                        "failed_only=true to see only errors. "
+                        "get_job_log: Get job metadata AND the full trimmed execution "
+                        "log (PLAY/TASK flow, failures, PLAY RECAP, timing). Best for "
+                        "triage — gives complete context in one call. "
+                        "get_job_events: Get structured execution events for a job. "
+                        "Use failed_only=true to see only errors. "
                         "find_jobs: Search for jobs by status, time range, or "
                         "template name across one or all controllers."
                     ),
@@ -786,142 +841,6 @@ TOOLS = [
                 },
             },
             "required": ["action"],
-        },
-    },
-    {
-        "name": "query_agnosticd_source",
-        "description": (
-            "Fetch source code from AgnosticD GitHub repositories to trace "
-            "provisioning failures to their exact Ansible role or config. Use this "
-            "after finding a failed AAP2 job event — the event's role and task fields "
-            "tell you where the failure occurred, and this tool fetches the actual "
-            "source code. The git_url from the AAP2 job identifies which repo to use."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "action": {
-                    "type": "string",
-                    "enum": ["get_role", "get_config", "get_file"],
-                    "description": (
-                        "Action to perform. "
-                        "get_role: Fetch task files from ansible/roles/{role}/tasks/. "
-                        "Returns the role's available task files and their content. "
-                        "get_config: Fetch default_vars for an env_type from "
-                        "ansible/configs/{env_type}/. "
-                        "get_file: Fetch an arbitrary file or list a directory."
-                    ),
-                },
-                "role": {
-                    "type": "string",
-                    "description": (
-                        "For get_role: Ansible role name (e.g. 'bookbag', "
-                        "'ocp4_workload_machinesets'). Get this from the 'role' "
-                        "field in AAP2 job events."
-                    ),
-                },
-                "task_file": {
-                    "type": "string",
-                    "description": (
-                        "For get_role: specific task file to fetch (e.g. "
-                        "'remove_workload', 'workload'). Without this, fetches "
-                        "main.yml and workload-related files. The AAP2 job action "
-                        "(provision vs destroy) hints at which file: destroy → "
-                        "remove_workload, provision → workload."
-                    ),
-                },
-                "env_type": {
-                    "type": "string",
-                    "description": (
-                        "For get_config: environment type (e.g. 'ocp4-cluster', "
-                        "'cloud-vms-base'). Maps to ansible/configs/{env_type}/."
-                    ),
-                },
-                "cloud_provider": {
-                    "type": "string",
-                    "description": (
-                        "For get_config: cloud provider for cloud-specific defaults "
-                        "(e.g. 'ec2', 'azure', 'openshift_cnv'). Fetches "
-                        "ansible/configs/{env_type}/{cloud_provider}/default_vars.yml."
-                    ),
-                },
-                "file_path": {
-                    "type": "string",
-                    "description": (
-                        "For get_file: path within the repo (e.g. "
-                        "'ansible/roles/bookbag/tasks/remove_workload.yml')."
-                    ),
-                },
-                "scm_url": {
-                    "type": "string",
-                    "description": (
-                        "Git URL to auto-detect which repo to use. Pass the "
-                        "git_url from the AAP2 job metadata or scm_url from "
-                        "the AgnosticVComponent. If it contains 'agnosticd-v2', "
-                        "uses agnosticd/agnosticd-v2; otherwise uses "
-                        "redhat-cop/agnosticd."
-                    ),
-                },
-                "ref": {
-                    "type": "string",
-                    "description": (
-                        "Git ref (branch/tag/commit). Pass the git_branch or "
-                        "git_revision from the AAP2 job metadata. Default: "
-                        "'main' for agnosticd-v2, 'development' for legacy."
-                    ),
-                },
-            },
-            "required": ["action"],
-        },
-    },
-    {
-        "name": "query_agnosticv_repo",
-        "description": (
-            "Fetch catalog item configuration from AgnosticV GitHub repositories "
-            "(private). Use this to look up runtime, lifespan, and variable "
-            "definitions for a catalog item. Get the agnosticv_repo and path from "
-            "the AgnosticVComponent (spec.agnosticvRepo and spec.path) returned by "
-            "query_babylon_catalog's get_component action."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "action": {
-                    "type": "string",
-                    "enum": ["get_config", "get_file"],
-                    "description": (
-                        "Action to perform. "
-                        "get_config: Fetch the catalog item config file (and "
-                        "common.yaml from the same directory). "
-                        "get_file: Fetch any file or list a directory."
-                    ),
-                },
-                "agnosticv_repo": {
-                    "type": "string",
-                    "description": (
-                        "The agnosticvRepo value from the AgnosticVComponent "
-                        "spec (e.g. 'rhpds-agnosticv', 'zt-ansiblebu-agnosticv', "
-                        "'zt-rhelbu-agnosticv'). This determines which GitHub "
-                        "repo to query. Required."
-                    ),
-                },
-                "path": {
-                    "type": "string",
-                    "description": (
-                        "For get_config: the spec.path from the AgnosticVComponent "
-                        "(e.g. 'ansiblebu/AAP2_WORKSHOP_NETWORKING_AUTOMATION/"
-                        "prod.yaml'). For get_file: any path within the repo."
-                    ),
-                },
-                "ref": {
-                    "type": "string",
-                    "description": (
-                        "Git ref (branch/tag). Default: 'main'. Only override "
-                        "if you need a specific version."
-                    ),
-                },
-            },
-            "required": ["action", "agnosticv_repo", "path"],
         },
     },
 ]

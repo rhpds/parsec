@@ -71,6 +71,12 @@ module = [
     "anthropic.*",
     "dynaconf.*",
     "httpx.*",
+    "fastapi",
+    "fastapi.*",
+    "mcp",
+    "mcp.*",
+    "yaml",
+    "yaml.*",
 ]
 ignore_missing_imports = true
 

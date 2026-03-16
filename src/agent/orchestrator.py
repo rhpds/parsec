@@ -29,8 +29,6 @@ from src.agent.system_prompt import ALERT_INVESTIGATION_PROMPT, get_system_promp
 from src.agent.tool_definitions import SUBMIT_ALERT_VERDICT_TOOL, TOOLS
 from src.config import get_config
 from src.tools.aap2 import query_aap2
-from src.tools.agnosticd import query_agnosticd_source
-from src.tools.agnosticv import query_agnosticv_repo
 from src.tools.aws_account import query_aws_account
 from src.tools.aws_accounts import query_aws_account_db
 from src.tools.aws_capacity_manager import query_aws_capacity_manager
@@ -41,6 +39,7 @@ from src.tools.babylon import query_babylon_catalog
 from src.tools.cloudtrail import query_cloudtrail
 from src.tools.cost_monitor import query_cost_monitor
 from src.tools.gcp_costs import query_gcp_costs
+from src.tools.github_files import fetch_github_file
 from src.tools.marketplace_agreements import query_marketplace_agreements
 from src.tools.provision_db import execute_query
 
@@ -187,23 +186,11 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
             max_results=tool_input.get("max_results", 50),
         )
 
-    elif tool_name == "query_agnosticd_source":
-        return await query_agnosticd_source(
-            action=tool_input["action"],
-            role=tool_input.get("role", ""),
-            task_file=tool_input.get("task_file", ""),
-            env_type=tool_input.get("env_type", ""),
-            cloud_provider=tool_input.get("cloud_provider", ""),
-            file_path=tool_input.get("file_path", ""),
-            scm_url=tool_input.get("scm_url", ""),
-            ref=tool_input.get("ref", ""),
-        )
-
-    elif tool_name == "query_agnosticv_repo":
-        return await query_agnosticv_repo(
-            action=tool_input["action"],
-            agnosticv_repo=tool_input.get("agnosticv_repo", ""),
-            path=tool_input.get("path", ""),
+    elif tool_name == "fetch_github_file":
+        return await fetch_github_file(
+            owner=tool_input["owner"],
+            repo=tool_input["repo"],
+            path=tool_input["path"],
             ref=tool_input.get("ref", ""),
         )
 
@@ -418,7 +405,8 @@ def _serialize_messages(messages: list) -> list:
 
 
 async def run_agent(
-    question: str, conversation_history: list | None = None
+    question: str,
+    conversation_history: list | None = None,
 ) -> AsyncGenerator[str, None]:
     """Run the Claude tool-use loop and yield SSE events.
 

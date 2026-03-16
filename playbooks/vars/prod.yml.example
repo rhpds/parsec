@@ -13,3 +13,7 @@ oauth_enabled: true
 
 # See dev.yml.example for all available variables.
 # Production values follow the same structure.
+
+# GitHub PAT (repo scope, for rhpds private repos)
+# Used by the fetch_github_file tool (GitHub remote MCP server)
+github_token: "ghp_..."

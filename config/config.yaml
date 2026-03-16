@@ -70,9 +70,14 @@ aap2:
   #     password: ""
 
 github:
-  # GitHub PAT for accessing private agnosticv repos (read-only)
-  # Set via PARSEC_GITHUB__TOKEN env var or parsec-secrets secret
+  # GitHub PAT for accessing private agnosticv repos (read-only).
+  # Set via PARSEC_GITHUB__TOKEN env var or parsec-secrets secret.
+  # Needs `repo` scope for access to rhpds private repos.
   token: ""
+  # GitHub remote MCP server URL (streamable HTTP).
+  # Uses GitHub's hosted MCP server — no sidecar needed.
+  # Auth via PAT in Authorization header (uses github.token above).
+  mcp_url: "https://api.githubcopilot.com/mcp/"
 
 alert_api_key: ""
 
