@@ -36,6 +36,11 @@ def get_mcp_url() -> str:
     return _mcp_url
 
 
+def get_token() -> str:
+    """Return the configured GitHub token, or empty string if not configured."""
+    return _token
+
+
 async def call_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Call a tool on the GitHub remote MCP server via streamable HTTP.
 
@@ -67,7 +72,12 @@ async def call_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]
 
             parts: list[str] = []
             for block in result.content:
-                if hasattr(block, "text"):
+                if hasattr(block, "resource") and hasattr(block.resource, "text"):
+                    # EmbeddedResource with TextResourceContents (file content)
+                    parts.append(block.resource.text)
+                elif hasattr(block, "text") and not block.text.startswith(
+                    "successfully downloaded"
+                ):
                     parts.append(block.text)
 
             return {"content": "\n".join(parts)}

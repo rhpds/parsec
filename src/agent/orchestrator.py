@@ -39,7 +39,7 @@ from src.tools.babylon import query_babylon_catalog
 from src.tools.cloudtrail import query_cloudtrail
 from src.tools.cost_monitor import query_cost_monitor
 from src.tools.gcp_costs import query_gcp_costs
-from src.tools.github_files import fetch_github_file
+from src.tools.github_files import fetch_github_file, lookup_catalog_item, search_github_repo
 from src.tools.marketplace_agreements import query_marketplace_agreements
 from src.tools.provision_db import execute_query
 
@@ -191,6 +191,19 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
             owner=tool_input["owner"],
             repo=tool_input["repo"],
             path=tool_input["path"],
+            ref=tool_input.get("ref", ""),
+        )
+
+    elif tool_name == "lookup_catalog_item":
+        return await lookup_catalog_item(
+            search=tool_input["search"],
+        )
+
+    elif tool_name == "search_github_repo":
+        return await search_github_repo(
+            owner=tool_input["owner"],
+            repo=tool_input["repo"],
+            search=tool_input["search"],
             ref=tool_input.get("ref", ""),
         )
 

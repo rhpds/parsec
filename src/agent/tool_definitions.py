@@ -629,7 +629,8 @@ TOOLS = [
             "tracing AAP2 job failures to source code. AgnosticD repos: "
             "agnosticd/agnosticd-v2 (v2, default ref: main) and "
             "redhat-cop/agnosticd (legacy, default ref: development). "
-            "(3) List directories to discover folder names before fetching files. "
+            "IMPORTANT: If you don't know the exact path, use search_github_repo "
+            "first to find it — do NOT list directories one by one. "
             "Supports fetching specific git refs (branches, tags, commit SHAs). "
             "Secrets in file content are automatically redacted."
         ),
@@ -666,6 +667,70 @@ TOOLS = [
                 },
             },
             "required": ["owner", "repo", "path"],
+        },
+    },
+    {
+        "name": "lookup_catalog_item",
+        "description": (
+            "Look up a catalog item across ALL agnosticv repos instantly using a "
+            "cached index. Searches rhpds/agnosticv, partner-agnosticv, "
+            "zt-ansiblebu-agnosticv, and zt-rhelbu-agnosticv. Returns the exact "
+            "repo, account directory, path, and list of files (common.yaml, prod.yaml, etc). "
+            "ALWAYS use this BEFORE fetch_github_file when looking for catalog items — "
+            "it's instant (no API calls). If it returns found=false with no similar items, "
+            "the catalog item does NOT exist — do NOT fall back to listing directories."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "search": {
+                    "type": "string",
+                    "description": (
+                        "Catalog item name to search for (case-insensitive, underscores "
+                        "and hyphens are equivalent). Example: 'ocp4-cluster', "
+                        "'ANS_BU_WKSP_RHEL_90', 'rosa-security-lab'."
+                    ),
+                },
+            },
+            "required": ["search"],
+        },
+    },
+    {
+        "name": "search_github_repo",
+        "description": (
+            "Search a GitHub repo's entire file tree for paths matching a substring. "
+            "Returns matching file and directory paths in a single API call. "
+            "Use for searching agnosticd repos or non-agnosticv repos. "
+            "For agnosticv catalog item lookups, use lookup_catalog_item instead "
+            "(it's instant and searches all agnosticv repos). "
+            "IMPORTANT: This searches the COMPLETE repo tree. If it returns "
+            "zero matches, the item does NOT exist — do NOT fall back to "
+            "listing directories manually."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "owner": {
+                    "type": "string",
+                    "description": "Repository owner or organization (e.g. 'rhpds').",
+                },
+                "repo": {
+                    "type": "string",
+                    "description": "Repository name (e.g. 'agnosticd-v2').",
+                },
+                "search": {
+                    "type": "string",
+                    "description": (
+                        "Substring to match against file/directory paths (case-insensitive). "
+                        "Example: 'ocp4-cluster-destroy' to find all paths containing that string."
+                    ),
+                },
+                "ref": {
+                    "type": "string",
+                    "description": "Optional git ref (branch, tag, SHA). Defaults to HEAD.",
+                },
+            },
+            "required": ["owner", "repo", "search"],
         },
     },
     {

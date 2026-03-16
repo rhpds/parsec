@@ -4,6 +4,14 @@ const messagesEl = document.getElementById("messages");
 const form = document.getElementById("query-form");
 const input = document.getElementById("question");
 const sendBtn = document.getElementById("send-btn");
+const fileInput = document.getElementById("file-upload");
+const uploadBtn = document.getElementById("upload-btn");
+const attachmentIndicator = document.getElementById("attachment-indicator");
+const attachmentNameEl = document.getElementById("attachment-name");
+const attachmentRemoveBtn = document.getElementById("attachment-remove");
+
+const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 10 MB
+let pendingAttachment = null; // { name, content }
 
 let conversationHistory = [];
 let currentConversationId = null;
@@ -31,6 +39,34 @@ try {
 } catch (e) {
     // Ignore corrupt data
 }
+
+// ─── File upload ───
+uploadBtn.addEventListener("click", function() { fileInput.click(); });
+
+fileInput.addEventListener("change", function() {
+    var file = fileInput.files[0];
+    if (!file) return;
+    if (file.size > MAX_UPLOAD_SIZE) {
+        alert("File too large — maximum size is 10 MB.");
+        fileInput.value = "";
+        return;
+    }
+    var reader = new FileReader();
+    reader.onload = function() {
+        pendingAttachment = { name: file.name, content: reader.result };
+        attachmentNameEl.textContent = file.name;
+        attachmentIndicator.style.display = "flex";
+        uploadBtn.classList.add("has-file");
+    };
+    reader.readAsText(file);
+});
+
+attachmentRemoveBtn.addEventListener("click", function() {
+    pendingAttachment = null;
+    fileInput.value = "";
+    attachmentIndicator.style.display = "none";
+    uploadBtn.classList.remove("has-file");
+});
 
 // New Chat button — saves current, clears, and reloads
 document.getElementById("new-chat-btn").addEventListener("click", function() {
@@ -302,6 +338,7 @@ marked.setOptions({ renderer: renderer });
     welcomeShort.className = "md-text welcome-short";
     welcomeShort.innerHTML = marked.parse(
         "**Hi, I'm Parsec** — a natural language investigation assistant for RHDP cloud costs and provisioning. " +
+        "I can also look up automation source code in AgnosticD and catalog item configs in AgnosticV. " +
         "Ask me anything about costs, provisions, sandboxes, or usage."
     );
     contentEl.appendChild(welcomeShort);
@@ -319,6 +356,8 @@ marked.setOptions({ renderer: renderer });
         "- \"What workshops are running in user-user-redhat-com?\"\n" +
         "- \"Show me the active workshops on the east Babylon cluster\"\n" +
         "- \"Chart the top 10 AWS services by cost this month\"\n" +
+        "- \"Show me the agnosticv config for ocp4-cluster-destroy-scoped\"\n" +
+        "- \"What roles does the ocp-virt-advanced-ops catalog item use in agnosticd?\"\n" +
         "- \"Generate a report of suspicious activity\"\n\n" +
         "I'm still learning! My instructions are in " +
         "[`config/agent_instructions.md`](https://github.com/rhpds/parsec/blob/main/config/agent_instructions.md) " +
@@ -409,7 +448,16 @@ form.addEventListener("submit", async (e) => {
     // Collapse any active choice buttons from previous messages
     collapseActiveChoices("Skipped");
 
-    addMessage("user", question);
+    var attachment = pendingAttachment;
+    pendingAttachment = null;
+    fileInput.value = "";
+    attachmentIndicator.style.display = "none";
+    uploadBtn.classList.remove("has-file");
+
+    var displayText = attachment
+        ? question + "\n\n\uD83D\uDCCE *" + attachment.name + "*"
+        : question;
+    addMessage("user", displayText);
 
     const assistantEl = addMessage("assistant", "");
     const contentEl = assistantEl.querySelector(".content");
@@ -426,6 +474,10 @@ form.addEventListener("submit", async (e) => {
     let textChunks = [];     // Array of text segments between tool calls
     let currentChunk = "";   // Current text being accumulated
     let chartCanvases = [];  // Track chart canvases for export
+    let liveWrapper = null;  // Live tool-calls-summary wrapper
+    let liveInner = null;    // Inner container for tool calls
+    let liveSummary = null;  // Summary element (updated with count)
+    let liveToolCount = 0;   // Running count of tool calls
 
     function ensureStreamStarted() {
         if (!streamStarted) {
@@ -474,13 +526,31 @@ form.addEventListener("submit", async (e) => {
                     textChunks.push(currentChunk);
                 }
                 currentChunk = "";
-                // Remove the live text element — it'll be collapsed later
-                const liveEl = contentEl.querySelector(".md-text-live");
-                if (liveEl) liveEl.remove();
+                // Remove the live text element — it'll be collapsed into wrapper later
+                const liveTextEl = contentEl.querySelector(".md-text-live");
+                if (liveTextEl) liveTextEl.remove();
+
+                // Create the live wrapper on first tool call
+                if (!liveWrapper) {
+                    liveWrapper = document.createElement("details");
+                    liveWrapper.className = "tool-calls-summary";
+                    liveWrapper.open = true;
+                    liveSummary = document.createElement("summary");
+                    liveWrapper.appendChild(liveSummary);
+                    liveInner = document.createElement("div");
+                    liveInner.className = "tool-calls-inner";
+                    liveWrapper.appendChild(liveInner);
+                    contentEl.appendChild(liveWrapper);
+                }
+
+                liveToolCount++;
+                liveSummary.textContent = liveToolCount === 1
+                    ? "1 query running..."
+                    : liveToolCount + " queries running...";
 
                 currentToolEl = createToolCall(data.tool, data.input);
                 toolElements[data.tool + "_" + Object.keys(toolElements).length] = currentToolEl;
-                contentEl.appendChild(currentToolEl);
+                liveInner.appendChild(currentToolEl);
                 scrollToBottom();
                 break;
             }
@@ -559,45 +629,42 @@ form.addEventListener("submit", async (e) => {
                     s.textContent = "done";
                 });
 
-                // Collect tool calls and intermediate thinking text
-                const toolCalls = contentEl.querySelectorAll(".tool-call");
-                if (toolCalls.length > 0 || textChunks.length > 0) {
-                    const wrapper = document.createElement("details");
-                    wrapper.className = "tool-calls-summary";
-                    const summary = document.createElement("summary");
-                    const qCount = toolCalls.length;
-                    const label = qCount === 1 ? "1 query executed" : qCount + " queries executed";
-                    summary.textContent = label;
-                    wrapper.appendChild(summary);
-                    const inner = document.createElement("div");
-                    inner.className = "tool-calls-inner";
+                // Finalize the live tool-calls wrapper
+                if (liveWrapper && liveSummary) {
+                    var qCount = liveToolCount;
+                    liveSummary.textContent = qCount === 1
+                        ? "1 query executed"
+                        : qCount + " queries executed";
+                    if (qCount > 1) {
+                        addExpandCollapseToggle(liveSummary, liveWrapper);
+                    }
 
-                    // Interleave thinking text and tool calls
-                    // The thinking chunks were saved before each tool_start
-                    let chunkIdx = 0;
-                    const allToolCalls = Array.from(toolCalls);
-                    allToolCalls.forEach(tc => {
+                    // Rebuild inner with interleaved thinking text + tool calls
+                    var toolEls = Array.from(liveInner.querySelectorAll(".tool-call"));
+                    liveInner.replaceChildren();
+                    var chunkIdx = 0;
+                    toolEls.forEach(function(tc) {
                         if (chunkIdx < textChunks.length) {
-                            const thinkEl = document.createElement("div");
+                            var thinkEl = document.createElement("div");
                             thinkEl.className = "thinking-text";
-                            thinkEl.innerHTML = marked.parse(textChunks[chunkIdx]);
-                            inner.appendChild(thinkEl);
+                            thinkEl.innerHTML = marked.parse(textChunks[chunkIdx]); // safe: server-generated
+                            liveInner.appendChild(thinkEl);
                             chunkIdx++;
                         }
-                        inner.appendChild(tc);
+                        liveInner.appendChild(tc);
                     });
-                    // Any remaining thinking chunks
                     while (chunkIdx < textChunks.length) {
-                        const thinkEl = document.createElement("div");
-                        thinkEl.className = "thinking-text";
-                        thinkEl.innerHTML = marked.parse(textChunks[chunkIdx]);
-                        inner.appendChild(thinkEl);
+                        var thinkEl2 = document.createElement("div");
+                        thinkEl2.className = "thinking-text";
+                        thinkEl2.innerHTML = marked.parse(textChunks[chunkIdx]); // safe: server-generated
+                        liveInner.appendChild(thinkEl2);
                         chunkIdx++;
                     }
 
-                    wrapper.appendChild(inner);
-                    // Insert at the top of content
-                    contentEl.insertBefore(wrapper, contentEl.firstChild);
+                    // Collapse the wrapper now that all queries are done
+                    liveWrapper.open = false;
+                    // Move wrapper to top of content
+                    contentEl.insertBefore(liveWrapper, contentEl.firstChild);
                 }
 
                 // Extract choice buttons from {{choices}} blocks before rendering final text
@@ -636,8 +703,12 @@ form.addEventListener("submit", async (e) => {
     }
 
     try {
+        var fullQuestion = question;
+        if (attachment) {
+            fullQuestion = question + "\n\n--- Attached file: " + attachment.name + " ---\n" + attachment.content;
+        }
         const payload = {
-            question,
+            question: fullQuestion,
             conversation_history: conversationHistory.length > 0 ? conversationHistory : null,
         };
         const response = await fetch("/api/query", {
@@ -762,6 +833,21 @@ function createToolCall(toolName, toolInput) {
 
     details.appendChild(body);
     return details;
+}
+
+function addExpandCollapseToggle(summaryEl, wrapper) {
+    var toggle = document.createElement("button");
+    toggle.className = "tool-toggle-all";
+    toggle.textContent = "Expand all";
+    toggle.addEventListener("click", function(e) {
+        e.stopPropagation();
+        var inner = wrapper.querySelector(".tool-calls-inner");
+        var details = inner.querySelectorAll("details.tool-call");
+        var allOpen = Array.from(details).every(function(d) { return d.open; });
+        details.forEach(function(d) { d.open = !allOpen; });
+        toggle.textContent = allOpen ? "Expand all" : "Collapse all";
+    });
+    summaryEl.appendChild(toggle);
 }
 
 function finalizeToolCall(toolEl, toolName, result) {
@@ -1078,8 +1164,12 @@ function renderSharedMessages(messages, interactive) {
         if (msg.role === "user") {
             var text = msg.content;
             if (Array.isArray(text)) {
-                text = text.map(function(b) { return b.text || ""; }).join("");
+                // Filter out tool_result blocks — they're internal
+                var userParts = text.filter(function(b) { return b.type !== "tool_result"; });
+                text = userParts.map(function(b) { return b.text || ""; }).join("");
             }
+            // Skip empty user messages (tool_result-only messages)
+            if (!text.trim()) return;
             addMessage("user", text);
         } else if (msg.role === "assistant") {
             var el = addMessage("assistant", "");
@@ -1113,6 +1203,9 @@ function renderSharedMessages(messages, interactive) {
                     tcSummaryEl.textContent = toolCalls.length === 1
                         ? "1 query executed"
                         : toolCalls.length + " queries executed";
+                    if (toolCalls.length > 1) {
+                        addExpandCollapseToggle(tcSummaryEl, wrapper);
+                    }
                     wrapper.appendChild(tcSummaryEl);
                     var inner = document.createElement("div");
                     inner.className = "tool-calls-inner";
