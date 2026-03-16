@@ -25,7 +25,6 @@ src/
     gcp_costs.py             # GCP BigQuery billing queries
     babylon.py               # Babylon cluster catalog/deployment queries
     aap2.py                  # AAP2 controller job queries (REST API)
-    agnosticd.py             # AgnosticD GitHub source code lookup
     github_files.py          # GitHub file/directory fetching via remote MCP server
   agent/
     learnings.py             # Post-conversation AI analysis and learning
@@ -392,29 +391,6 @@ For OpenShift deployment, store credentials in a secret and inject via env vars 
 
 Extra vars from AAP2 jobs often contain AWS keys, passwords, and tokens. The tool strips these using the same `_SECRET_PATTERNS` and `_SECRET_KEYS` as the Babylon tool before returning results.
 
-## AgnosticD Source Lookup
-
-The `query_agnosticd_source` tool fetches Ansible role/config source code from the agnosticd GitHub repositories via the GitHub Contents API. Used to trace AAP2 job failures back to their exact source code.
-
-### Repos
-
-- **agnosticd-v2** (current): `agnosticd/agnosticd-v2`, default ref: `main`
-- **agnosticd** (legacy): `redhat-cop/agnosticd`, default ref: `development`
-
-Auto-detected from `scm_url` parameter. Falls back to the other repo on 404 when no `scm_url` specified.
-
-### Actions
-
-- `get_role` — Fetch role task files from `ansible/roles/{role}/tasks/`
-- `get_config` — Fetch env_type defaults from `ansible/configs/{env_type}/`
-- `get_file` — Arbitrary file or directory listing
-
-### Investigation Flow
-
-1. Get `git_url`/`git_branch` from AAP2 job metadata, or `scm_url`/`scm_ref` from AgnosticVComponent
-2. Get failed role/task from AAP2 job events
-3. Call `query_agnosticd_source(action="get_role", role="bookbag", task_file="remove_workload", scm_url=git_url)`
-
 ## GitHub MCP Integration
 
 The `fetch_github_file` tool fetches files and directory listings from GitHub repositories via GitHub's hosted remote MCP server (`https://api.githubcopilot.com/mcp/`).
@@ -430,7 +406,23 @@ The `fetch_github_file` tool fetches files and directory listings from GitHub re
 
 - **AAP2 job failure investigation**: Fetching agnosticv config files (common.yaml, prod.yaml) and agnosticd env_type configs (default_vars.yml) to trace provisioning failures
 - **Catalog item inspection**: Reading catalog item definitions from agnosticv repos
+- **AgnosticD source code lookup**: Fetching Ansible roles (`ansible/roles/{role}/tasks/`) and env_type configs (`ansible/configs/{env_type}/default_vars.yml`) to trace failures to source code
 - **Code tracing**: Fetching specific Ansible roles or tasks from agnosticd when debugging failures
+
+### AgnosticD Repos (for source code tracing)
+
+| Repo | Owner | Default Ref | Notes |
+|------|-------|-------------|-------|
+| `agnosticd-v2` | `agnosticd` | `main` | Current version |
+| `agnosticd` | `redhat-cop` | `development` | Legacy version |
+
+Determine which repo from `git_url` in AAP2 job metadata or `scm_url` from AgnosticVComponent.
+
+### AgnosticV Repo Name Mapping
+
+The Babylon `get_component` action returns `agnosticv_repo` — map to GitHub repo name:
+- `rhpds-agnosticv` → GitHub repo `agnosticv` (owner: `rhpds`)
+- All others keep the same name (e.g. `zt-ansiblebu-agnosticv` → repo `zt-ansiblebu-agnosticv`)
 
 ### Configuration
 
