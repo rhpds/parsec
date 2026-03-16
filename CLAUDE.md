@@ -463,9 +463,13 @@ Format: `RHPDS {account}.{catalog-item}.{stage}-{guid}-{action} {uuid}`
 
 Example: `RHPDS sandboxes-gpte.ans-bu-wksp-rhel-90.prod-zhkrm-provision 54ca9081...`
 - Account: `sandboxes-gpte`
-- Catalog item path: `ANS_BU_WKSP_RHEL_90` (dashes → underscores, uppercase)
+- Catalog item segment: `ans-bu-wksp-rhel-90` (keep as-is from job template)
 - Stage: `prod`
-- AgnosticV path: `sandboxes-gpte/ANS_BU_WKSP_RHEL_90/prod.yaml`
+
+**Directory names vary** — some repos use UPPERCASE_UNDERSCORES (e.g.,
+`ANS_BU_WKSP_RHEL_90`), others use lowercase-dashes (e.g., `ocp-virt-advanced-ops`).
+Always list the account directory first to discover the actual folder name rather
+than guessing. See `config/agent_instructions.md` Step 3 for the full discovery sequence.
 
 ### AgnosticV Repos (searched in order)
 
