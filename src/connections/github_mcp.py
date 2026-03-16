@@ -23,9 +23,7 @@ def init_github_mcp() -> None:
         return
 
     if not token:
-        logger.warning(
-            "GitHub MCP URL set but no token configured — calls will fail auth"
-        )
+        logger.warning("GitHub MCP URL set but no token configured — calls will fail auth")
 
     global _mcp_url, _token  # noqa: PLW0603
     _mcp_url = url
@@ -54,27 +52,25 @@ async def call_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]
         if _token:
             headers["Authorization"] = f"Bearer {_token}"
 
-        async with streamablehttp_client(
-            url=_mcp_url, headers=headers
-        ) as (read_stream, write_stream, _):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                result = await session.call_tool(tool_name, arguments)
+        async with (
+            streamablehttp_client(url=_mcp_url, headers=headers) as (read_stream, write_stream, _),
+            ClientSession(read_stream, write_stream) as session,
+        ):
+            await session.initialize()
+            result = await session.call_tool(tool_name, arguments)
 
-                if result.isError:
-                    error_text = " ".join(
-                        block.text
-                        for block in result.content
-                        if hasattr(block, "text")
-                    )
-                    return {"error": error_text or "MCP tool returned an error"}
+            if result.isError:
+                error_text = " ".join(
+                    block.text for block in result.content if hasattr(block, "text")
+                )
+                return {"error": error_text or "MCP tool returned an error"}
 
-                parts: list[str] = []
-                for block in result.content:
-                    if hasattr(block, "text"):
-                        parts.append(block.text)
+            parts: list[str] = []
+            for block in result.content:
+                if hasattr(block, "text"):
+                    parts.append(block.text)
 
-                return {"content": "\n".join(parts)}
+            return {"content": "\n".join(parts)}
 
     except Exception as exc:
         logger.exception("GitHub MCP call failed (tool=%s)", tool_name)
