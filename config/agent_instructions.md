@@ -1230,7 +1230,7 @@ provision DB for marketplace information — use CloudTrail Lake and account ins
 
 ### Investigate AAP2 Job Failures
 
-When a user pastes AAP2 job details, uploads a job log, or asks about a failed AAP2
+When a user pastes AAP2 job details, a job log, or asks about a failed AAP2
 job, follow this workflow.
 
 **MANDATORY: You MUST call `fetch_github_file` during every AAP2 job failure
@@ -1243,7 +1243,7 @@ at least the agnosticv common.yaml and stage config via `fetch_github_file`.**
 
 **Possible inputs from the user:**
 - **Job Details** — copy-pasted from the AAP2 job details page
-- **Job Log** — pasted log content or uploaded log file (attached to the message)
+- **Job Log** — pasted log content
 - **Job ID + controller** — direct reference to a job
 - **GUID or catalog item name** — enough to search for the job
 

@@ -27,7 +27,7 @@ Natural language cloud cost and provisioning investigation tool for the RHDP pla
 | `query_marketplace_agreements` | DynamoDB | Marketplace subscription inventory |
 | `query_aws_account_db` | DynamoDB | Sandbox account pool metadata |
 | `query_babylon_catalog` | Babylon K8s clusters | Catalog definitions, active deployments, workshops, resource pools |
-| `fetch_github_file` | GitHub API (via MCP sidecar) | Fetch agnosticv/agnosticd config files for AAP2 job failure investigation |
+| `fetch_github_file` | GitHub remote MCP server | Fetch agnosticv/agnosticd config files for AAP2 job failure investigation |
 
 Claude can chain multiple tools — for example, querying the provision DB for account IDs, checking Babylon for expected instance types, then comparing against actual AWS instances.
 
@@ -47,7 +47,6 @@ Ask for a report in the chat and Claude will generate a formatted Markdown or As
 - Vertex AI credentials (or Anthropic API key)
 - Babylon cluster kubeconfigs (`rhdp-readonly` SA)
 - GitHub PAT with `repo` scope (for agnosticv/agnosticd private repos)
-- Node.js 22+ (for the GitHub MCP sidecar, local dev only)
 
 ### Local Development
 
@@ -140,7 +139,7 @@ Parsec queries Babylon clusters to understand what catalog items should deploy a
 - **Provision DB**: Read-only PostgreSQL user, SELECT-only SQL validation, 30s statement timeout, 500-row limit
 - **Cloud APIs**: Structured parameters with no injection surface
 - **Babylon**: Read-only SA, secrets auto-stripped from all results
-- **GitHub**: Read-only MCP server (`GITHUB_READ_ONLY=true`), secrets auto-redacted from fetched files
+- **GitHub**: Read-only access via GitHub's remote MCP server, secrets auto-redacted from fetched files
 - **Web UI**: OAuth proxy sidecar with group-based access control
 - **Reports**: Served from server-side filesystem, behind same auth
 
