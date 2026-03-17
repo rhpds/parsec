@@ -834,6 +834,14 @@ Babylon. Don't spend tool calls searching multiple Babylon clusters for AnarchyA
 - **Job ID 404:** If a job ID returns 404, the job may be on a different controller.
   Immediately tell the user which controllers are available (east, west, event0, partner0)
   and suggest they pick a job ID from a `find_jobs` query rather than guessing IDs.
+- **Job ID ≠ template name:** `find_jobs` searches by `template_name` (the job
+  template string), NOT by job ID. If you have a numeric job ID, use
+  `get_job(controller=<controller>, job_id=<id>)` directly. If you don't know
+  which controller, try `east` first (primary production), then `west`.
+- **Short failures (< 30s elapsed):** Jobs that ran under 30 seconds failed during
+  early setup (collection install, env validation). Once you confirm the job
+  status is `failed` with a short duration, call `get_job_events(failed_only=true)`
+  immediately — don't re-fetch job metadata you already have.
 
 ### Tracing Failures to Source Code
 
