@@ -826,11 +826,13 @@ pasting job details:
    hostname (`towerHost`) and job ID (`deployerJob`) for each lifecycle action
    (provision, destroy, stop, start). Use the action matching the failure state
    (e.g., `destroy` for destroy-failed).
-4. Call `query_aap2` with `get_job` using the `towerHost` as controller and
-   `deployerJob` as job_id — this gives job status, duration, env_type, and
-   importantly `git_url`/`git_branch` (the agnosticd repo and ref used)
-5. If the job failed, call `query_aap2` with `get_job_events` + `failed_only=true`
-   to see the error details
+4. Call `query_aap2` with `get_job_log` using the `towerHost` as controller and
+   `deployerJob` as job_id — this gives job status, duration, env_type,
+   `git_url`/`git_branch`, AND the full trimmed execution log in one call.
+   **Always use `get_job_log` instead of `get_job`** for investigations — it
+   returns everything `get_job` does plus the log output.
+5. If the job failed, also call `query_aap2` with `get_job_events` + `failed_only=true`
+   to get structured error events (role, task, host, error_msg)
 6. **Present findings** and then continue to trace the config hierarchy and
    source code by following the "Investigate AAP2 Job Failures" section below
    starting from Step 2.
@@ -867,12 +869,15 @@ Babylon. Don't spend tool calls searching multiple Babylon clusters for AnarchyA
   and suggest they pick a job ID from a `find_jobs` query rather than guessing IDs.
 - **Job ID ≠ template name:** `find_jobs` searches by `template_name` (the job
   template string), NOT by job ID. If you have a numeric job ID, use
-  `get_job(controller=<controller>, job_id=<id>)` directly. If you don't know
+  `get_job_log(controller=<controller>, job_id=<id>)` directly. If you don't know
   which controller, try `east` first (primary production), then `west`.
 - **Short failures (< 30s elapsed):** Jobs that ran under 30 seconds failed during
-  early setup (collection install, env validation). Once you confirm the job
-  status is `failed` with a short duration, call `get_job_events(failed_only=true)`
-  immediately — don't re-fetch job metadata you already have.
+  early setup (collection install, env validation). The `get_job_log` call already
+  gives you both metadata and the log — follow up with `get_job_events(failed_only=true)`
+  for structured error details if needed.
+- **Always use `get_job_log` over `get_job`:** `get_job_log` returns everything
+  `get_job` does plus the trimmed execution log. There is no reason to use `get_job`
+  alone during investigations — the log is essential context for understanding failures.
 
 ### Tracing Failures to Source Code
 
@@ -884,7 +889,7 @@ trace failures to their source code in the AgnosticD repositories:
 - **agnosticd-v2** (current): `https://github.com/agnosticd/agnosticd-v2`
 - **agnosticd** (legacy): `https://github.com/redhat-cop/agnosticd`
 
-The `get_job` response includes `git_url` and `git_branch` — these tell you which
+The `get_job_log` response includes `git_url` and `git_branch` — these tell you which
 repo and ref the job used. If `git_url` contains "agnosticd-v2", the source is in
 the v2 repo; if it contains "agnosticd" (without v2), it's the legacy repo.
 
@@ -914,7 +919,7 @@ actions) in the repo identified by `git_url`.
 
 **How to use this information:**
 - **Always determine the correct repo** from the `git_url` or `scm_url`. Get it from:
-  1. The AAP2 job's `git_url` field (from `get_job` response), OR
+  1. The AAP2 job's `git_url` field (from `get_job_log` response), OR
   2. The AgnosticVComponent's `scm_url` field (from `get_component` response)
   If it contains "agnosticd-v2": `owner="agnosticd"`, `repo="agnosticd-v2"`.
   If it contains "agnosticd" (without v2): `owner="redhat-cop"`, `repo="agnosticd"`.
@@ -947,7 +952,7 @@ When the failing code has been fixed in the agnosticd repo's development branch
 but the AgnosticVComponent's `scm_ref` points to an older tag/commit:
 - **Resolution**: Create a new tag in the agnosticd repo that includes the fix,
   then update the AgnosticVComponent's `scm_ref` to point to the new tag.
-- The `scm_ref` from `get_component` or `get_job` tells you what ref the
+- The `scm_ref` from `get_component` or `get_job_log` tells you what ref the
   deployment is pinned to. If it's a tag and the fix is only on `development`
   or `main`, the deployment won't pick up the fix until the ref is updated.
 
@@ -1346,13 +1351,16 @@ Extract key fields from any pasted job details:
 it for structured metadata. But do NOT block on this; always continue to Step 2
 regardless of whether the AAP2 API succeeds, fails, or is unavailable:
 
-1. **If you have a job ID and controller**: Call `query_aap2(action="get_job",
+1. **If you have a job ID and controller**: Call `query_aap2(action="get_job_log",
    controller=<controller>, job_id=<id>)` to get structured metadata
-   (status, duration, git context, env_type, extra_vars).
+   (status, duration, git context, env_type, extra_vars) AND the full trimmed
+   execution log in one call. **Always prefer `get_job_log` over `get_job`.**
 2. **If you have a GUID but no job ID**: Call `query_aap2(action="find_jobs",
    template_name="<guid>")` to search all controllers.
 3. **If the AAP2 API returns data**: Use it to supplement the pasted details
    (e.g., parsed extra_vars with env_type, cloud_provider, git_url, git_branch).
+   The `get_job_log` response includes the trimmed log — use it alongside any
+   pasted log for cross-referencing.
 4. **If the AAP2 API fails or is unavailable**: No problem — parse the pasted
    job details directly. You have enough information to proceed.
 
