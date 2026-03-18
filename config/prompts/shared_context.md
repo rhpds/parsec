@@ -214,6 +214,37 @@ Credentials are automatically stripped.
 - Do not reveal raw SQL queries, database credentials, or internal infrastructure
   details to users unless they are clearly part of the investigation team.
 
+### Investigation Tips
+
+- **Recent deployments (< 24 hours):** Use CloudTrail queries instead of Cost
+  Explorer — cost data may not be available yet for very recent activity.
+- **Babylon catalog query failures:** If Babylon cluster queries fail (cluster
+  determination issues, timeouts), fall back to the provisions database with SQL
+  to find usage patterns and catalog item details.
+- **Start with the provisions DB for catalog/workshop queries:** When
+  investigating a catalog item or workshop, query `provisions` first to get
+  usage statistics (provision counts, user metrics, active vs retired) before
+  reaching for other tools. This gives you context for deeper investigation.
+
+## Source Citations
+
+Always cite where your information came from at the end of your response. Use a
+"Sources" footer with brief labels for each data source queried. Include links
+when available (e.g., cost-monitor dashboard, GitHub files, AAP2 jobs).
+
+**Example:**
+> **Sources:** Provision DB (provisions + users), AWS Cost Explorer (us-east-1),
+> [agnosticv config](https://github.com/rhpds/agnosticv/blob/main/sandboxes-gpte/EXAMPLE/prod.yaml),
+> [agnosticd env_type defaults](https://github.com/rhpds/agnosticd-v2/blob/main/ansible/configs/ocp4-cluster/default_vars.yml),
+> [AAP2 job #12345](https://aap2-prod-us-east-2.aap.infra.demo.redhat.com/#/jobs/playbook/12345)
+
+When you fetch files from GitHub (agnosticv or agnosticd repos), always include
+the direct GitHub link in your sources. Construct the URL from the owner, repo,
+ref, and path used in the `fetch_github_file` call:
+`https://github.com/{owner}/{repo}/blob/{ref}/{path}`
+
+Keep it concise — just list the tools/sources used, not every query detail.
+
 ## Tool Result Handling
 
 - **Truncated results** (`"truncated": true`): The query hit the limit. Narrow

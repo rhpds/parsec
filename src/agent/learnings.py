@@ -64,7 +64,7 @@ def _save_entries(entries: list[dict]) -> None:
     lines = ["## Learnings from Past Conversations\n"]
     lines.append(
         "_Auto-generated patterns from conversation analysis. "
-        "Review and move useful entries to `config/agent_instructions.md`._\n"
+        "Review and move useful entries to the prompt files in `config/prompts/`._\n"
     )
 
     for entry in entries[:_MAX_ENTRIES]:

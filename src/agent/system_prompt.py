@@ -1,8 +1,8 @@
-"""System prompt loader — reads from config/agent_instructions.md + data/agent_learnings.md.
+"""System prompt loader — reads per-agent prompts from config/prompts/.
 
-Supports two modes:
-1. Monolithic: ``get_system_prompt()`` loads the original single-file prompt.
-2. Sub-agent: ``get_agent_prompt(agent_type)`` loads shared_context + domain prompt.
+Each agent type has a domain-specific prompt file. Sub-agents (cost, triage,
+security) get shared_context.md prepended. The orchestrator has its own
+standalone prompt. Learnings from data/agent_learnings.md are appended to all.
 """
 
 import logging
@@ -12,14 +12,8 @@ logger = logging.getLogger(__name__)
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 
-_PROMPT_PATH = os.path.join(_BASE_DIR, "config", "agent_instructions.md")
 _LEARNINGS_PATH = os.path.join(_BASE_DIR, "data", "agent_learnings.md")
 _PROMPTS_DIR = os.path.join(_BASE_DIR, "config", "prompts")
-
-# Cache for the monolithic prompt
-_cached_prompt: str = ""
-_cached_instructions_mtime: float = 0
-_cached_learnings_mtime: float = 0
 
 # Cache for per-agent prompts: {agent_type: (prompt_str, shared_mtime, domain_mtime)}
 _agent_prompt_cache: dict[str, tuple[str, float, float]] = {}
@@ -65,37 +59,6 @@ def _get_learnings() -> str:
     return ""
 
 
-def get_system_prompt() -> str:
-    """Load the monolithic system prompt, including learnings if available.
-
-    Hot-reloads when either file changes (checked via mtime).
-    """
-    global _cached_prompt, _cached_instructions_mtime, _cached_learnings_mtime
-
-    inst_mtime = _get_mtime(_PROMPT_PATH)
-    learn_mtime = _get_mtime(_LEARNINGS_PATH)
-
-    if (
-        _cached_prompt
-        and inst_mtime == _cached_instructions_mtime
-        and learn_mtime == _cached_learnings_mtime
-    ):
-        return _cached_prompt
-
-    with open(_PROMPT_PATH) as f:
-        prompt = f.read()
-
-    learnings = _get_learnings()
-    if learnings:
-        prompt += "\n\n" + learnings
-        logger.info("System prompt updated with learnings (%d chars)", len(learnings))
-
-    _cached_prompt = prompt
-    _cached_instructions_mtime = inst_mtime
-    _cached_learnings_mtime = learn_mtime
-    return prompt
-
-
 def get_agent_prompt(agent_type: str) -> str:
     """Load a per-agent prompt: shared_context + domain-specific instructions.
 
@@ -107,8 +70,8 @@ def get_agent_prompt(agent_type: str) -> str:
     """
     domain_path = _AGENT_PROMPT_FILES.get(agent_type)
     if not domain_path:
-        logger.warning("Unknown agent type %s, falling back to monolithic prompt", agent_type)
-        return get_system_prompt()
+        logger.warning("Unknown agent type: %s", agent_type)
+        return ""
 
     shared_mtime = _get_mtime(_SHARED_CONTEXT_PATH)
     domain_mtime = _get_mtime(domain_path)
@@ -139,9 +102,6 @@ def get_agent_prompt(agent_type: str) -> str:
     )
     return prompt
 
-
-# For backward compatibility
-SYSTEM_PROMPT = get_system_prompt()
 
 ALERT_INVESTIGATION_PROMPT = """
 ## Alert Investigation Mode
