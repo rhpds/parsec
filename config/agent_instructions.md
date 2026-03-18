@@ -161,6 +161,18 @@ When filtering provisions by status, typical patterns:
 - Retired provisions: `WHERE p.last_state = 'retired'` or `WHERE p.retired_at IS NOT NULL`
 - Failed provisions: `WHERE p.provision_result = 'failed'` or `WHERE p.last_state = 'error'`
 
+### Investigation Tips
+
+- **Recent deployments (< 24 hours):** Use CloudTrail queries instead of Cost
+  Explorer — cost data may not be available yet for very recent activity.
+- **Babylon catalog query failures:** If Babylon cluster queries fail (cluster
+  determination issues, timeouts), fall back to the provisions database with SQL
+  to find usage patterns and catalog item details.
+- **Start with the provisions DB for catalog/workshop queries:** When
+  investigating a catalog item or workshop, query `provisions` first to get
+  usage statistics (provision counts, user metrics, active vs retired) before
+  reaching for other tools. This gives you context for deeper investigation.
+
 ### Important Query Patterns
 
 **Get the effective catalog item name for a provision:**
