@@ -1,26 +1,38 @@
-"""System prompt loader — reads from config/agent_instructions.md + data/agent_learnings.md."""
+"""System prompt loader — reads from config/agent_instructions.md + data/agent_learnings.md.
+
+Supports two modes:
+1. Monolithic: ``get_system_prompt()`` loads the original single-file prompt.
+2. Sub-agent: ``get_agent_prompt(agent_type)`` loads shared_context + domain prompt.
+"""
 
 import logging
 import os
 
 logger = logging.getLogger(__name__)
 
-_PROMPT_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-    "config",
-    "agent_instructions.md",
-)
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 
-_LEARNINGS_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-    "data",
-    "agent_learnings.md",
-)
+_PROMPT_PATH = os.path.join(_BASE_DIR, "config", "agent_instructions.md")
+_LEARNINGS_PATH = os.path.join(_BASE_DIR, "data", "agent_learnings.md")
+_PROMPTS_DIR = os.path.join(_BASE_DIR, "config", "prompts")
 
-# Cache for the combined prompt
+# Cache for the monolithic prompt
 _cached_prompt: str = ""
 _cached_instructions_mtime: float = 0
 _cached_learnings_mtime: float = 0
+
+# Cache for per-agent prompts: {agent_type: (prompt_str, shared_mtime, domain_mtime)}
+_agent_prompt_cache: dict[str, tuple[str, float, float]] = {}
+
+# Agent type → prompt file mapping
+_AGENT_PROMPT_FILES: dict[str, str] = {
+    "orchestrator": os.path.join(_PROMPTS_DIR, "orchestrator.md"),
+    "cost": os.path.join(_PROMPTS_DIR, "cost_agent.md"),
+    "triage": os.path.join(_PROMPTS_DIR, "triage_agent.md"),
+    "security": os.path.join(_PROMPTS_DIR, "security_agent.md"),
+}
+
+_SHARED_CONTEXT_PATH = os.path.join(_PROMPTS_DIR, "shared_context.md")
 
 
 def _get_mtime(path: str) -> float:
@@ -31,8 +43,30 @@ def _get_mtime(path: str) -> float:
         return 0
 
 
+def _read_file(path: str) -> str:
+    """Read a file, returning empty string if it doesn't exist."""
+    try:
+        with open(path) as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def _get_learnings() -> str:
+    """Load learnings content if available."""
+    if _get_mtime(_LEARNINGS_PATH) > 0:
+        try:
+            with open(_LEARNINGS_PATH) as f:
+                learnings = f.read().strip()
+            if learnings:
+                return learnings
+        except Exception:
+            pass
+    return ""
+
+
 def get_system_prompt() -> str:
-    """Load the system prompt, including learnings if available.
+    """Load the monolithic system prompt, including learnings if available.
 
     Hot-reloads when either file changes (checked via mtime).
     """
@@ -51,20 +85,58 @@ def get_system_prompt() -> str:
     with open(_PROMPT_PATH) as f:
         prompt = f.read()
 
-    # Append learnings if available
-    if learn_mtime > 0:
-        try:
-            with open(_LEARNINGS_PATH) as f:
-                learnings = f.read().strip()
-            if learnings:
-                prompt += "\n\n" + learnings
-                logger.info("System prompt updated with learnings (%d chars)", len(learnings))
-        except Exception:
-            pass
+    learnings = _get_learnings()
+    if learnings:
+        prompt += "\n\n" + learnings
+        logger.info("System prompt updated with learnings (%d chars)", len(learnings))
 
     _cached_prompt = prompt
     _cached_instructions_mtime = inst_mtime
     _cached_learnings_mtime = learn_mtime
+    return prompt
+
+
+def get_agent_prompt(agent_type: str) -> str:
+    """Load a per-agent prompt: shared_context + domain-specific instructions.
+
+    For the orchestrator, returns the orchestrator prompt (no shared context since
+    it has its own complete prompt). For sub-agents (cost, triage, security),
+    returns shared_context.md + the domain prompt.
+
+    Hot-reloads when either source file changes (checked via mtime).
+    """
+    domain_path = _AGENT_PROMPT_FILES.get(agent_type)
+    if not domain_path:
+        logger.warning("Unknown agent type %s, falling back to monolithic prompt", agent_type)
+        return get_system_prompt()
+
+    shared_mtime = _get_mtime(_SHARED_CONTEXT_PATH)
+    domain_mtime = _get_mtime(domain_path)
+
+    cached = _agent_prompt_cache.get(agent_type)
+    if cached:
+        cached_prompt, cached_shared_mt, cached_domain_mt = cached
+        if cached_shared_mt == shared_mtime and cached_domain_mt == domain_mtime:
+            return cached_prompt
+
+    if agent_type == "orchestrator":
+        prompt = _read_file(domain_path)
+    else:
+        shared = _read_file(_SHARED_CONTEXT_PATH)
+        domain = _read_file(domain_path)
+        prompt = f"{shared}\n\n{domain}"
+
+    learnings = _get_learnings()
+    if learnings:
+        prompt += "\n\n" + learnings
+
+    _agent_prompt_cache[agent_type] = (prompt, shared_mtime, domain_mtime)
+    logger.info(
+        "Agent prompt loaded for %s (%d chars, shared=%s)",
+        agent_type,
+        len(prompt),
+        "yes" if agent_type != "orchestrator" else "no",
+    )
     return prompt
 
 

@@ -587,6 +587,30 @@ form.addEventListener("submit", async (e) => {
                 break;
             }
 
+            case "agent_start": {
+                ensureStreamStarted();
+                var agentBanner = document.createElement("div");
+                agentBanner.className = "agent-banner agent-running";
+                agentBanner.dataset.agent = data.agent;
+                agentBanner.innerHTML = '<span class="agent-icon">&#9881;</span> ' +
+                    '<span class="agent-label">' + (data.name || data.agent) + '</span>' +
+                    ' <span class="agent-status">investigating\u2026</span>';
+                contentEl.appendChild(agentBanner);
+                scrollToBottom();
+                break;
+            }
+
+            case "agent_done": {
+                var banners = contentEl.querySelectorAll('.agent-banner[data-agent="' + data.agent + '"]');
+                banners.forEach(function(b) {
+                    b.classList.remove("agent-running");
+                    b.classList.add("agent-done");
+                    var statusSpan = b.querySelector(".agent-status");
+                    if (statusSpan) statusSpan.textContent = "done";
+                });
+                break;
+            }
+
             case "status": {
                 ensureStreamStarted();
                 // Remove previous status indicator if any

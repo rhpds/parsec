@@ -35,6 +35,16 @@ def sse_status(message: str) -> str:
     return sse_event("status", {"message": message})
 
 
+def sse_agent_start(agent_type: str, agent_name: str) -> str:
+    """Signal that a sub-agent has started execution."""
+    return sse_event("agent_start", {"agent": agent_type, "name": agent_name})
+
+
+def sse_agent_done(agent_type: str) -> str:
+    """Signal that a sub-agent has finished execution."""
+    return sse_event("agent_done", {"agent": agent_type})
+
+
 def sse_error(message: str) -> str:
     """Send an error event."""
     return sse_event("error", {"message": message})

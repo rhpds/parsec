@@ -10,6 +10,10 @@ anthropic:
   model: "claude-sonnet-4-6"
   max_tokens: 4096
   max_tool_rounds: 10
+  # Model for the orchestrator agent. Sub-agents always use the main 'model'
+  # above. Set to a faster model (e.g. claude-haiku) to reduce orchestrator
+  # routing latency. Empty = same as model.
+  # orchestrator_model: ""
   # Vertex AI settings (when backend: "vertex")
   # vertex_project_id: ""  # falls back to gcp.project_id
   # vertex_region: "us-east5"
