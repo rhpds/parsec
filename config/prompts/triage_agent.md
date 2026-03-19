@@ -183,11 +183,53 @@ handles repo discovery, naming normalization, and directory resolution.
 
 #### Step 4: Resolve Components
 
-Check if `__meta__.components` is present in `common.yaml`:
+Check if `__meta__.components` is present in `common.yaml`. There are two patterns:
 
-**Pattern A — Virtual CI** (`deployer.type: null`): Config lives in the component's files.
-**Pattern B — Chained CI** (own deployer + components): Has both infrastructure components
-and its own deployer.
+**Pattern A — Virtual CI** (`deployer.type: null`): The parent catalog item has no deployer
+of its own — it only exists to present a catalog entry and delegates all deployment to its
+components. Found under `published/`.
+
+```yaml
+__meta__:
+  components:
+  - name: ai-driven-automation
+    item: openshift_cnv/ai-driven-automation
+  deployer:
+    type: null
+```
+
+- The parent's `prod.yaml` / `dev.yaml` are typically empty placeholders.
+- **All actual config** (`env_type`/`config`, `scm_ref`, deployer settings, workloads) lives
+  in the component's files.
+- The AAP job template will reference the component path, not the parent.
+
+**Pattern B — Chained CI** (own deployer + components): The catalog item has both
+infrastructure components and its own deployer for workloads that run on top.
+
+```yaml
+config: openshift-workloads
+cloud_provider: none
+workloads:
+- agnosticd.showroom.ocp4_workload_showroom
+
+__meta__:
+  components:
+  - name: openshift
+    item: agd-v2/ocp-cluster-cnv-pools/prod
+    propagate_provision_data:
+    - name: openshift_api_url
+      var: openshift_api_url
+  deployer:
+    scm_url: https://github.com/agnosticd/agnosticd-v2
+    scm_ref: main
+```
+
+- The component provisions infrastructure (e.g., an OCP cluster). The catalog item's own
+  deployer then runs workloads on that infrastructure.
+- The catalog item has its own `env_type`/`config`, `scm_ref`, and workload definitions.
+- Data flows from component to parent via `propagate_provision_data`.
+- A failure could be in **either** the component's job (infrastructure) **or** the catalog
+  item's own job (workloads). Check the job template name to determine which.
 
 **Component resolution rules:**
 1. The `item` field is a path in the **same agnosticv repo**
@@ -203,6 +245,10 @@ Find `env_type` (v1) or `config` (v2):
 
 Also extract `__meta__.deployer.scm_ref` — check stage file first, then `common.yaml`.
 
+- **prod.yaml** typically pins a specific release tag (e.g., `scm_ref: ocp4-argo-wksp-1.2.0`)
+- **dev.yaml** typically uses the `development` branch (e.g., `scm_ref: development`)
+- If not set in the stage file, check `common.yaml`
+
 #### Step 6: Determine AgnosticD Version and Fetch Config
 
 | Project Pattern | Version | GitHub Owner | GitHub Repo |
@@ -210,9 +256,29 @@ Also extract `__meta__.deployer.scm_ref` — check stage file first, then `commo
 | `https://github.com/redhat-cop/agnosticd.git` | v1 | `redhat-cop` | `agnosticd` |
 | `https://github.com/rhpds/agnosticd-v2.git` | v2 | `rhpds` | `agnosticd-v2` |
 
-Use the `ref` parameter when fetching agnosticd files. Fetch:
+When fetching agnosticd files, use the `ref` parameter to get the correct code version:
+1. **If the job has a Revision SHA** — use it as `ref` to get the exact commit that ran.
+2. **Otherwise** — use the `__meta__.deployer.scm_ref` extracted from the agnosticv config
+   (Step 5) as the `ref`. This will be a tag (for prod) or a branch name like `development`
+   (for dev).
+
+Fetch:
 - `ansible/configs/{env_type}/default_vars.yml`
 - `ansible/roles/{role_name}/tasks/main.yml` (when tracing failures)
+
+**AgnosticD Structure:**
+```
+agnosticd/
+└── ansible/
+    ├── configs/
+    │   └── {env_type}/
+    │       ├── default_vars.yml
+    │       ├── pre_software.yml
+    │       ├── software.yml
+    │       └── post_software.yml
+    └── roles/
+        └── {role_name}/
+```
 
 **IMPORTANT:** Config names may differ between v1 and v2 — e.g., `ocp4-cluster` in v1
 is `openshift-cluster` in v2. Use `search_github_repo` to confirm the correct name.
@@ -221,6 +287,12 @@ is `openshift-cluster` in v2. Use `search_github_repo` to confirm the correct na
 
 **CHECKPOINT:** Verify you have completed Steps 3-6 before analyzing.
 
+**Key sections to examine in the log:**
+1. **PLAY RECAP** — Summary of hosts and status
+2. **fatal** or **FAILED** tasks — Actual error messages
+3. **TASK [role_name : task_name]** — Identify which role/task failed
+4. **Cloud provider errors** — AWS/Azure/GCP specific errors
+
 Common failure patterns:
 
 | Pattern | Likely Cause |
@@ -228,8 +300,10 @@ Common failure patterns:
 | `FAILED! => {"msg": "..."}` | Task failure with error message |
 | `fatal: [host]: UNREACHABLE!` | SSH/connectivity issues |
 | `ERROR! No inventory` | Inventory generation failed |
+| `Unable to resolve DNS` | DNS or network issues |
 | `cloud_provider error` | Cloud API quota/limits/credentials |
 | `timeout` | Resource provisioning timeout |
+| `Vault password` | Missing vault credentials |
 
 #### Step 8: Cross-Reference with Parsec Data
 
@@ -239,18 +313,41 @@ Common failure patterns:
 
 #### AAP2 Output Format
 
-**Job Analysis:** Job ID, status, duration
+**Job Analysis:**
+- **Job ID:** {id}
+- **Status:** {status}
+- **Duration:** {start} → {finish}
+
 **Configuration Trace** (REQUIRED):
 
 | Layer | Location | Key Values |
 |-------|----------|------------|
-| AgnosticV Stage | `{account}/{catalog_item}/{stage}.yaml` | deployer settings |
-| AgnosticV Common | `{account}/{catalog_item}/common.yaml` | env_type, components |
-| Component (if used) | `{component_item}/common.yaml` | actual env_type, scm_ref |
+| AgnosticV Stage | `{account}/{catalog_item}/{stage}.yaml` | purpose, deployer settings |
+| AgnosticV Common | `{account}/{catalog_item}/common.yaml` | env_type, platform, components |
+| Component (if used) | `{component_item}/common.yaml` + `{stage}.yaml` | actual env_type, scm_ref, deployer |
 | AgnosticD Config | `ansible/configs/{env_type}/` | playbook structure |
 
-**Failure Analysis:** Failed task, host, error message
-**Root Cause & Recommendations:** Immediate cause, underlying reason, fix suggestions
+- **env_type:** `{env_type}`
+- **Component:** `{component_item}` (if applicable)
+- **AgnosticD Version:** v1/v2 (from Project URL)
+- **Deployer scm_ref:** `{scm_ref}` (from agnosticv `__meta__.deployer.scm_ref`)
+- **Job Revision:** `{revision}` (resolved commit SHA from job details)
+
+**Failure Analysis:**
+- **Failed Task:** `{role} : {task_name}`
+- **Host:** `{host}`
+- **Error:** the error message
+
+**Root Cause & Recommendations:**
+1. **Immediate cause:** what directly failed
+2. **Root cause:** underlying reason
+3. **Fix suggestions:** actionable next steps
+
+**Relevant Files to Review:**
+- AgnosticV config: `{path_to_common.yaml}`
+- Component config (if used): `{component_item}/common.yaml`, `{component_item}/{stage}.yaml`
+- AgnosticD env_type: `ansible/configs/{env_type}/`
+- Failed role: `ansible/roles/{role_name}/`
 
 #### Quick Reference: Common AAP2 Fixes
 
