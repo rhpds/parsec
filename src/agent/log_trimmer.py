@@ -17,7 +17,12 @@ _RETRY_RE = re.compile(r"FAILED - RETRYING:.*\((\d+) retries left\)")
 
 _JSON_ERROR_KEYS = ("msg", "stderr", "message", "error", "reason")
 
+_PRIMARY_ERROR_KEYS = {"msg", "stderr"}
+
 MAX_LINE_CHARS = 1500
+MAX_FATAL_LINE_CHARS = 12000
+MAX_ERROR_FIELD_CHARS = 8000
+MAX_SECONDARY_FIELD_CHARS = 1500
 
 _NOISE_PREFIXES = ("skipping:", "changed:", "included:", "ASYNC ", "[WARNING]:")
 
@@ -51,7 +56,8 @@ def _extract_json_errors(line: str) -> str | None:
     for key in _JSON_ERROR_KEYS:
         val = data.get(key)
         if val:
-            text = str(val)[:500]
+            limit = MAX_ERROR_FIELD_CHARS if key in _PRIMARY_ERROR_KEYS else MAX_SECONDARY_FIELD_CHARS
+            text = str(val)[:limit]
             parts.append(f'"{key}": {text!r}')
 
     if "cmd" in data:
@@ -63,15 +69,21 @@ def _extract_json_errors(line: str) -> str | None:
     return ", ".join(parts) if parts else None
 
 
-def _truncate_line(line: str) -> str:
-    """Truncate a long line, preserving extracted error fields."""
-    if len(line) <= MAX_LINE_CHARS:
+def _truncate_line(line: str, *, is_fatal: bool = False) -> str:
+    """Truncate a long line, preserving extracted error fields.
+
+    Fatal/error lines get a much larger budget so diagnostic content
+    (e.g. pod YAML dumps, multi-line error messages) isn't lost.
+    """
+    max_chars = MAX_FATAL_LINE_CHARS if is_fatal else MAX_LINE_CHARS
+    if len(line) <= max_chars:
         return line
 
     errors = _extract_json_errors(line)
-    prefix = line[:800]
+    prefix_len = min(2000, max_chars // 3) if is_fatal else 800
+    prefix = line[:prefix_len]
     if errors:
-        return f"{prefix}... " f"[extracted: {errors}] " f"[truncated from {len(line):,} chars]"
+        return f"{prefix}... [extracted: {errors}] [truncated from {len(line):,} chars]"
     return f"{prefix}... [truncated from {len(line):,} chars]"
 
 
@@ -183,7 +195,7 @@ def trim_ansible_log(content: str) -> str:
                 result.append(f"  [... retried {retry_count} times before failing]")
                 prev_was_retry = False
                 retry_count = 0
-            result.append(_truncate_line(line))
+            result.append(_truncate_line(line, is_fatal=True))
             continue
 
         if _is_unconditional_keep(stripped):

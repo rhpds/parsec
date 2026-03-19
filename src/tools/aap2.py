@@ -130,10 +130,13 @@ def _parse_event(event: dict) -> dict:
         if not error_msg:
             error_msg = res.get("module_stderr", "")
 
-    # Truncate stdout to keep response manageable
+    is_failed = event.get("failed", False)
+    stdout_limit = 8000 if is_failed else 500
+    error_limit = 8000
+
     stdout = event.get("stdout", "") or ""
-    if len(stdout) > 500:
-        stdout = stdout[:500] + "... [truncated]"
+    if len(stdout) > stdout_limit:
+        stdout = stdout[:stdout_limit] + f"... [truncated from {len(stdout):,} chars]"
 
     return {
         "event": event.get("event", ""),
@@ -141,10 +144,10 @@ def _parse_event(event: dict) -> dict:
         "play": event.get("play", ""),
         "role": event.get("role", ""),
         "host": event.get("host_name", ""),
-        "failed": event.get("failed", False),
+        "failed": is_failed,
         "changed": event.get("changed", False),
         "stdout": stdout,
-        "error_msg": str(error_msg)[:500] if error_msg else "",
+        "error_msg": str(error_msg)[:error_limit] if error_msg else "",
         "counter": event.get("counter", 0),
     }
 
