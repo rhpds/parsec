@@ -938,6 +938,8 @@ COST_TOOLS = _tools_by_name(
     "query_aws_capacity_manager",
     "query_provisions_db",
     "query_aws_account_db",
+    "render_chart",
+    "generate_report",
 )
 
 TRIAGE_TOOLS = _tools_by_name(
@@ -948,6 +950,8 @@ TRIAGE_TOOLS = _tools_by_name(
     "query_babylon_catalog",
     "query_provisions_db",
     "query_aws_account_db",
+    "render_chart",
+    "generate_report",
 )
 
 SECURITY_TOOLS = _tools_by_name(
@@ -957,6 +961,8 @@ SECURITY_TOOLS = _tools_by_name(
     "query_babylon_catalog",
     "query_provisions_db",
     "query_aws_account_db",
+    "render_chart",
+    "generate_report",
 )
 
 ORCHESTRATOR_DIRECT_TOOLS = _tools_by_name(

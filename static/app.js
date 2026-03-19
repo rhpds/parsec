@@ -392,6 +392,7 @@ marked.setOptions({ renderer: renderer });
                 document.getElementById("shared-banner").style.display = "flex";
                 document.getElementById("query-form").style.display = "none";
                 renderSharedMessages(shareData.messages);
+                scrollToBottom();
 
                 // Continue Investigation button
                 document.getElementById("continue-btn").addEventListener("click", function() {
@@ -1184,6 +1185,21 @@ function exportResponseAsPDF(messageEl) {
 }
 
 function renderSharedMessages(messages, interactive) {
+    // Build tool_use_id → tool_result map for reconstructing reports/charts
+    var toolResultMap = {};
+    messages.forEach(function(msg) {
+        if (msg.role !== "user" || !Array.isArray(msg.content)) return;
+        msg.content.forEach(function(block) {
+            if (block.type === "tool_result" && block.tool_use_id) {
+                try {
+                    toolResultMap[block.tool_use_id] = JSON.parse(block.content);
+                } catch (e) {
+                    toolResultMap[block.tool_use_id] = block.content;
+                }
+            }
+        });
+    });
+
     messages.forEach(function(msg, msgIdx) {
         if (msg.role === "user") {
             var text = msg.content;
@@ -1200,6 +1216,7 @@ function renderSharedMessages(messages, interactive) {
             var contentEl = el.querySelector(".content");
             var content = msg.content;
             var restoredText = "";
+            var restoredCharts = [];
 
             if (typeof content === "string") {
                 restoredText = content;
@@ -1249,11 +1266,44 @@ function renderSharedMessages(messages, interactive) {
                         var body = document.createElement("div");
                         body.className = "tool-body";
                         body.textContent = JSON.stringify(tc.input || {}, null, 2);
+
+                        // Append tool result if available
+                        var result = toolResultMap[tc.id];
+                        if (result && typeof result === "object") {
+                            body.textContent += "\n\n--- Result ---\n" + JSON.stringify(result, null, 2);
+                        }
+
                         tcEl.appendChild(body);
                         inner.appendChild(tcEl);
                     });
                     wrapper.appendChild(inner);
                     contentEl.appendChild(wrapper);
+
+                    // Reconstruct report download links and charts
+                    toolCalls.forEach(function(tc) {
+                        var result = toolResultMap[tc.id];
+                        if (!result || typeof result !== "object" || result.error) return;
+
+                        if (tc.name === "generate_report" && result.filename) {
+                            var link = document.createElement("a");
+                            link.className = "report-download";
+                            link.href = "/api/reports/" + result.filename;
+                            link.download = result.filename;
+                            link.textContent = "Download report: " + result.filename;
+                            contentEl.appendChild(link);
+                        } else if (tc.name === "render_chart" && result.datasets) {
+                            try {
+                                var chartEl = renderChart(result);
+                                contentEl.appendChild(chartEl);
+                                var chartCanvas = chartEl.querySelector("canvas");
+                                if (chartCanvas) {
+                                    restoredCharts.push({ title: result.title || "chart", canvas: chartCanvas });
+                                }
+                            } catch (e) {
+                                console.warn("Failed to reconstruct chart:", e);
+                            }
+                        }
+                    });
                 }
 
                 // Render text content
@@ -1282,7 +1332,7 @@ function renderSharedMessages(messages, interactive) {
             // Add export bar to restored assistant messages
             if (restoredText.trim()) {
                 el._exportMarkdown = restoredText;
-                el._exportCharts = [];
+                el._exportCharts = restoredCharts;
                 contentEl.appendChild(createResponseExportBar(el));
             }
         }

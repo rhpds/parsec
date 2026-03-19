@@ -631,13 +631,17 @@ async def run_agent(
         messages.append({"role": "user", "content": tool_results})
         yield sse_event("history", {"messages": _serialize_messages(messages)})
 
-    yield sse_text(
+    max_rounds_text = (
         "\n\nI've used all my planned tool calls but haven't finished. "
         "Would you like me to keep going?\n\n"
         "{{choices}}\n"
         "Keep investigating\n"
         "That's enough, thanks\n"
         "{{/choices}}"
+    )
+    yield sse_text(max_rounds_text)
+    messages.append(
+        {"role": "assistant", "content": [{"type": "text", "text": max_rounds_text}]}
     )
     yield sse_event("history", {"messages": _serialize_messages(messages)})
     yield sse_done()

@@ -18,7 +18,7 @@ from typing import Any
 
 import anthropic
 
-from src.agent.streaming import sse_status, sse_tool_result, sse_tool_start
+from src.agent.streaming import sse_event, sse_report, sse_status, sse_tool_result, sse_tool_start
 from src.agent.system_prompt import get_agent_prompt
 from src.agent.tool_definitions import COST_TOOLS, SECURITY_TOOLS, TRIAGE_TOOLS
 from src.config import get_config
@@ -283,6 +283,12 @@ async def run_sub_agent(
 
             await _emit(sse_tool_result(tool_name, result))
 
+            if tool_name == "generate_report" and "error" not in result:
+                download_url = f"/api/reports/{result['filename']}"
+                await _emit(sse_report(result["filename"], result["format"], download_url))
+            elif tool_name == "render_chart" and "error" not in result:
+                await _emit(sse_event("chart", result))
+
             result_str = json.dumps(result, default=str)
             if len(result_str) > 300:
                 investigation_log.append(f"[Tool: {tool_name}] result: {result_str[:300]}...")
@@ -485,13 +491,17 @@ async def run_sub_agent_streaming(
         _time.monotonic() - start_time,
     )
     yield sse_event("agent_done", {"agent": agent_type})
-    yield sse_text(
+    max_rounds_text = (
         "\n\nI've used all my planned tool calls but haven't finished. "
         "Would you like me to keep going?\n\n"
         "{{choices}}\n"
         "Keep investigating\n"
         "That's enough, thanks\n"
         "{{/choices}}"
+    )
+    yield sse_text(max_rounds_text)
+    messages.append(
+        {"role": "assistant", "content": [{"type": "text", "text": max_rounds_text}]}
     )
     yield sse_event("history", {"messages": _serialize_messages(messages)})
     yield sse_done()

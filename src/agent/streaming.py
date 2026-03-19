@@ -1,12 +1,19 @@
 """SSE (Server-Sent Events) helpers for streaming agent responses."""
 
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def sse_event(event: str, data: dict | str) -> str:
     """Format a single SSE event."""
     if isinstance(data, dict):
-        data = json.dumps(data)
+        try:
+            data = json.dumps(data)
+        except (TypeError, ValueError) as exc:
+            logger.error("Failed to serialize SSE %s event: %s", event, exc)
+            data = json.dumps(data, default=str)
     return f"event: {event}\ndata: {data}\n\n"
 
 
