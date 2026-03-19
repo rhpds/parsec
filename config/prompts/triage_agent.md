@@ -109,15 +109,7 @@ Workshops and MultiWorkshops have start/end dates:
 
 The `query_aap2` tool queries AAP2 controllers for job metadata and execution events.
 
-### Which Investigation Flow to Use
-
-**If the user pastes job details, a job log, or a job URL**: Go directly to the
-paste-based "Investigate AAP2 Job Failures" workflow below.
-
-**If the user asks about a failed provision by GUID or catalog item name**: Use
-the GUID-based flow below.
-
-### GUID-Based Investigation Flow
+### Investigation Flow
 
 1. Get the provision GUID from the user's question or the provision DB
 2. Use `query_babylon_catalog` with `list_anarchy_subjects` + guid filter
@@ -125,7 +117,7 @@ the GUID-based flow below.
 4. Call `query_aap2` with `get_job_log` using `towerHost` as controller and `deployerJob` as job_id.
    **Always use `get_job_log` instead of `get_job`.**
 5. If the job failed, also call `get_job_events` + `failed_only=true`
-6. Continue to trace the config hierarchy via the paste-based workflow Steps 2+
+6. Continue to trace the config hierarchy via the "Investigate AAP2 Job Failures" workflow Steps 2+
 
 **If the AnarchySubject is gone**, use `query_aap2(action="find_jobs", template_name="<guid>")`
 to find the job directly.
@@ -148,12 +140,12 @@ to find the job directly.
 ### Investigate AAP2 Job Failures
 
 **MANDATORY: You MUST call `fetch_github_file` during every AAP2 job failure
-investigation.** Analyzing the pasted log alone is NOT sufficient. Your job is to resolve
+investigation.** Analyzing the job log alone is NOT sufficient. Your job is to resolve
 the config chain and cross-reference it with the failure.
 
-#### Step 1: Parse Job Details
+#### Step 1: Get Job Details via API
 
-Extract key fields from any pasted job details:
+Use `query_aap2` with `get_job_log` to retrieve the job metadata and log. Key fields:
 
 | Field | What to Extract |
 |-------|-----------------|
@@ -162,8 +154,6 @@ Extract key fields from any pasted job details:
 | Project | Determines agnosticd version (v1 or v2) |
 | Revision | Git commit SHA for agnosticd |
 | Status | Failed, Error, etc. |
-
-**Optionally enrich via AAP2 API** — if configured. But do NOT block on this.
 
 #### Step 2: Parse the Job Template Name
 

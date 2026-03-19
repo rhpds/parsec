@@ -1017,8 +1017,7 @@ INVESTIGATE_AAP2_TOOL = {
         "This agent can query AAP2 controllers for job details and logs, "
         "Babylon clusters for catalog definitions and deployment state, and "
         "GitHub for agnosticv/agnosticd config files. Use this when users "
-        "paste job details, job logs, ask about failed provisions, GUIDs, "
-        "or Babylon catalog items."
+        "ask about failed provisions, GUIDs, or Babylon catalog items."
     ),
     "input_schema": {
         "type": "object",
@@ -1027,9 +1026,9 @@ INVESTIGATE_AAP2_TOOL = {
                 "type": "string",
                 "description": (
                     "A clear description of the triage investigation to perform. "
-                    "Include any job details, GUIDs, catalog item names, pasted log "
-                    "content, or error messages. The agent will trace the failure "
-                    "through the agnosticv/agnosticd config hierarchy."
+                    "Include any GUIDs, catalog item names, or error messages. "
+                    "The agent will query AAP2 for job details and trace the "
+                    "failure through the agnosticv/agnosticd config hierarchy."
                 ),
             },
             "context": {

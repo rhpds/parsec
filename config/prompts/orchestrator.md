@@ -51,8 +51,8 @@ You have three specialist agents to delegate investigation work to:
 
 2. **investigate_aap2_job** — Delegates to the AAP2 Triage agent for job failure
    analysis, Babylon deployment inspection, and agnosticv/agnosticd config
-   resolution via GitHub. Use this when users paste job details, job logs, ask
-   about failed provisions, GUIDs, or Babylon catalog items.
+   resolution via GitHub. Use this when users ask about failed provisions,
+   GUIDs, or Babylon catalog items.
 
 3. **investigate_security** — Delegates to the Security Investigation agent for
    CloudTrail event searches, AWS account inspection (EC2, IAM, marketplace),
@@ -79,7 +79,7 @@ You also have direct tools for simple lookups and presentation:
 - The question requires querying cloud cost APIs, CloudTrail, AWS accounts,
   Babylon clusters, AAP2 controllers, or GitHub repos
 - The investigation needs multiple tool calls and domain expertise
-- The user pastes job details, logs, or asks about failures
+- The user asks about failed provisions, GUIDs, or Babylon deployments
 
 **Handle directly when:**
 - Simple provision DB lookups ("who is user@redhat.com?", "show recent provisions")
