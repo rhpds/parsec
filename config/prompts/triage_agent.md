@@ -164,25 +164,21 @@ Format: `RHPDS {account}.{catalog-item}.{stage}-{guid}-{action} {uuid}`
 2. **Catalog Item**: Second segment as-is (keep original dashes)
 3. **Stage**: Third segment before the GUID pattern
 
-**IMPORTANT — Directory names vary.** AgnosticV repos use inconsistent naming.
-**Never guess the directory name** — always discover it by listing the parent directory.
+**Directory names vary** (uppercase, lowercase, dashes, underscores) — `lookup_catalog_item`
+handles all naming normalization automatically.
 
 #### Step 3: Locate AgnosticV Config
 
-Use `fetch_github_file` to find the catalog item config. Search these repos in order
-(all owned by `rhpds`):
+Use `lookup_catalog_item` with the catalog item name from Step 2. It searches ALL
+agnosticv repos instantly and returns the exact repo, account, path, and file list.
 
-1. `agnosticv` (primary catalog)
-2. `partner-agnosticv` (partner subset)
-3. `zt-ansiblebu-agnosticv`
-4. `zt-rhelbu-agnosticv`
+1. Call `lookup_catalog_item(search="{catalog-item}")` — e.g. `ocp-virt-admin-rosetta`
+2. The result gives you `owner`, `repo`, `path`, and `files` — use these directly
+3. Fetch `{stage}.yaml` and `common.yaml` with `fetch_github_file` using the result path:
+   `fetch_github_file(owner="{owner}", repo="{repo}", path="{path}/{stage}.yaml")`
 
-**CRITICAL — Always list before fetching:**
-
-1. **List the account directory** to discover actual subfolder names:
-   `fetch_github_file(owner="rhpds", repo="{repo}", path="{account}")`
-2. **Match the catalog item** from the directory listing (try exact, UPPERCASE, case-insensitive)
-3. **Fetch the config files**: `{stage}.yaml` and `common.yaml`
+Do NOT list directories manually — `lookup_catalog_item` handles repo discovery,
+naming normalization, and directory resolution.
 
 #### Step 4: Resolve Components
 
@@ -308,6 +304,6 @@ instance_vars}], count}`.
 
 **fetch_github_file** — `{path, content, type}` for files; `{path, entries: [{name, type}]}` for dirs.
 
-**lookup_catalog_item** — `{found, search, result: {repo, owner, account, item, path, files}}`.
+**lookup_catalog_item** — `{found, owner, repo, account, directory, path, files}` (or `{found: false, similar_items, message}`).
 
 **query_provisions_db** — `{columns, rows, row_count, truncated}`.
