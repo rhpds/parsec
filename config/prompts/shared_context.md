@@ -234,7 +234,7 @@ when available (e.g., cost-monitor dashboard, GitHub files, AAP2 jobs).
 
 **Example:**
 > **Sources:** Provision DB (provisions + users), AWS Cost Explorer (us-east-1),
-> [agnosticv config](https://github.com/rhpds/agnosticv/blob/main/sandboxes-gpte/EXAMPLE/prod.yaml),
+> [agnosticv config](https://github.com/rhpds/agnosticv/blob/master/sandboxes-gpte/EXAMPLE/prod.yaml),
 > [agnosticd env_type defaults](https://github.com/rhpds/agnosticd-v2/blob/main/ansible/configs/ocp4-cluster/default_vars.yml),
 > [AAP2 job #12345](https://aap2-prod-us-east-2.aap.infra.demo.redhat.com/#/jobs/playbook/12345)
 
@@ -242,6 +242,12 @@ When you fetch files from GitHub (agnosticv or agnosticd repos), always include
 the direct GitHub link in your sources. Construct the URL from the owner, repo,
 ref, and path used in the `fetch_github_file` call:
 `https://github.com/{owner}/{repo}/blob/{ref}/{path}`
+
+**IMPORTANT:** Different repos have different default branches (`master`, `main`,
+`development`). Use the `default_branch` field from `lookup_catalog_item` results
+for agnosticv repos, or the `ref` you passed to `fetch_github_file`. Do NOT
+hardcode `main` — it will produce broken links for repos that use `master` or
+`development`.
 
 Keep it concise — just list the tools/sources used, not every query detail.
 

@@ -173,12 +173,13 @@ Use `lookup_catalog_item` with the catalog item name from Step 2. It searches AL
 agnosticv repos instantly and returns the exact repo, account, path, and file list.
 
 1. Call `lookup_catalog_item(search="{catalog-item}")` — e.g. `ocp-virt-admin-rosetta`
-2. The result gives you `owner`, `repo`, `path`, and `files` — use these directly
-3. Fetch `{stage}.yaml` and `common.yaml` with `fetch_github_file` using the result path:
-   `fetch_github_file(owner="{owner}", repo="{repo}", path="{path}/{stage}.yaml")`
+2. The result gives you `owner`, `repo`, `path`, `files`, and `default_branch`
+3. Fetch `{stage}.yaml` and `common.yaml` using the result path and branch:
+   `fetch_github_file(owner="{owner}", repo="{repo}", path="{path}/{stage}.yaml", ref="{default_branch}")`
 
-Do NOT list directories manually — `lookup_catalog_item` handles repo discovery,
-naming normalization, and directory resolution.
+Use `default_branch` as the `ref` for `fetch_github_file` and for constructing
+GitHub source links. Do NOT list directories manually — `lookup_catalog_item`
+handles repo discovery, naming normalization, and directory resolution.
 
 #### Step 4: Resolve Components
 
@@ -304,6 +305,6 @@ instance_vars}], count}`.
 
 **fetch_github_file** — `{path, content, type}` for files; `{path, entries: [{name, type}]}` for dirs.
 
-**lookup_catalog_item** — `{found, owner, repo, account, directory, path, files}` (or `{found: false, similar_items, message}`).
+**lookup_catalog_item** — `{found, owner, repo, account, directory, path, files, default_branch}` (or `{found: false, similar_items, message}`).
 
 **query_provisions_db** — `{columns, rows, row_count, truncated}`.

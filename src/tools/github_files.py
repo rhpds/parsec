@@ -120,17 +120,25 @@ async def _build_catalog_index() -> None:
 
     new_index: dict[str, dict] = {}
 
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+    }
+
     async with httpx.AsyncClient(timeout=30) as client:
         for owner, repo in _AGNOSTICV_REPOS:
-            url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/HEAD?recursive=1"
             try:
-                resp = await client.get(
-                    url,
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Accept": "application/vnd.github+json",
-                    },
+                # Get repo metadata for default branch name
+                repo_resp = await client.get(
+                    f"https://api.github.com/repos/{owner}/{repo}",
+                    headers=headers,
                 )
+                default_branch = "main"
+                if repo_resp.status_code == 200:
+                    default_branch = repo_resp.json().get("default_branch", "main")
+
+                url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/HEAD?recursive=1"
+                resp = await client.get(url, headers=headers)
                 if resp.status_code != 200:
                     logger.warning("Failed to index %s/%s: HTTP %s", owner, repo, resp.status_code)
                     continue
@@ -171,6 +179,7 @@ async def _build_catalog_index() -> None:
                         "directory": item_dir,
                         "path": dir_path,
                         "files": files,
+                        "default_branch": default_branch,
                     }
 
                 logger.info(
@@ -218,6 +227,7 @@ async def lookup_catalog_item(search: str) -> dict:
             "directory": item["directory"],
             "path": item["path"],
             "files": item["files"],
+            "default_branch": item.get("default_branch", "main"),
         }
 
     # Substring match
