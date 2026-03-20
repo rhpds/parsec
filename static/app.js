@@ -391,6 +391,7 @@ marked.setOptions({ renderer: renderer });
                 var shareData = await shareResp.json();
                 document.getElementById("shared-banner").style.display = "flex";
                 document.getElementById("query-form").style.display = "none";
+                messagesEl.textContent = "";
                 renderSharedMessages(shareData.messages);
 
                 // Continue Investigation button
