@@ -923,6 +923,7 @@ TOOLS = [
 # Per-agent tool groupings for the sub-agent architecture
 # ---------------------------------------------------------------------------
 
+
 def _tools_by_name(*names: str) -> list[dict]:
     """Return tool definitions from TOOLS matching the given names."""
     by_name = {t["name"]: t for t in TOOLS}

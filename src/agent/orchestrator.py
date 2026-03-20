@@ -8,7 +8,7 @@ import logging
 import os
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import anthropic
 
@@ -487,6 +487,125 @@ _DELEGATION_TOOL_MAP = {
 }
 
 
+async def _handle_delegation(
+    agent_type: str,
+    tool_block: Any,
+    tool_input: dict,
+    client: Any,
+    incoming_history: list,
+) -> AsyncGenerator[tuple[str | None, dict | None], None]:
+    """Run a sub-agent delegation, yielding (sse_event, None) or (None, tool_result) at the end."""
+    from src.agent.agents import AGENTS, run_sub_agent
+    from src.agent.streaming import sse_agent_done, sse_agent_start
+
+    agent_cfg = AGENTS.get(agent_type)
+    agent_name = agent_cfg.name if agent_cfg else agent_type
+
+    logger.info(
+        "Orchestrator delegating to %s agent: %s",
+        agent_type,
+        tool_input.get("task", "")[:120],
+    )
+
+    yield sse_agent_start(agent_type, agent_name), None
+    yield sse_tool_start(tool_block.name, tool_input), None
+
+    event_queue: asyncio.Queue[str] = asyncio.Queue()
+
+    sub_task = asyncio.create_task(
+        run_sub_agent(
+            agent_type=agent_type,
+            task=tool_input.get("task", ""),
+            context=tool_input.get("context"),
+            client=client,
+            event_queue=event_queue,
+            conversation_history=incoming_history,
+        )
+    )
+
+    while not sub_task.done():
+        try:
+            event = await asyncio.wait_for(event_queue.get(), timeout=1.0)
+            yield event, None
+        except TimeoutError:
+            pass
+
+    while not event_queue.empty():
+        yield event_queue.get_nowait(), None
+
+    result = sub_task.result()
+
+    logger.info(
+        "Sub-agent %s delegation complete: status=%s tool_calls=%d duration=%.1fs",
+        agent_type,
+        result.get("status"),
+        result.get("tool_calls", 0),
+        result.get("duration_seconds", 0),
+    )
+
+    yield sse_tool_result(
+        tool_block.name,
+        {
+            "agent": result.get("agent"),
+            "status": result.get("status"),
+            "summary": result.get("summary", "")[:2000],
+            "tool_calls": result.get("tool_calls", 0),
+            "duration_seconds": result.get("duration_seconds", 0),
+        },
+    ), None
+    yield sse_agent_done(agent_type), None
+
+    yield None, {
+        "type": "tool_result",
+        "tool_use_id": tool_block.id,
+        "content": json.dumps(
+            {
+                "agent": result.get("agent"),
+                "status": result.get("status"),
+                "summary": result.get("summary", ""),
+                "note": (
+                    "The detailed analysis above was already streamed "
+                    "to the user. Do NOT repeat or re-summarize it. "
+                    "Only add brief follow-up suggestions or source "
+                    "citations if useful."
+                ),
+            }
+        ),
+    }
+
+
+async def _handle_direct_tool(
+    tool_block: Any,
+    tool_input: dict,
+) -> AsyncGenerator[tuple[str | None, dict | None], None]:
+    """Execute a direct tool call, yielding (sse_event, None) or (None, tool_result)."""
+    tool_name = tool_block.name
+    yield sse_tool_start(tool_name, tool_input), None
+
+    task = asyncio.create_task(_execute_tool(tool_name, tool_input))
+    elapsed = 0
+    while not task.done():
+        done, _ = await asyncio.wait({task}, timeout=10)
+        if not done:
+            elapsed += 10
+            yield sse_status(f"Processing {tool_name}... ({elapsed}s)"), None
+    result = task.result()
+
+    yield sse_tool_result(tool_name, result), None
+
+    if tool_name == "generate_report" and "error" not in result:
+        download_url = f"/api/reports/{result['filename']}"
+        yield sse_report(result["filename"], result["format"], download_url), None
+    elif tool_name == "render_chart" and "error" not in result:
+        yield sse_event("chart", result), None
+
+    yield None, {
+        "type": "tool_result",
+        "tool_use_id": tool_block.id,
+        "content": json.dumps(result),
+    }
+
+
 async def run_agent(
     question: str,
     conversation_history: list | None = None,
@@ -500,8 +619,7 @@ async def run_agent(
        direct tools (query_provisions_db, query_aws_account_db, render_chart,
        generate_report).
     """
-    from src.agent.agents import AGENTS, classify_fast, run_sub_agent, run_sub_agent_streaming
-    from src.agent.streaming import sse_agent_done, sse_agent_start
+    from src.agent.agents import AGENTS, classify_fast, run_sub_agent_streaming
     from src.agent.system_prompt import get_agent_prompt
     from src.agent.tool_definitions import ORCHESTRATOR_TOOLS
 
@@ -608,109 +726,17 @@ async def run_agent(
             agent_type = _DELEGATION_TOOL_MAP.get(tool_name)
 
             if agent_type:
-                agent_cfg = AGENTS.get(agent_type)
-                agent_name = agent_cfg.name if agent_cfg else agent_type
-
-                logger.info(
-                    "Orchestrator delegating to %s agent: %s",
-                    agent_type,
-                    tool_input.get("task", "")[:120],
-                )
-
-                yield sse_agent_start(agent_type, agent_name)
-                yield sse_tool_start(tool_name, tool_input)
-
-                event_queue: asyncio.Queue[str] = asyncio.Queue()
-
-                sub_task = asyncio.create_task(
-                    run_sub_agent(
-                        agent_type=agent_type,
-                        task=tool_input.get("task", ""),
-                        context=tool_input.get("context"),
-                        client=client,
-                        event_queue=event_queue,
-                        conversation_history=incoming_history,
-                    )
-                )
-
-                while not sub_task.done():
-                    try:
-                        event = await asyncio.wait_for(event_queue.get(), timeout=1.0)
-                        yield event
-                    except asyncio.TimeoutError:
-                        pass
-
-                while not event_queue.empty():
-                    yield event_queue.get_nowait()
-
-                result = sub_task.result()
-
-                logger.info(
-                    "Sub-agent %s delegation complete: status=%s tool_calls=%d duration=%.1fs",
-                    agent_type,
-                    result.get("status"),
-                    result.get("tool_calls", 0),
-                    result.get("duration_seconds", 0),
-                )
-
-                yield sse_tool_result(
-                    tool_name,
-                    {
-                        "agent": result.get("agent"),
-                        "status": result.get("status"),
-                        "summary": result.get("summary", "")[:2000],
-                        "tool_calls": result.get("tool_calls", 0),
-                        "duration_seconds": result.get("duration_seconds", 0),
-                    },
-                )
-                yield sse_agent_done(agent_type)
-
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tool_block.id,
-                        "content": json.dumps(
-                            {
-                                "agent": result.get("agent"),
-                                "status": result.get("status"),
-                                "summary": result.get("summary", ""),
-                                "note": (
-                                    "The detailed analysis above was already streamed "
-                                    "to the user. Do NOT repeat or re-summarize it. "
-                                    "Only add brief follow-up suggestions or source "
-                                    "citations if useful."
-                                ),
-                            }
-                        ),
-                    }
+                handler = _handle_delegation(
+                    agent_type, tool_block, tool_input, client, incoming_history
                 )
             else:
-                yield sse_tool_start(tool_name, tool_input)
+                handler = _handle_direct_tool(tool_block, tool_input)
 
-                task = asyncio.create_task(_execute_tool(tool_name, tool_input))
-                elapsed = 0
-                while not task.done():
-                    done, _ = await asyncio.wait({task}, timeout=10)
-                    if not done:
-                        elapsed += 10
-                        yield sse_status(f"Processing {tool_name}... ({elapsed}s)")
-                result = task.result()
-
-                yield sse_tool_result(tool_name, result)
-
-                if tool_name == "generate_report" and "error" not in result:
-                    download_url = f"/api/reports/{result['filename']}"
-                    yield sse_report(result["filename"], result["format"], download_url)
-                elif tool_name == "render_chart" and "error" not in result:
-                    yield sse_event("chart", result)
-
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tool_block.id,
-                        "content": json.dumps(result),
-                    }
-                )
+            async for sse_evt, tool_result in handler:
+                if sse_evt is not None:
+                    yield sse_evt
+                if tool_result is not None:
+                    tool_results.append(tool_result)
 
         messages.append({"role": "user", "content": tool_results})
         yield sse_event("history", {"messages": _serialize_messages(messages)})
