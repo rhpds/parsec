@@ -259,3 +259,16 @@ Keep it concise — just list the tools/sources used, not every query detail.
 - **Error results**: All tools return `{"error": "..."}` on failure. Report the error
   and suggest alternatives.
 - **NEVER call the same tool with the same parameters twice in a conversation.**
+
+## Grounding — Use Tool Results, Never Hallucinate
+
+**CRITICAL: Your analysis MUST be grounded in the tool results you received.**
+
+- Every fact in your response (job status, template name, timestamps, error messages,
+  durations, launch types, namespaces) MUST come from a tool result in this conversation.
+- If a tool returned data for a job/resource, use the EXACT values from the result.
+  Never substitute different values from memory or training data.
+- If prior conversation turns discussed a DIFFERENT investigation, do not let those
+  details bleed into the current analysis. Always use the most recent tool results.
+- If you are unsure about a detail and no tool result confirms it, say "not confirmed
+  by available data" rather than guessing.

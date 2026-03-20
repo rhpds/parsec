@@ -22,7 +22,8 @@ _agent_prompt_cache: dict[str, tuple[str, float, float]] = {}
 _AGENT_PROMPT_FILES: dict[str, str] = {
     "orchestrator": os.path.join(_PROMPTS_DIR, "orchestrator.md"),
     "cost": os.path.join(_PROMPTS_DIR, "cost_agent.md"),
-    "triage": os.path.join(_PROMPTS_DIR, "triage_agent.md"),
+    "aap2": os.path.join(_PROMPTS_DIR, "aap2_agent.md"),
+    "babylon": os.path.join(_PROMPTS_DIR, "babylon_agent.md"),
     "security": os.path.join(_PROMPTS_DIR, "security_agent.md"),
 }
 

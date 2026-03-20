@@ -18,9 +18,16 @@ from typing import Any
 
 import anthropic
 
-from src.agent.streaming import sse_event, sse_report, sse_status, sse_tool_result, sse_tool_start
+from src.agent.streaming import (
+    sse_event,
+    sse_report,
+    sse_status,
+    sse_text,
+    sse_tool_result,
+    sse_tool_start,
+)
 from src.agent.system_prompt import get_agent_prompt
-from src.agent.tool_definitions import COST_TOOLS, SECURITY_TOOLS, TRIAGE_TOOLS
+from src.agent.tool_definitions import AAP2_TOOLS, BABYLON_TOOLS, COST_TOOLS, SECURITY_TOOLS
 from src.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -58,19 +65,31 @@ AGENTS: dict[str, AgentConfig] = {
             "query_azure_costs": "Querying Azure billing",
         },
     ),
-    "triage": AgentConfig(
-        name="AAP2 Triage",
-        agent_type="triage",
-        tools=TRIAGE_TOOLS,
-        prompt_file="config/prompts/triage_agent.md",
-        max_rounds=10,
+    "aap2": AgentConfig(
+        name="AAP2 Investigation",
+        agent_type="aap2",
+        tools=AAP2_TOOLS,
+        prompt_file="config/prompts/aap2_agent.md",
+        max_rounds=20,
         description=(
-            "Investigates AAP2 job failures, Babylon deployments, "
-            "and agnosticv/agnosticd configs."
+            "Investigates AAP2 job failures and traces configs " "through agnosticv/agnosticd."
         ),
         slow_tool_labels={
             "query_babylon_catalog": "Querying Babylon cluster",
             "query_aap2": "Querying AAP2 controller",
+        },
+    ),
+    "babylon": AgentConfig(
+        name="Babylon Investigation",
+        agent_type="babylon",
+        tools=BABYLON_TOOLS,
+        prompt_file="config/prompts/babylon_agent.md",
+        max_rounds=8,
+        description=(
+            "Investigates Babylon catalog items, deployments, " "lifecycle state, and workshops."
+        ),
+        slow_tool_labels={
+            "query_babylon_catalog": "Querying Babylon cluster",
         },
     ),
     "security": AgentConfig(
@@ -101,9 +120,21 @@ _AAP2_PATTERNS = re.compile(
     | job\s+(failed|log|details|template)
     | failed?\s+provision
     | get_job_log
-    | agnostic[vd]
     | ansible.*(fail|error)
-    | \bguid\b.*\b[a-z0-9]{5}\b  # 5-char GUID reference
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+_BABYLON_PATTERNS = re.compile(
+    r"""
+    \bbabylon\b
+    | catalog\s+item
+    | resource.?claim
+    | anarchy.?subject
+    | resource.?pool
+    | \bworkshop\b
+    | deployment\s+state
+    | what.*(?:deploy|provision)s?\b
     """,
     re.IGNORECASE | re.VERBOSE,
 )
@@ -134,10 +165,17 @@ def classify_fast(question: str) -> str | None:
     """Regex fast-path: returns agent type or None for orchestrator.
 
     For queries that clearly map to a single domain, this skips the
-    orchestrator LLM call entirely.
+    orchestrator LLM call entirely. When multiple domains match, falls
+    through to the orchestrator for routing.
     """
-    if _AAP2_PATTERNS.search(question):
-        return "triage"
+    aap2 = _AAP2_PATTERNS.search(question)
+    babylon = _BABYLON_PATTERNS.search(question)
+
+    if aap2 and not babylon:
+        return "aap2"
+    if babylon and not aap2:
+        return "babylon"
+
     if _COST_PATTERNS.search(question) and not _SECURITY_PATTERNS.search(question):
         return "cost"
     if _SECURITY_PATTERNS.search(question) and not _COST_PATTERNS.search(question):
@@ -149,12 +187,72 @@ def classify_fast(question: str) -> str | None:
 # Sub-agent execution
 # ---------------------------------------------------------------------------
 
+
+def _extract_user_context(history: list) -> str:
+    """Extract user text messages from conversation history for sub-agent context.
+
+    The orchestrator's history contains tool_use/tool_result blocks that
+    reference orchestrator-level tools the sub-agent doesn't know about.
+    We extract just the user's natural-language messages so the sub-agent
+    has multi-turn context (e.g., follow-up questions, pasted logs).
+    """
+    if not history:
+        return ""
+
+    user_messages: list[str] = []
+    for msg in history:
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, str) and content.strip():
+            user_messages.append(content.strip())
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text = block.get("text", "").strip()
+                    if text:
+                        user_messages.append(text)
+
+    if not user_messages:
+        return ""
+
+    recent = user_messages[-3:]
+    return "\n\n**Prior conversation context (user messages):**\n" + "\n---\n".join(recent)
+
+
+def _maybe_inject_budget_warning(messages: list, current_round: int, max_rounds: int) -> None:
+    """Inject a budget warning when the agent is 2 rounds from the limit.
+
+    This nudges Claude to stop fetching and write its structured report
+    before running out of rounds.
+    """
+    remaining = max_rounds - current_round - 1
+    if remaining != 2:
+        return
+
+    last_content = messages[-1].get("content")
+    if isinstance(last_content, list):
+        last_content.append(
+            {
+                "type": "text",
+                "text": (
+                    "[SYSTEM: You have 2 tool rounds remaining. "
+                    "You MUST write your full structured report (config trace, "
+                    "failure analysis, root cause, recommendations) in your next "
+                    "response. Do NOT call more tools unless absolutely critical. "
+                    "A report with gaps is better than no report.]"
+                ),
+            }
+        )
+
+
 async def run_sub_agent(
     agent_type: str,
     task: str,
     context: dict | None = None,
     client: anthropic.Anthropic | None = None,
     event_queue: asyncio.Queue[str] | None = None,
+    conversation_history: list | None = None,
 ) -> dict:
     """Run a sub-agent's Claude tool-use loop and return structured results.
 
@@ -162,11 +260,12 @@ async def run_sub_agent(
     loop that executes tools and collects findings.
 
     Args:
-        agent_type: Key into AGENTS registry ("cost", "triage", "security").
+        agent_type: Key into AGENTS registry ("cost", "aap2", "babylon", "security").
         task: Natural language task description from the orchestrator.
         context: Optional context dict (account_ids, user info, etc.).
         client: Pre-built Anthropic client (shared with orchestrator).
         event_queue: Optional queue for forwarding SSE events to the outer stream.
+        conversation_history: Prior orchestrator messages for multi-turn context.
 
     Returns:
         Structured result dict with summary, findings, and metadata.
@@ -200,11 +299,13 @@ async def run_sub_agent(
 
     context_str = ""
     if context:
-        context_str = f"\n\n**Context from orchestrator:**\n```json\n{json.dumps(context, default=str)}\n```"
+        context_str = (
+            f"\n\n**Context from orchestrator:**\n```json\n{json.dumps(context, default=str)}\n```"
+        )
 
-    messages: list[dict] = [
-        {"role": "user", "content": f"{task}{context_str}"}
-    ]
+    history_context = _extract_user_context(conversation_history) if conversation_history else ""
+
+    messages: list[dict] = [{"role": "user", "content": f"{task}{context_str}{history_context}"}]
     investigation_log: list[str] = []
     tool_call_count = 0
     text_parts: list[str] = []
@@ -214,7 +315,18 @@ async def run_sub_agent(
             await event_queue.put(event)
 
     for _round in range(agent_cfg.max_rounds):
+        from src.agent.orchestrator import _dump_api_request
+
+        _dump_api_request(
+            f"sub_{agent_type}_round_{_round}",
+            system,
+            messages,
+            agent_cfg.tools,
+            model,
+        )
+
         try:
+
             def _call_api() -> anthropic.types.Message:
                 return client.messages.create(
                     model=model,
@@ -245,6 +357,7 @@ async def run_sub_agent(
             if block.type == "text" and block.text.strip():
                 text_parts.append(block.text)
                 investigation_log.append(block.text)
+                await _emit(sse_text(block.text))
             elif block.type == "tool_use":
                 tool_use_blocks.append(block)
 
@@ -272,9 +385,7 @@ async def run_sub_agent(
                     done, _ = await asyncio.wait({task_coro}, timeout=10)
                     if not done:
                         elapsed += 10
-                        label = agent_cfg.slow_tool_labels.get(
-                            tool_name, f"Processing {tool_name}"
-                        )
+                        label = agent_cfg.slow_tool_labels.get(tool_name, f"Processing {tool_name}")
                         await _emit(sse_status(f"{agent_cfg.name}: {label}... ({elapsed}s)"))
                 result = task_coro.result()
             except Exception as e:
@@ -304,6 +415,7 @@ async def run_sub_agent(
             )
 
         messages.append({"role": "user", "content": tool_results})
+        _maybe_inject_budget_warning(messages, _round, agent_cfg.max_rounds)
 
     elapsed_total = round(_time.monotonic() - start, 1)
     summary = "\n\n".join(text_parts) if text_parts else "Investigation completed without findings."
@@ -380,6 +492,7 @@ async def run_sub_agent_streaming(
 
     def _serialize_messages(msgs: list) -> list:
         from src.agent.orchestrator import _serialize_messages
+
         return _serialize_messages(msgs)
 
     logger.info(
@@ -394,7 +507,18 @@ async def run_sub_agent_streaming(
     yield sse_event("agent_start", {"agent": agent_type, "name": agent_cfg.name})
 
     for _round in range(agent_cfg.max_rounds):
+        from src.agent.orchestrator import _dump_api_request
+
+        _dump_api_request(
+            f"streaming_{agent_type}_round_{_round}",
+            system,
+            messages,
+            agent_cfg.tools,
+            model,
+        )
+
         try:
+
             def _call_api() -> anthropic.types.Message:
                 return client.messages.create(
                     model=model,
@@ -459,9 +583,7 @@ async def run_sub_agent_streaming(
                 done, _ = await asyncio.wait({tool_task}, timeout=10)
                 if not done:
                     elapsed += 10
-                    label = agent_cfg.slow_tool_labels.get(
-                        tool_name, f"Processing {tool_name}"
-                    )
+                    label = agent_cfg.slow_tool_labels.get(tool_name, f"Processing {tool_name}")
                     yield sse_status(f"{agent_cfg.name}: {label}... ({elapsed}s)")
             result = tool_task.result()
 
@@ -500,8 +622,6 @@ async def run_sub_agent_streaming(
         "{{/choices}}"
     )
     yield sse_text(max_rounds_text)
-    messages.append(
-        {"role": "assistant", "content": [{"type": "text", "text": max_rounds_text}]}
-    )
+    messages.append({"role": "assistant", "content": [{"type": "text", "text": max_rounds_text}]})
     yield sse_event("history", {"messages": _serialize_messages(messages)})
     yield sse_done()

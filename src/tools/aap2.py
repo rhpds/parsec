@@ -113,6 +113,69 @@ def _parse_job_metadata(data: dict, cluster_name: str) -> dict:
     return result
 
 
+def _trim_k8s_error(msg: str, limit: int = 8000) -> str:
+    """Extract the meaningful part of Kubernetes-heavy error messages.
+
+    Pod failure messages often include full YAML dumps with managedFields,
+    annotations, and network metadata that overwhelm the context window.
+    Extracts POD STATUS SUMMARY / CONTAINER STATUSES sections when present,
+    then falls back to cutting at YAML dump markers.
+    """
+    if len(msg) <= limit:
+        return msg
+
+    # Try to extract structured status sections from formatted reports
+    # (e.g., ocp4_workload_showroom's "Report pod failure" task)
+    summary_idx = -1
+    for marker in ("POD STATUS SUMMARY:", "CONTAINER STATUSES:", "Pod Status:"):
+        idx = msg.find(marker)
+        if idx >= 0:
+            summary_idx = idx
+            break
+
+    if summary_idx >= 0:
+        # Keep everything from the status section through container logs,
+        # stopping before the full pod YAML dump
+        dump_markers = ("FULL POD INFORMATION", "managedFields:", "f:metadata:")
+        remaining = msg[summary_idx:]
+        cut_at = len(remaining)
+        for dm in dump_markers:
+            didx = remaining.find(dm)
+            if 0 < didx < cut_at:
+                cut_at = didx
+
+        useful_section = remaining[:cut_at].rstrip()
+        prefix = msg[: min(summary_idx, 2000)].rstrip()
+
+        if len(useful_section) > limit:
+            useful_section = useful_section[:limit] + "\n... [container logs truncated]"
+
+        trimmed_chars = len(msg) - len(prefix) - len(useful_section)
+        if trimmed_chars > 100:
+            return (
+                f"{prefix}\n\n{useful_section}"
+                f"\n\n[{trimmed_chars:,} chars of K8s metadata removed]"
+            )
+
+    # Fall back: cut at YAML/JSON dump markers
+    for marker in (
+        "FULL POD INFORMATION (YAML):",
+        "FULL POD INFORMATION (JSON):",
+        "managedFields:",
+        "f:metadata:",
+    ):
+        idx = msg.find(marker)
+        if idx > 0:
+            trimmed = msg[:idx].rstrip()
+            if len(trimmed) > 200:
+                return (
+                    trimmed
+                    + f"\n[Pod YAML trimmed — {len(msg) - idx:,} chars of K8s metadata removed]"
+                )
+
+    return msg[:limit] + f"... [trimmed from {len(msg):,} chars]"
+
+
 def _parse_event(event: dict) -> dict:
     """Parse an AAP2 job event into a clean dict."""
     event_data = event.get("event_data", {})
@@ -131,12 +194,13 @@ def _parse_event(event: dict) -> dict:
             error_msg = res.get("module_stderr", "")
 
     is_failed = event.get("failed", False)
-    stdout_limit = 8000 if is_failed else 500
-    error_limit = 8000
+    stdout_limit = 4000 if is_failed else 500
 
     stdout = event.get("stdout", "") or ""
     if len(stdout) > stdout_limit:
         stdout = stdout[:stdout_limit] + f"... [truncated from {len(stdout):,} chars]"
+
+    error_str = _trim_k8s_error(str(error_msg)) if error_msg else ""
 
     return {
         "event": event.get("event", ""),
@@ -147,7 +211,7 @@ def _parse_event(event: dict) -> dict:
         "failed": is_failed,
         "changed": event.get("changed", False),
         "stdout": stdout,
-        "error_msg": str(error_msg)[:error_limit] if error_msg else "",
+        "error_msg": error_str,
         "counter": event.get("counter", 0),
     }
 

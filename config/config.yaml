@@ -93,6 +93,11 @@ learnings:
   # NEVER set this in production
   allow_anonymous_admin: false
 
+debug:
+  # Write the full LLM request payload (system prompt, messages, tools) to
+  # data/debug/ as JSON before each API call. Useful for prompt inspection.
+  dump_prompts: false
+
 auth:
   # Comma-separated list of allowed OpenShift groups (from X-Forwarded-Groups)
   # When set, only users in these groups (or in allowed_users) can access Parsec

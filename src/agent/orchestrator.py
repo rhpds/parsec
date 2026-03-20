@@ -312,7 +312,10 @@ def _estimate_tokens(obj) -> int:
 def _trim_history(history: list, max_tokens: int = 150000) -> list:
     """Trim conversation history to fit within token limits.
 
-    Keeps the most recent turns. Truncates large tool results in older turns.
+    Keeps the most recent turns. Truncates large tool results AND large
+    assistant text in older turns — both sides must be trimmed symmetrically
+    to prevent the model from anchoring on stale analysis text when the
+    supporting tool data has been stripped.
     """
     if not history:
         return []
@@ -323,19 +326,22 @@ def _trim_history(history: list, max_tokens: int = 150000) -> list:
     if _estimate_tokens(messages) <= max_tokens:
         return messages
 
-    # First pass: truncate large tool_result content in older messages
+    # First pass: truncate both tool results AND assistant text in older messages.
+    # Keeping old assistant analysis intact while truncating tool results causes
+    # hallucination — the model sees a coherent old analysis without the data
+    # to contradict it, and repeats old details for new investigations.
     for msg in messages[:-4]:  # Keep last 2 turns (4 messages) intact
         content = msg.get("content")
+
+        # Truncate large tool_result content
         if isinstance(content, list):
             for block in content:
                 if isinstance(block, dict) and block.get("type") == "tool_result":
                     result_str = block.get("content", "")
                     if isinstance(result_str, str) and len(result_str) > 2000:
-                        # Truncate but keep enough for context
                         try:
                             result_data = json.loads(result_str)
                             if isinstance(result_data, dict):
-                                # Keep summary fields, drop row data
                                 if "rows" in result_data:
                                     result_data["rows"] = result_data["rows"][:5]
                                     result_data["_truncated_for_context"] = True
@@ -347,6 +353,21 @@ def _trim_history(history: list, max_tokens: int = 150000) -> list:
                                 block["content"] = json.dumps(result_data)
                         except (json.JSONDecodeError, TypeError):
                             block["content"] = result_str[:2000] + "... [truncated]"
+
+                # Truncate large assistant text blocks in older turns
+                elif isinstance(block, dict) and block.get("type") == "text":
+                    text = block.get("text", "")
+                    if isinstance(text, str) and len(text) > 3000:
+                        block["text"] = (
+                            text[:3000]
+                            + "\n\n[Earlier analysis truncated — use current tool results only]"
+                        )
+
+        # Truncate large string-type assistant content
+        if msg.get("role") == "assistant" and isinstance(content, str) and len(content) > 3000:
+            msg["content"] = (
+                content[:3000] + "\n\n[Earlier analysis truncated — use current tool results only]"
+            )
 
     # If still over, drop oldest turns
     while len(messages) > 2 and _estimate_tokens(messages) > max_tokens:
@@ -417,9 +438,51 @@ def _serialize_messages(messages: list) -> list:
     return result
 
 
+def _dump_api_request(
+    label: str,
+    system: str,
+    messages: list,
+    tools: list,
+    model: str,
+) -> None:
+    """Write the full API request payload to data/debug/ for prompt inspection.
+
+    Only runs when debug.dump_prompts is enabled in config.
+    """
+    cfg = get_config()
+    if not cfg.get("debug", {}).get("dump_prompts", False):
+        return
+
+    debug_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "debug"
+    )
+    os.makedirs(debug_dir, exist_ok=True)
+
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
+    safe_label = label.replace(" ", "_").lower()
+    filepath = os.path.join(debug_dir, f"{safe_label}_{ts}.json")
+
+    try:
+        payload = {
+            "label": label,
+            "model": model,
+            "system_prompt_length": len(system),
+            "system": system,
+            "messages": _serialize_messages(messages),
+            "tools": tools,
+            "message_count": len(messages),
+        }
+        with open(filepath, "w") as f:
+            json.dump(payload, f, indent=2, default=str)
+        logger.info("Prompt dump written: %s", filepath)
+    except Exception:
+        logger.exception("Failed to dump prompt to %s", filepath)
+
+
 _DELEGATION_TOOL_MAP = {
     "investigate_costs": "cost",
-    "investigate_aap2_job": "triage",
+    "investigate_aap2_job": "aap2",
+    "investigate_babylon": "babylon",
     "investigate_security": "security",
 }
 
@@ -485,7 +548,16 @@ async def run_agent(
     messages.append({"role": "user", "content": question})
 
     for _round in range(max_rounds):
+        _dump_api_request(
+            f"orchestrator_round_{_round}",
+            system,
+            messages,
+            ORCHESTRATOR_TOOLS,
+            model,
+        )
+
         try:
+
             def _call_api() -> anthropic.types.Message:
                 return client.messages.create(
                     model=model,
@@ -557,6 +629,7 @@ async def run_agent(
                         context=tool_input.get("context"),
                         client=client,
                         event_queue=event_queue,
+                        conversation_history=incoming_history,
                     )
                 )
 
@@ -580,24 +653,35 @@ async def run_agent(
                     result.get("duration_seconds", 0),
                 )
 
-                yield sse_tool_result(tool_name, {
-                    "agent": result.get("agent"),
-                    "status": result.get("status"),
-                    "summary": result.get("summary", "")[:2000],
-                    "tool_calls": result.get("tool_calls", 0),
-                    "duration_seconds": result.get("duration_seconds", 0),
-                })
+                yield sse_tool_result(
+                    tool_name,
+                    {
+                        "agent": result.get("agent"),
+                        "status": result.get("status"),
+                        "summary": result.get("summary", "")[:2000],
+                        "tool_calls": result.get("tool_calls", 0),
+                        "duration_seconds": result.get("duration_seconds", 0),
+                    },
+                )
                 yield sse_agent_done(agent_type)
 
                 tool_results.append(
                     {
                         "type": "tool_result",
                         "tool_use_id": tool_block.id,
-                        "content": json.dumps({
-                            "agent": result.get("agent"),
-                            "status": result.get("status"),
-                            "summary": result.get("summary", ""),
-                        }),
+                        "content": json.dumps(
+                            {
+                                "agent": result.get("agent"),
+                                "status": result.get("status"),
+                                "summary": result.get("summary", ""),
+                                "note": (
+                                    "The detailed analysis above was already streamed "
+                                    "to the user. Do NOT repeat or re-summarize it. "
+                                    "Only add brief follow-up suggestions or source "
+                                    "citations if useful."
+                                ),
+                            }
+                        ),
                     }
                 )
             else:
@@ -640,9 +724,7 @@ async def run_agent(
         "{{/choices}}"
     )
     yield sse_text(max_rounds_text)
-    messages.append(
-        {"role": "assistant", "content": [{"type": "text", "text": max_rounds_text}]}
-    )
+    messages.append({"role": "assistant", "content": [{"type": "text", "text": max_rounds_text}]})
     yield sse_event("history", {"messages": _serialize_messages(messages)})
     yield sse_done()
 
@@ -686,7 +768,9 @@ async def run_alert_investigation(
     from src.agent.system_prompt import get_agent_prompt
     from src.agent.tool_definitions import SECURITY_TOOLS
 
-    system = f"{get_agent_prompt('security')}\n\nToday's date is {today}.\n{ALERT_INVESTIGATION_PROMPT}"
+    system = (
+        f"{get_agent_prompt('security')}\n\nToday's date is {today}.\n{ALERT_INVESTIGATION_PROMPT}"
+    )
     alert_tools = list(SECURITY_TOOLS)
     alert_tools.append(SUBMIT_ALERT_VERDICT_TOOL)
 
@@ -714,6 +798,14 @@ async def run_alert_investigation(
     verdict: dict | None = None
 
     for _round in range(max_rounds):
+        _dump_api_request(
+            f"alert_{alert_type}_round_{_round}",
+            system,
+            messages,
+            alert_tools,
+            model,
+        )
+
         try:
 
             def _call_api() -> anthropic.types.Message:

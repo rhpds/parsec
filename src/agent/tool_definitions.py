@@ -2,8 +2,8 @@
 
 Tool definitions are organized in two ways:
 1. TOOLS — the flat list of all tools (used by the monolithic agent and as a reference)
-2. Per-agent groupings — COST_TOOLS, TRIAGE_TOOLS, SECURITY_TOOLS, ORCHESTRATOR_TOOLS
-   (used by the sub-agent architecture when use_sub_agents is enabled)
+2. Per-agent groupings — COST_TOOLS, AAP2_TOOLS, BABYLON_TOOLS, SECURITY_TOOLS,
+   ORCHESTRATOR_TOOLS (used by the sub-agent architecture)
 """
 
 # Verdict tool for alert investigations (not included in the default TOOLS list —
@@ -944,12 +944,23 @@ COST_TOOLS = _tools_by_name(
     "generate_report",
 )
 
-TRIAGE_TOOLS = _tools_by_name(
+AAP2_TOOLS = _tools_by_name(
     "query_aap2",
     "fetch_github_file",
     "lookup_catalog_item",
     "search_github_repo",
     "query_babylon_catalog",
+    "query_provisions_db",
+    "query_aws_account_db",
+    "render_chart",
+    "generate_report",
+)
+
+BABYLON_TOOLS = _tools_by_name(
+    "query_babylon_catalog",
+    "query_aap2",
+    "fetch_github_file",
+    "lookup_catalog_item",
     "query_provisions_db",
     "query_aws_account_db",
     "render_chart",
@@ -1015,11 +1026,11 @@ INVESTIGATE_COSTS_TOOL = {
 INVESTIGATE_AAP2_TOOL = {
     "name": "investigate_aap2_job",
     "description": (
-        "Delegate an AAP2 job failure investigation to the Triage agent. "
-        "This agent can query AAP2 controllers for job details and logs, "
-        "Babylon clusters for catalog definitions and deployment state, and "
-        "GitHub for agnosticv/agnosticd config files. Use this when users "
-        "ask about failed provisions, GUIDs, or Babylon catalog items."
+        "Delegate an AAP2 job failure investigation to the AAP2 Investigation agent. "
+        "This agent can query AAP2 controllers for job details, logs, and execution "
+        "events, and trace failures through the agnosticv/agnosticd config hierarchy "
+        "on GitHub. Use this when users ask about failed provisions, job logs, "
+        "AAP2 errors, or need root cause analysis of provisioning failures."
     ),
     "input_schema": {
         "type": "object",
@@ -1027,8 +1038,8 @@ INVESTIGATE_AAP2_TOOL = {
             "task": {
                 "type": "string",
                 "description": (
-                    "A clear description of the triage investigation to perform. "
-                    "Include any GUIDs, catalog item names, or error messages. "
+                    "A clear description of the job failure investigation to perform. "
+                    "Include any GUIDs, job IDs, catalog item names, or error messages. "
                     "The agent will query AAP2 for job details and trace the "
                     "failure through the agnosticv/agnosticd config hierarchy."
                 ),
@@ -1038,6 +1049,40 @@ INVESTIGATE_AAP2_TOOL = {
                 "description": (
                     "Optional context such as parsed job template fields, account "
                     "info, or provision data already looked up."
+                ),
+            },
+        },
+        "required": ["task"],
+    },
+}
+
+INVESTIGATE_BABYLON_TOOL = {
+    "name": "investigate_babylon",
+    "description": (
+        "Delegate a Babylon investigation to the Babylon Investigation agent. "
+        "This agent can query Babylon clusters for catalog item definitions, "
+        "active deployments (ResourceClaims), provision lifecycle state "
+        "(AnarchySubjects), resource pools, and workshops. Use this when users "
+        "ask what a catalog item deploys, check deployment state, inspect "
+        "resource pools, or investigate workshop details."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": (
+                    "A clear description of the Babylon investigation to perform. "
+                    "Include catalog item names, GUIDs, sandbox names, or namespace "
+                    "info. The agent will query Babylon clusters for definitions, "
+                    "deployments, and lifecycle state."
+                ),
+            },
+            "context": {
+                "type": "object",
+                "description": (
+                    "Optional context such as sandbox account data, provision info, "
+                    "or cluster details already looked up."
                 ),
             },
         },
@@ -1082,6 +1127,7 @@ INVESTIGATE_SECURITY_TOOL = {
 DELEGATION_TOOLS = [
     INVESTIGATE_COSTS_TOOL,
     INVESTIGATE_AAP2_TOOL,
+    INVESTIGATE_BABYLON_TOOL,
     INVESTIGATE_SECURITY_TOOL,
 ]
 
