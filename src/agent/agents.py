@@ -14,9 +14,12 @@ import re
 import time as _time
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import anthropic
+
+if TYPE_CHECKING:
+    from anthropic import AnthropicBedrock, AnthropicVertex
 
 from src.agent.streaming import (
     sse_event,
@@ -250,7 +253,7 @@ async def run_sub_agent(
     agent_type: str,
     task: str,
     context: dict | None = None,
-    client: anthropic.Anthropic | None = None,
+    client: anthropic.Anthropic | AnthropicVertex | AnthropicBedrock | None = None,
     event_queue: asyncio.Queue[str] | None = None,
     conversation_history: list | None = None,
 ) -> dict:
@@ -291,6 +294,7 @@ async def run_sub_agent(
 
     if client is None:
         client = _build_client(cfg)
+    assert client is not None
 
     from datetime import UTC, datetime
 
@@ -309,6 +313,7 @@ async def run_sub_agent(
     investigation_log: list[str] = []
     tool_call_count = 0
     text_parts: list[str] = []
+    _client = client
 
     async def _emit(event: str) -> None:
         if event_queue is not None:
@@ -328,12 +333,12 @@ async def run_sub_agent(
         try:
 
             def _call_api() -> anthropic.types.Message:
-                return client.messages.create(
+                return _client.messages.create(
                     model=model,
                     max_tokens=max_tokens,
                     system=system,
-                    tools=agent_cfg.tools,
-                    messages=messages,
+                    tools=agent_cfg.tools,  # type: ignore[arg-type]
+                    messages=messages,  # type: ignore[arg-type]
                 )
 
             await _emit(sse_status(f"{agent_cfg.name}: Analyzing..."))
@@ -442,7 +447,7 @@ async def run_sub_agent_streaming(
     agent_type: str,
     task: str,
     context: dict | None = None,
-    client: anthropic.Anthropic | None = None,
+    client: anthropic.Anthropic | AnthropicVertex | AnthropicBedrock | None = None,
     conversation_history: list | None = None,
 ) -> AsyncGenerator[str, None]:
     """Run a sub-agent as the top-level agent, yielding SSE events directly.
@@ -480,6 +485,7 @@ async def run_sub_agent_streaming(
         yield sse_error(str(e))
         yield sse_done()
         return
+    assert client is not None
 
     from datetime import UTC, datetime
 
@@ -503,6 +509,7 @@ async def run_sub_agent_streaming(
     )
     tool_call_count = 0
     start_time = _time.monotonic()
+    _client = client
 
     yield sse_event("agent_start", {"agent": agent_type, "name": agent_cfg.name})
 
@@ -520,12 +527,12 @@ async def run_sub_agent_streaming(
         try:
 
             def _call_api() -> anthropic.types.Message:
-                return client.messages.create(
+                return _client.messages.create(
                     model=model,
                     max_tokens=max_tokens,
                     system=system,
-                    tools=agent_cfg.tools,
-                    messages=messages,
+                    tools=agent_cfg.tools,  # type: ignore[arg-type]
+                    messages=messages,  # type: ignore[arg-type]
                 )
 
             yield sse_status(f"{agent_cfg.name}: Analyzing...")
