@@ -8,7 +8,7 @@ import logging
 import os
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import anthropic
 
@@ -25,8 +25,8 @@ from src.agent.streaming import (
     sse_tool_result,
     sse_tool_start,
 )
-from src.agent.system_prompt import ALERT_INVESTIGATION_PROMPT, get_system_prompt
-from src.agent.tool_definitions import SUBMIT_ALERT_VERDICT_TOOL, TOOLS
+from src.agent.system_prompt import ALERT_INVESTIGATION_PROMPT
+from src.agent.tool_definitions import SUBMIT_ALERT_VERDICT_TOOL
 from src.config import get_config
 from src.tools.aap2 import query_aap2
 from src.tools.aws_account import query_aws_account
@@ -312,7 +312,10 @@ def _estimate_tokens(obj) -> int:
 def _trim_history(history: list, max_tokens: int = 150000) -> list:
     """Trim conversation history to fit within token limits.
 
-    Keeps the most recent turns. Truncates large tool results in older turns.
+    Keeps the most recent turns. Truncates large tool results AND large
+    assistant text in older turns — both sides must be trimmed symmetrically
+    to prevent the model from anchoring on stale analysis text when the
+    supporting tool data has been stripped.
     """
     if not history:
         return []
@@ -323,19 +326,22 @@ def _trim_history(history: list, max_tokens: int = 150000) -> list:
     if _estimate_tokens(messages) <= max_tokens:
         return messages
 
-    # First pass: truncate large tool_result content in older messages
+    # First pass: truncate both tool results AND assistant text in older messages.
+    # Keeping old assistant analysis intact while truncating tool results causes
+    # hallucination — the model sees a coherent old analysis without the data
+    # to contradict it, and repeats old details for new investigations.
     for msg in messages[:-4]:  # Keep last 2 turns (4 messages) intact
         content = msg.get("content")
+
+        # Truncate large tool_result content
         if isinstance(content, list):
             for block in content:
                 if isinstance(block, dict) and block.get("type") == "tool_result":
                     result_str = block.get("content", "")
                     if isinstance(result_str, str) and len(result_str) > 2000:
-                        # Truncate but keep enough for context
                         try:
                             result_data = json.loads(result_str)
                             if isinstance(result_data, dict):
-                                # Keep summary fields, drop row data
                                 if "rows" in result_data:
                                     result_data["rows"] = result_data["rows"][:5]
                                     result_data["_truncated_for_context"] = True
@@ -347,6 +353,21 @@ def _trim_history(history: list, max_tokens: int = 150000) -> list:
                                 block["content"] = json.dumps(result_data)
                         except (json.JSONDecodeError, TypeError):
                             block["content"] = result_str[:2000] + "... [truncated]"
+
+                # Truncate large assistant text blocks in older turns
+                elif isinstance(block, dict) and block.get("type") == "text":
+                    text = block.get("text", "")
+                    if isinstance(text, str) and len(text) > 3000:
+                        block["text"] = (
+                            text[:3000]
+                            + "\n\n[Earlier analysis truncated — use current tool results only]"
+                        )
+
+        # Truncate large string-type assistant content
+        if msg.get("role") == "assistant" and isinstance(content, str) and len(content) > 3000:
+            msg["content"] = (
+                content[:3000] + "\n\n[Earlier analysis truncated — use current tool results only]"
+            )
 
     # If still over, drop oldest turns
     while len(messages) > 2 and _estimate_tokens(messages) > max_tokens:
@@ -417,21 +438,211 @@ def _serialize_messages(messages: list) -> list:
     return result
 
 
+def _dump_api_request(
+    label: str,
+    system: str,
+    messages: list,
+    tools: list,
+    model: str,
+) -> None:
+    """Write the full API request payload to data/debug/ for prompt inspection.
+
+    Only runs when debug.dump_prompts is enabled in config.
+    """
+    cfg = get_config()
+    if not cfg.get("debug", {}).get("dump_prompts", False):
+        return
+
+    debug_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "debug"
+    )
+    os.makedirs(debug_dir, exist_ok=True)
+
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
+    safe_label = label.replace(" ", "_").lower()
+    filepath = os.path.join(debug_dir, f"{safe_label}_{ts}.json")
+
+    try:
+        payload = {
+            "label": label,
+            "model": model,
+            "system_prompt_length": len(system),
+            "system": system,
+            "messages": _serialize_messages(messages),
+            "tools": tools,
+            "message_count": len(messages),
+        }
+        with open(filepath, "w") as f:
+            json.dump(payload, f, indent=2, default=str)
+        logger.info("Prompt dump written: %s", filepath)
+    except Exception:
+        logger.exception("Failed to dump prompt to %s", filepath)
+
+
+_DELEGATION_TOOL_MAP = {
+    "investigate_costs": "cost",
+    "investigate_aap2_job": "aap2",
+    "investigate_babylon": "babylon",
+    "investigate_security": "security",
+}
+
+
+async def _handle_delegation(
+    agent_type: str,
+    tool_block: Any,
+    tool_input: dict,
+    client: Any,
+    incoming_history: list,
+) -> AsyncGenerator[tuple[str | None, dict | None], None]:
+    """Run a sub-agent delegation, yielding (sse_event, None) or (None, tool_result) at the end."""
+    from src.agent.agents import AGENTS, run_sub_agent
+    from src.agent.streaming import sse_agent_done, sse_agent_start
+
+    agent_cfg = AGENTS.get(agent_type)
+    agent_name = agent_cfg.name if agent_cfg else agent_type
+
+    logger.info(
+        "Orchestrator delegating to %s agent: %s",
+        agent_type,
+        tool_input.get("task", "")[:120],
+    )
+
+    yield sse_agent_start(agent_type, agent_name), None
+    yield sse_tool_start(tool_block.name, tool_input), None
+
+    event_queue: asyncio.Queue[str] = asyncio.Queue()
+
+    sub_task = asyncio.create_task(
+        run_sub_agent(
+            agent_type=agent_type,
+            task=tool_input.get("task", ""),
+            context=tool_input.get("context"),
+            client=client,
+            event_queue=event_queue,
+            conversation_history=incoming_history,
+        )
+    )
+
+    while not sub_task.done():
+        try:
+            event = await asyncio.wait_for(event_queue.get(), timeout=1.0)
+            yield event, None
+        except TimeoutError:
+            pass
+
+    while not event_queue.empty():
+        yield event_queue.get_nowait(), None
+
+    result = sub_task.result()
+
+    logger.info(
+        "Sub-agent %s delegation complete: status=%s tool_calls=%d duration=%.1fs",
+        agent_type,
+        result.get("status"),
+        result.get("tool_calls", 0),
+        result.get("duration_seconds", 0),
+    )
+
+    yield sse_tool_result(
+        tool_block.name,
+        {
+            "agent": result.get("agent"),
+            "status": result.get("status"),
+            "summary": result.get("summary", "")[:2000],
+            "tool_calls": result.get("tool_calls", 0),
+            "duration_seconds": result.get("duration_seconds", 0),
+        },
+    ), None
+    yield sse_agent_done(agent_type), None
+
+    yield None, {
+        "type": "tool_result",
+        "tool_use_id": tool_block.id,
+        "content": json.dumps(
+            {
+                "agent": result.get("agent"),
+                "status": result.get("status"),
+                "summary": result.get("summary", ""),
+                "note": (
+                    "The detailed analysis above was already streamed "
+                    "to the user. Do NOT repeat or re-summarize it. "
+                    "Only add brief follow-up suggestions or source "
+                    "citations if useful."
+                ),
+            }
+        ),
+    }
+
+
+async def _handle_direct_tool(
+    tool_block: Any,
+    tool_input: dict,
+) -> AsyncGenerator[tuple[str | None, dict | None], None]:
+    """Execute a direct tool call, yielding (sse_event, None) or (None, tool_result)."""
+    tool_name = tool_block.name
+    yield sse_tool_start(tool_name, tool_input), None
+
+    task = asyncio.create_task(_execute_tool(tool_name, tool_input))
+    elapsed = 0
+    while not task.done():
+        done, _ = await asyncio.wait({task}, timeout=10)
+        if not done:
+            elapsed += 10
+            yield sse_status(f"Processing {tool_name}... ({elapsed}s)"), None
+    result = task.result()
+
+    yield sse_tool_result(tool_name, result), None
+
+    if tool_name == "generate_report" and "error" not in result:
+        download_url = f"/api/reports/{result['filename']}"
+        yield sse_report(result["filename"], result["format"], download_url), None
+    elif tool_name == "render_chart" and "error" not in result:
+        yield sse_event("chart", result), None
+
+    yield None, {
+        "type": "tool_result",
+        "tool_use_id": tool_block.id,
+        "content": json.dumps(result),
+    }
+
+
 async def run_agent(
     question: str,
     conversation_history: list | None = None,
 ) -> AsyncGenerator[str, None]:
-    """Run the Claude tool-use loop and yield SSE events.
+    """Run the orchestrator agent loop and yield SSE events.
 
-    Args:
-        question: The user's natural language question.
-        conversation_history: Optional prior messages for multi-turn context.
-
-    Yields:
-        SSE-formatted strings.
+    1. Fast-path: if the query clearly maps to one domain, run that sub-agent
+       directly as the top-level agent (no orchestrator LLM call).
+    2. Otherwise: run the orchestrator agent which can call delegation tools
+       (investigate_costs, investigate_aap2_job, investigate_security) plus
+       direct tools (query_provisions_db, query_aws_account_db, render_chart,
+       generate_report).
     """
+    from src.agent.agents import AGENTS, classify_fast, run_sub_agent_streaming
+    from src.agent.system_prompt import get_agent_prompt
+    from src.agent.tool_definitions import ORCHESTRATOR_TOOLS
+
+    logger.info("run_agent: question=%s", question[:120])
+
     cfg = get_config()
-    model = cfg.anthropic.get("model", "claude-sonnet-4-20250514")
+
+    # Fast-path: skip orchestrator for obvious single-domain queries
+    fast_agent = classify_fast(question)
+    if fast_agent and fast_agent in AGENTS:
+        logger.info("Fast-path routing to %s agent", fast_agent)
+        async for event in run_sub_agent_streaming(
+            agent_type=fast_agent,
+            task=question,
+            conversation_history=conversation_history,
+        ):
+            yield event
+        return
+
+    # Full orchestrator mode
+    model = cfg.anthropic.get("orchestrator_model", "") or cfg.anthropic.get(
+        "model", "claude-sonnet-4-20250514"
+    )
     max_tokens = cfg.anthropic.get("max_tokens", 4096)
     max_rounds = cfg.anthropic.get("max_tool_rounds", 10)
 
@@ -442,33 +653,39 @@ async def run_agent(
         yield sse_done()
         return
 
-    # Inject today's date so Claude knows the current date
     today = datetime.now(UTC).strftime("%Y-%m-%d")
-    system = f"{get_system_prompt()}\n\nToday's date is {today}."
+    system = f"{get_agent_prompt('orchestrator')}\n\nToday's date is {today}."
 
     incoming_history = conversation_history or []
     messages = _trim_history(incoming_history)
     logger.info(
-        "Agent loop: %d history messages received, %d after trim",
+        "Orchestrator loop: %d history messages received, %d after trim",
         len(incoming_history),
         len(messages),
     )
     messages.append({"role": "user", "content": question})
 
     for _round in range(max_rounds):
+        _dump_api_request(
+            f"orchestrator_round_{_round}",
+            system,
+            messages,
+            ORCHESTRATOR_TOOLS,
+            model,
+        )
+
         try:
-            # Run the synchronous API call in a thread so we can send
-            # keepalive SSE events and prevent proxy/browser timeouts.
+
             def _call_api() -> anthropic.types.Message:
                 return client.messages.create(
                     model=model,
                     max_tokens=max_tokens,
                     system=system,
-                    tools=TOOLS,  # type: ignore[arg-type]
+                    tools=ORCHESTRATOR_TOOLS,  # type: ignore[arg-type]
                     messages=messages,
                 )
 
-            yield sse_status("Analyzing results...")
+            yield sse_status("Orchestrator analyzing...")
             api_task: asyncio.Task[anthropic.types.Message] = asyncio.ensure_future(
                 asyncio.to_thread(_call_api)
             )
@@ -477,87 +694,63 @@ async def run_agent(
                 await asyncio.sleep(10)
                 if not api_task.done():
                     elapsed += 10
-                    yield sse_status(f"Analyzing results... ({elapsed}s)")
+                    yield sse_status(f"Orchestrator analyzing... ({elapsed}s)")
             response = api_task.result()
         except anthropic.APIError as e:
-            logger.exception("Claude API error")
+            logger.exception("Claude API error in orchestrator")
             yield sse_error(f"Claude API error: {e}")
             yield sse_done()
             return
 
-        # Process response content blocks
         assistant_content = response.content
         tool_use_blocks = []
-        text_parts = []
 
         for block in assistant_content:
             if block.type == "text":
-                text_parts.append(block.text)
                 yield sse_text(block.text)
             elif block.type == "tool_use":
                 tool_use_blocks.append(block)
 
-        # Append assistant message (needed for both multi-turn history and tool loop)
         messages.append({"role": "assistant", "content": assistant_content})
 
-        # If no tool calls, we're done — send the full history for multi-turn
         if not tool_use_blocks:
             yield sse_event("history", {"messages": _serialize_messages(messages)})
             yield sse_done()
             return
 
-        # Execute tool calls and build tool results
         tool_results = []
         for tool_block in tool_use_blocks:
             tool_name = tool_block.name
             tool_input = tool_block.input
 
-            yield sse_tool_start(tool_name, tool_input)
+            agent_type = _DELEGATION_TOOL_MAP.get(tool_name)
 
-            # Run tool with periodic keepalive events to prevent proxy timeout
-            task = asyncio.create_task(_execute_tool(tool_name, tool_input))
-            elapsed = 0
-            while not task.done():
-                done, _ = await asyncio.wait({task}, timeout=10)
-                if not done:
-                    elapsed += 10
-                    label = _SLOW_TOOL_LABELS.get(tool_name, f"Processing {tool_name}")
-                    yield sse_status(f"{label}... ({elapsed}s)")
-            result = task.result()
+            if agent_type:
+                handler = _handle_delegation(
+                    agent_type, tool_block, tool_input, client, incoming_history
+                )
+            else:
+                handler = _handle_direct_tool(tool_block, tool_input)
 
-            yield sse_tool_result(tool_name, result)
+            async for sse_evt, tool_result in handler:
+                if sse_evt is not None:
+                    yield sse_evt
+                if tool_result is not None:
+                    tool_results.append(tool_result)
 
-            # Special SSE events for certain tools
-            if tool_name == "generate_report" and "error" not in result:
-                download_url = f"/api/reports/{result['filename']}"
-                yield sse_report(result["filename"], result["format"], download_url)
-            elif tool_name == "render_chart" and "error" not in result:
-                yield sse_event("chart", result)
-
-            tool_results.append(
-                {
-                    "type": "tool_result",
-                    "tool_use_id": tool_block.id,
-                    "content": json.dumps(result),
-                }
-            )
-
-        # Add tool results and loop back for Claude's next response
         messages.append({"role": "user", "content": tool_results})
-
-        # Send intermediate history so the client can persist context even if
-        # the SSE connection drops before the final response.
         yield sse_event("history", {"messages": _serialize_messages(messages)})
 
-    # If we exhausted max rounds, ask the user whether to continue
-    yield sse_text(
-        "\n\nI've used all my planned tool calls but haven't finished the "
-        "investigation yet. Would you like me to keep going?\n\n"
+    max_rounds_text = (
+        "\n\nI've used all my planned tool calls but haven't finished. "
+        "Would you like me to keep going?\n\n"
         "{{choices}}\n"
         "Keep investigating\n"
         "That's enough, thanks\n"
         "{{/choices}}"
     )
+    yield sse_text(max_rounds_text)
+    messages.append({"role": "assistant", "content": [{"type": "text", "text": max_rounds_text}]})
     yield sse_event("history", {"messages": _serialize_messages(messages)})
     yield sse_done()
 
@@ -596,12 +789,15 @@ async def run_alert_investigation(
             "duration_seconds": round(_time.monotonic() - start, 1),
         }
 
-    # Build system prompt: base instructions + alert investigation addendum
     today = datetime.now(UTC).strftime("%Y-%m-%d")
-    system = f"{get_system_prompt()}\n\nToday's date is {today}.\n{ALERT_INVESTIGATION_PROMPT}"
 
-    # Build tools list: standard tools + verdict tool (exclude render_chart, generate_report)
-    alert_tools = [t for t in TOOLS if t["name"] not in ("render_chart", "generate_report")]
+    from src.agent.system_prompt import get_agent_prompt
+    from src.agent.tool_definitions import SECURITY_TOOLS
+
+    system = (
+        f"{get_agent_prompt('security')}\n\nToday's date is {today}.\n{ALERT_INVESTIGATION_PROMPT}"
+    )
+    alert_tools = list(SECURITY_TOOLS)
     alert_tools.append(SUBMIT_ALERT_VERDICT_TOOL)
 
     # Construct the user message from alert context
@@ -628,6 +824,14 @@ async def run_alert_investigation(
     verdict: dict | None = None
 
     for _round in range(max_rounds):
+        _dump_api_request(
+            f"alert_{alert_type}_round_{_round}",
+            system,
+            messages,
+            alert_tools,
+            model,
+        )
+
         try:
 
             def _call_api() -> anthropic.types.Message:

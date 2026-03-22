@@ -1,4 +1,10 @@
-"""Claude API tool schemas for Parsec."""
+"""Claude API tool schemas for Parsec.
+
+Tool definitions are organized in two ways:
+1. TOOLS — the flat list of all tools (used by the monolithic agent and as a reference)
+2. Per-agent groupings — COST_TOOLS, AAP2_TOOLS, BABYLON_TOOLS, SECURITY_TOOLS,
+   ORCHESTRATOR_TOOLS (used by the sub-agent architecture)
+"""
 
 # Verdict tool for alert investigations (not included in the default TOOLS list —
 # only appended during alert investigation mode).
@@ -675,7 +681,9 @@ TOOLS = [
             "Look up a catalog item across ALL agnosticv repos instantly using a "
             "cached index. Searches rhpds/agnosticv, partner-agnosticv, "
             "zt-ansiblebu-agnosticv, and zt-rhelbu-agnosticv. Returns the exact "
-            "repo, account directory, path, and list of files (common.yaml, prod.yaml, etc). "
+            "repo, account directory, path, list of files (common.yaml, prod.yaml, etc), "
+            "and default_branch (the repo's default branch — use as ref for "
+            "fetch_github_file and for constructing GitHub links). "
             "ALWAYS use this BEFORE fetch_github_file when looking for catalog items — "
             "it's instant (no API calls). If it returns found=false with no similar items, "
             "the catalog item does NOT exist — do NOT fall back to listing directories."
@@ -909,3 +917,219 @@ TOOLS = [
         },
     },
 ]
+
+
+# ---------------------------------------------------------------------------
+# Per-agent tool groupings for the sub-agent architecture
+# ---------------------------------------------------------------------------
+
+
+def _tools_by_name(*names: str) -> list[dict]:
+    """Return tool definitions from TOOLS matching the given names."""
+    by_name = {t["name"]: t for t in TOOLS}
+    return [by_name[n] for n in names if n in by_name]
+
+
+SHARED_TOOLS = _tools_by_name("query_provisions_db", "query_aws_account_db")
+
+COST_TOOLS = _tools_by_name(
+    "query_aws_costs",
+    "query_azure_costs",
+    "query_gcp_costs",
+    "query_aws_pricing",
+    "query_cost_monitor",
+    "query_aws_capacity_manager",
+    "query_provisions_db",
+    "query_aws_account_db",
+    "render_chart",
+    "generate_report",
+)
+
+AAP2_TOOLS = _tools_by_name(
+    "query_aap2",
+    "fetch_github_file",
+    "lookup_catalog_item",
+    "search_github_repo",
+    "query_babylon_catalog",
+    "query_provisions_db",
+    "query_aws_account_db",
+    "render_chart",
+    "generate_report",
+)
+
+BABYLON_TOOLS = _tools_by_name(
+    "query_babylon_catalog",
+    "query_aap2",
+    "fetch_github_file",
+    "lookup_catalog_item",
+    "query_provisions_db",
+    "query_aws_account_db",
+    "render_chart",
+    "generate_report",
+)
+
+SECURITY_TOOLS = _tools_by_name(
+    "query_cloudtrail",
+    "query_aws_account",
+    "query_marketplace_agreements",
+    "query_babylon_catalog",
+    "query_provisions_db",
+    "query_aws_account_db",
+    "render_chart",
+    "generate_report",
+)
+
+ORCHESTRATOR_DIRECT_TOOLS = _tools_by_name(
+    "query_provisions_db",
+    "query_aws_account_db",
+    "render_chart",
+    "generate_report",
+)
+
+
+# ---------------------------------------------------------------------------
+# Delegation tool schemas (used by the orchestrator to invoke sub-agents)
+# ---------------------------------------------------------------------------
+
+INVESTIGATE_COSTS_TOOL = {
+    "name": "investigate_costs",
+    "description": (
+        "Delegate a cost investigation to the Cost Investigation agent. "
+        "This agent can query AWS Cost Explorer, Azure billing, GCP BigQuery, "
+        "EC2 pricing, the cost-monitor dashboard, and ODCR capacity metrics. "
+        "Use this for questions about cloud spending, cost breakdowns, GPU "
+        "abuse detection, pricing lookups, and capacity reservation waste."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": (
+                    "A clear, specific description of the cost investigation to perform. "
+                    "Include account IDs, sandbox names, date ranges, and what aspect "
+                    "of costs to investigate. The agent will use this to decide which "
+                    "tools to call."
+                ),
+            },
+            "context": {
+                "type": "object",
+                "description": (
+                    "Optional context to pass to the agent, such as account_ids, "
+                    "sandbox_names, or user info already looked up by the orchestrator."
+                ),
+            },
+        },
+        "required": ["task"],
+    },
+}
+
+INVESTIGATE_AAP2_TOOL = {
+    "name": "investigate_aap2_job",
+    "description": (
+        "Delegate an AAP2 job failure investigation to the AAP2 Investigation agent. "
+        "This agent can query AAP2 controllers for job details, logs, and execution "
+        "events, and trace failures through the agnosticv/agnosticd config hierarchy "
+        "on GitHub. Use this when users ask about failed provisions, job logs, "
+        "AAP2 errors, or need root cause analysis of provisioning failures."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": (
+                    "A clear description of the job failure investigation to perform. "
+                    "Include any GUIDs, job IDs, catalog item names, or error messages. "
+                    "The agent will query AAP2 for job details and trace the "
+                    "failure through the agnosticv/agnosticd config hierarchy."
+                ),
+            },
+            "context": {
+                "type": "object",
+                "description": (
+                    "Optional context such as parsed job template fields, account "
+                    "info, or provision data already looked up."
+                ),
+            },
+        },
+        "required": ["task"],
+    },
+}
+
+INVESTIGATE_BABYLON_TOOL = {
+    "name": "investigate_babylon",
+    "description": (
+        "Delegate a Babylon investigation to the Babylon Investigation agent. "
+        "This agent can query Babylon clusters for catalog item definitions, "
+        "active deployments (ResourceClaims), provision lifecycle state "
+        "(AnarchySubjects), resource pools, and workshops. Use this when users "
+        "ask what a catalog item deploys, check deployment state, inspect "
+        "resource pools, or investigate workshop details."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": (
+                    "A clear description of the Babylon investigation to perform. "
+                    "Include catalog item names, GUIDs, sandbox names, or namespace "
+                    "info. The agent will query Babylon clusters for definitions, "
+                    "deployments, and lifecycle state."
+                ),
+            },
+            "context": {
+                "type": "object",
+                "description": (
+                    "Optional context such as sandbox account data, provision info, "
+                    "or cluster details already looked up."
+                ),
+            },
+        },
+        "required": ["task"],
+    },
+}
+
+INVESTIGATE_SECURITY_TOOL = {
+    "name": "investigate_security",
+    "description": (
+        "Delegate a security investigation to the Security Investigation agent. "
+        "This agent can query CloudTrail Lake for org-wide API events, inspect "
+        "AWS member accounts (EC2 instances, IAM users, marketplace agreements), "
+        "and search the marketplace agreement inventory. Use this for questions "
+        "about who did what on an account, IAM access keys, marketplace subscriptions, "
+        "running instances, abuse indicators, or security concerns."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": (
+                    "A clear description of the security investigation to perform. "
+                    "Include account IDs, sandbox names, time ranges, and what "
+                    "security aspect to check. The agent will query CloudTrail, "
+                    "inspect accounts, and check for abuse indicators."
+                ),
+            },
+            "context": {
+                "type": "object",
+                "description": (
+                    "Optional context such as account info, sandbox data, or "
+                    "user details already looked up."
+                ),
+            },
+        },
+        "required": ["task"],
+    },
+}
+
+DELEGATION_TOOLS = [
+    INVESTIGATE_COSTS_TOOL,
+    INVESTIGATE_AAP2_TOOL,
+    INVESTIGATE_BABYLON_TOOL,
+    INVESTIGATE_SECURITY_TOOL,
+]
+
+ORCHESTRATOR_TOOLS = ORCHESTRATOR_DIRECT_TOOLS + DELEGATION_TOOLS

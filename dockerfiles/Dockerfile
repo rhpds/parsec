@@ -24,12 +24,12 @@ WORKDIR /app
 COPY src/ src/
 COPY static/ static/
 COPY config/config.yaml config/config.yaml
-COPY config/agent_instructions.md config/agent_instructions.md
+COPY config/prompts/ config/prompts/
 COPY data/ec2_pricing.json data-seed/ec2_pricing.json
 COPY scripts/refresh_pricing.py scripts/refresh_pricing.py
 COPY scripts/refresh_azure_billing.py scripts/refresh_azure_billing.py
 
-RUN mkdir -p /app/reports && \
+RUN mkdir -p /app/data/reports /app/data/debug && \
     chgrp -R 0 /app && \
     chmod -R g=u /app
 

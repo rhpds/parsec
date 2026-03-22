@@ -10,6 +10,10 @@ anthropic:
   model: "claude-sonnet-4-6"
   max_tokens: 4096
   max_tool_rounds: 10
+  # Model for the orchestrator agent. Sub-agents always use the main 'model'
+  # above. Set to a faster model (e.g. claude-haiku) to reduce orchestrator
+  # routing latency. Empty = same as model.
+  # orchestrator_model: ""
   # Vertex AI settings (when backend: "vertex")
   # vertex_project_id: ""  # falls back to gcp.project_id
   # vertex_region: "us-east5"
@@ -88,6 +92,11 @@ learnings:
   # Set to true in config.local.yaml to allow anonymous (no OAuth) admin access
   # NEVER set this in production
   allow_anonymous_admin: false
+
+debug:
+  # Write the full LLM request payload (system prompt, messages, tools) to
+  # data/debug/ as JSON before each API call. Useful for prompt inspection.
+  dump_prompts: false
 
 auth:
   # Comma-separated list of allowed OpenShift groups (from X-Forwarded-Groups)
