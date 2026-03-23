@@ -388,6 +388,15 @@ header .header-logo {
     max-height: 44px;
     width: auto;
     border-radius: 8px;
+    position: relative;
+    overflow: hidden;
+    animation: logoTwinkle 1.5s ease-in-out 1.2s 1;
+}
+
+@keyframes logoTwinkle {
+    0%   { filter: brightness(1); }
+    40%  { filter: brightness(1.6) drop-shadow(0 0 6px rgba(107, 159, 248, 0.5)); }
+    100% { filter: brightness(1); }
 }
 
 header .header-btn {
