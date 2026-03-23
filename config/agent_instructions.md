@@ -825,6 +825,19 @@ and retry patterns.
    2. If not found: `query_aap2(action="find_jobs", template_name="<guid>")` — search by job name
    3. If still not found: `query_provisions_db` — historical record only
    Don't start with the provision DB — Babylon and AAP2 have richer failure context.
+   **Partial GUID matching:** GUIDs from catalog URLs may be shortened or partial.
+   If an exact match returns nothing, use `WHERE uuid LIKE '%<guid>%'` in the
+   provision DB, or search by user email / timeframe instead.
+
+6. **Cleaned-up provisions — know when to stop.** When a provision has been
+   retired and cleaned up, AnarchySubjects are deleted and AAP2 job records may
+   be unavailable. If Babylon and AAP2 searches return empty:
+   - Check the provision DB for `provision_result` and error details
+   - Search AAP2 by timeframe (`find_jobs` with date range) rather than trying
+     multiple template name variations
+   - If all databases return empty, **stop searching and ask the user** for
+     additional context (full UUID, user email, catalog item name) rather than
+     continuing to query other systems
 
 4. **Showroom/workload repo routing.** `ocp4_workload_showroom` and similar
    workload roles live in the **legacy** `redhat-cop/agnosticd` repo, not

@@ -339,7 +339,8 @@ marked.setOptions({ renderer: renderer });
     welcomeShort.innerHTML = marked.parse(
         "**Hi, I'm Parsec** — a natural language investigation assistant for RHDP cloud costs and provisioning. " +
         "I can also look up automation source code in AgnosticD and catalog item configs in AgnosticV. " +
-        "Ask me anything about costs, provisions, sandboxes, or usage."
+        "Ask me anything about costs, provisions, sandboxes, or usage. " +
+        "Questions? Join [#rhdp-parsec](https://redhat.enterprise.slack.com/archives/C0AN89G051T) on Slack."
     );
     contentEl.appendChild(welcomeShort);
 
