@@ -82,21 +82,55 @@ document.getElementById("new-chat-btn").addEventListener("click", function() {
 
 var sidebarEl = document.getElementById("sidebar");
 var sidebarListEl = document.getElementById("sidebar-list");
-var sidebarTab = document.getElementById("sidebar-tab");
+var sidebarHistoryTitle = sidebarEl.querySelector(".sidebar-title");
+var sidebarExamplesEl = sidebarEl.querySelector(".sidebar-examples");
+var tabHistory = document.getElementById("sidebar-tab-history");
+var tabExamples = document.getElementById("sidebar-tab-examples");
 
-document.getElementById("sidebar-close-btn").addEventListener("click", function() {
-    sidebarEl.classList.remove("open");
-    sidebarTab.style.display = "block";
-});
+// Sidebar sections — hide both by default, show based on which tab was clicked
+sidebarListEl.style.display = "none";
+sidebarHistoryTitle.style.display = "none";
+sidebarExamplesEl.style.display = "none";
 
-sidebarTab.addEventListener("click", function() {
+var learningsPanel = document.getElementById("learnings-panel");
+var isAdmin = false;
+
+function openSidebar(section) {
+    if (section === "history") {
+        sidebarHistoryTitle.style.display = "";
+        sidebarHistoryTitle.textContent = "History";
+        sidebarListEl.style.display = "";
+        sidebarExamplesEl.style.display = "none";
+        if (isAdmin) learningsPanel.style.display = "block";
+        loadConversationList();
+    } else {
+        sidebarHistoryTitle.style.display = "";
+        sidebarHistoryTitle.textContent = "Examples";
+        sidebarListEl.style.display = "none";
+        sidebarExamplesEl.style.display = "";
+        learningsPanel.style.display = "none";
+    }
     sidebarEl.classList.add("open");
-    sidebarTab.style.display = "none";
-    loadConversationList();
-});
+}
 
-// Load conversation list on page load (sidebar starts open)
-loadConversationList();
+function closeSidebar() {
+    sidebarEl.classList.remove("open");
+}
+
+document.getElementById("sidebar-close-btn").addEventListener("click", closeSidebar);
+tabHistory.addEventListener("click", function() { openSidebar("history"); });
+tabExamples.addEventListener("click", function() { openSidebar("examples"); });
+
+// Example items click-to-fill
+document.querySelectorAll(".sidebar-examples-list li").forEach(function(li) {
+    li.addEventListener("click", function() {
+        var input = document.getElementById("question");
+        input.value = li.textContent;
+        input.focus();
+        input.dispatchEvent(new Event("input"));
+        closeSidebar();
+    });
+});
 
 // ─── Learnings panel (admin only) ───
 
@@ -106,8 +140,9 @@ loadConversationList();
         return resp.json();
     }).then(function(data) {
         if (!data || !data.is_admin) return;
-        var panel = document.getElementById("learnings-panel");
-        panel.style.display = "block";
+        // Admin: show history tab and learnings
+        isAdmin = true;
+        tabHistory.style.display = "block";
         refreshLearningsCount();
     }).catch(function() {});
 })();
@@ -344,37 +379,6 @@ marked.setOptions({ renderer: renderer });
     );
     contentEl.appendChild(welcomeShort);
 
-    var welcomeFull = document.createElement("div");
-    welcomeFull.className = "md-text welcome-full";
-    welcomeFull.innerHTML = marked.parse(
-        "I can help you with things like:\n" +
-        "- \"What services does user@redhat.com have?\"\n" +
-        "- \"What instances should clusterplatform.ocp4-aws.prod be running?\"\n" +
-        "- \"What's deployed on sandbox1234?\"\n" +
-        "- \"Who are the top GPU users this week?\"\n" +
-        "- \"How much did we spend on AWS yesterday?\"\n" +
-        "- \"Show me external users with 50+ provisions since December\"\n" +
-        "- \"What workshops are running in user-user-redhat-com?\"\n" +
-        "- \"Show me the active workshops on the east Babylon cluster\"\n" +
-        "- \"Chart the top 10 AWS services by cost this month\"\n" +
-        "- \"Show me the agnosticv config for ocp4-cluster-destroy-scoped\"\n" +
-        "- \"What roles does the ocp-virt-advanced-ops catalog item use in agnosticd?\"\n" +
-        "- \"Generate a report of suspicious activity\"\n\n" +
-        "I'm still learning! My instructions are in " +
-        "[`config/agent_instructions.md`](https://github.com/rhpds/parsec/blob/main/config/agent_instructions.md) " +
-        "in the [parsec repo](https://github.com/rhpds/parsec) " +
-        "— PRs welcome \uD83D\uDE01"
-    );
-    contentEl.appendChild(welcomeFull);
-
-    var welcomeToggle = document.createElement("button");
-    welcomeToggle.className = "welcome-toggle";
-    welcomeToggle.textContent = "Show examples";
-    welcomeToggle.addEventListener("click", function() {
-        var isExpanded = el.classList.toggle("welcome-expanded");
-        welcomeToggle.textContent = isExpanded ? "Hide examples" : "Show examples";
-    });
-    contentEl.appendChild(welcomeToggle);
 
     // Restore previous conversation from localStorage (e.g. after "Continue Investigation")
     if (conversationHistory.length > 0) {
@@ -438,14 +442,6 @@ form.addEventListener("submit", async (e) => {
     input.value = "";
     input.style.height = "auto";
     sendBtn.disabled = true;
-
-    // Collapse welcome message on first send
-    var welcomeEl = document.getElementById("welcome-message");
-    if (welcomeEl && welcomeEl.classList.contains("welcome-expanded")) {
-        welcomeEl.classList.remove("welcome-expanded");
-        var toggle = welcomeEl.querySelector(".welcome-toggle");
-        if (toggle) toggle.textContent = "Show examples";
-    }
 
     // Collapse any active choice buttons from previous messages
     collapseActiveChoices("Skipped");

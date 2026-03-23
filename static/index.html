@@ -22,12 +22,31 @@
 </head>
 <body>
     <div id="app">
-        <aside id="sidebar" class="sidebar open">
+        <aside id="sidebar" class="sidebar">
             <div class="sidebar-header">
                 <span class="sidebar-title">History</span>
                 <button id="sidebar-close-btn" class="sidebar-close" title="Close sidebar">&laquo;</button>
             </div>
             <div id="sidebar-list" class="sidebar-list"></div>
+            <div class="sidebar-examples">
+                <div class="sidebar-examples-title">Try asking</div>
+                <ul class="sidebar-examples-list">
+                    <li>What services does user@redhat.com have?</li>
+                    <li>What instances should clusterplatform.ocp4-aws.prod be running?</li>
+                    <li>What's deployed on sandbox1234?</li>
+                    <li>Who are the top GPU users this week?</li>
+                    <li>How much did we spend on AWS yesterday?</li>
+                    <li>Show me external users with 50+ provisions since December</li>
+                    <li>Chart the top 10 AWS services by cost this month</li>
+                    <li>Show me the agnosticv config for ocp4-cluster-destroy-scoped</li>
+                    <li>Generate a report of suspicious activity</li>
+                </ul>
+                <div class="sidebar-examples-footer">
+                    I'm still learning! My instructions are in
+                    <a href="https://github.com/rhpds/parsec/blob/main/config/agent_instructions.md" target="_blank" rel="noopener">agent_instructions.md</a>
+                    — PRs welcome 😁
+                </div>
+            </div>
             <div id="learnings-panel" class="learnings-panel" style="display: none;">
                 <div class="learnings-header">
                     <span class="learnings-title">Agent Learnings</span>
@@ -39,7 +58,10 @@
                 </div>
             </div>
         </aside>
-        <button id="sidebar-tab" class="sidebar-tab">History &raquo;</button>
+        <div class="sidebar-tabs">
+            <button id="sidebar-tab-history" class="sidebar-tab" style="display: none;">History &raquo;</button>
+            <button id="sidebar-tab-examples" class="sidebar-tab">Examples &raquo;</button>
+        </div>
         <header>
             <img src="/logo.png" alt="Parsec" class="header-logo" height="44">
             <button id="theme-toggle-btn" class="header-btn" title="Toggle light/dark theme" aria-label="Toggle theme"></button>
