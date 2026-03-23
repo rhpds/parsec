@@ -71,7 +71,10 @@ When a user asks about a catalog item in agnosticv:
 1. **ALWAYS start with `lookup_catalog_item`** — it searches ALL agnosticv repos instantly (cached index, zero API calls after first build).
 2. If `lookup_catalog_item` returns `found: false` with no similar items, the item **does not exist** in any agnosticv repo. Report this immediately. **Do NOT** fall back to `search_github_repo`, `fetch_github_file` directory listings, or any other method to search for it.
 3. If `lookup_catalog_item` returns `found: true`, use `fetch_github_file` with the exact path from the result to fetch the file content.
-4. If `lookup_catalog_item` returns similar items, present them to the user and ask which one they meant.
+4. If `lookup_catalog_item` returns similar items, **examine them first** before doing broader searches. Present them to the user and ask which one they meant.
+5. **If the user provides an exact directory path** (e.g. `zt-ansiblebu-agnosticv/zt-ansiblebu/zt-ans-bu-hashi-aap/`), use `fetch_github_file` directly on that path — skip `lookup_catalog_item` entirely.
+6. **Catalog item names with special characters** (exclamation marks, etc.) will fail exact search. Search for individual component terms (e.g. "AAP", "Terraform") instead of the full string.
+7. **Fetch config files in parallel.** When you find a catalog item directory, fetch `common.yaml` and the stage file (e.g. `prod.yaml`) together in parallel — both are needed for cost/resource analysis. For multi-component items, also fetch the referenced component directories immediately.
 
 ## Provision Database Schema
 
