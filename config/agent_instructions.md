@@ -803,6 +803,40 @@ The `query_aap2` tool queries AAP2 (Ansible Automation Platform) controllers for
 metadata and execution events. Use this to investigate provisioning failures, slow jobs,
 and retry patterns.
 
+### Investigation Priority (from production learnings)
+
+1. **AAP2 failures — job log first, config second.** Always get the job details
+   and failed events (`get_job` + `get_job_events(failed_only=true)`) before
+   looking up catalog item configuration. The failure cause is in the job output.
+   Only fetch agnosticv/agnosticd configs if the error suggests a configuration
+   issue (e.g., wrong variable, missing default).
+
+2. **Destroy failures — focus on the destroy job, not the deployment config.**
+   When a provision succeeded but the destroy failed, the root cause is in the
+   destroy job output, not the original deployment configuration. Common patterns:
+   - `helm uninstall` "release not found" → installation was incomplete or already cleaned up
+   - "Find the bastion" inventory error → AWS resources already terminated outside normal workflow
+   - `make uninstall` failure → target cluster connectivity or resource cleanup logic issue
+   Do NOT search agnosticv repos or fetch catalog configs for destroy failures
+   unless the error message explicitly references a config variable.
+
+3. **GUID lookup order.** When investigating a GUID:
+   1. `query_babylon_catalog(action="list_anarchy_subjects", guid="<guid>")` — fastest, gives tower_jobs
+   2. If not found: `query_aap2(action="find_jobs", template_name="<guid>")` — search by job name
+   3. If still not found: `query_provisions_db` — historical record only
+   Don't start with the provision DB — Babylon and AAP2 have richer failure context.
+
+4. **Showroom/workload repo routing.** `ocp4_workload_showroom` and similar
+   workload roles live in the **legacy** `redhat-cop/agnosticd` repo, not
+   `agnosticd-v2`. When investigating workload failures, check both repos —
+   try `redhat-cop/agnosticd` first for workload roles.
+
+5. **Multi-account checks in parallel.** When checking instance counts or status
+   across multiple AWS accounts, make all `query_aws_account` calls in parallel
+   (same turn), not sequentially. For sandbox alerts, check the sandbox DB status
+   first (`query_aws_account_db`) before deep investigation — the account may
+   already be reclaimed.
+
 ### Which Investigation Flow to Use
 
 **If the user pastes job details, a job log, or a job URL**: Skip this section
