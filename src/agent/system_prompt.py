@@ -15,8 +15,8 @@ _BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 _LEARNINGS_PATH = os.path.join(_BASE_DIR, "data", "agent_learnings.md")
 _PROMPTS_DIR = os.path.join(_BASE_DIR, "config", "prompts")
 
-# Cache for per-agent prompts: {agent_type: (prompt_str, shared_mtime, domain_mtime)}
-_agent_prompt_cache: dict[str, tuple[str, float, float]] = {}
+# Cache: {agent_type: (prompt_str, shared_mtime, domain_mtime, learnings_mtime)}
+_agent_prompt_cache: dict[str, tuple[str, float, float, float]] = {}
 
 # Agent type → prompt file mapping
 _AGENT_PROMPT_FILES: dict[str, str] = {
@@ -76,11 +76,16 @@ def get_agent_prompt(agent_type: str) -> str:
 
     shared_mtime = _get_mtime(_SHARED_CONTEXT_PATH)
     domain_mtime = _get_mtime(domain_path)
+    learnings_mtime = _get_mtime(_LEARNINGS_PATH)
 
     cached = _agent_prompt_cache.get(agent_type)
     if cached:
-        cached_prompt, cached_shared_mt, cached_domain_mt = cached
-        if cached_shared_mt == shared_mtime and cached_domain_mt == domain_mtime:
+        cached_prompt, cached_shared_mt, cached_domain_mt, cached_learn_mt = cached
+        if (
+            cached_shared_mt == shared_mtime
+            and cached_domain_mt == domain_mtime
+            and cached_learn_mt == learnings_mtime
+        ):
             return cached_prompt
 
     if agent_type == "orchestrator":
@@ -94,7 +99,7 @@ def get_agent_prompt(agent_type: str) -> str:
     if learnings:
         prompt += "\n\n" + learnings
 
-    _agent_prompt_cache[agent_type] = (prompt, shared_mtime, domain_mtime)
+    _agent_prompt_cache[agent_type] = (prompt, shared_mtime, domain_mtime, learnings_mtime)
     logger.info(
         "Agent prompt loaded for %s (%d chars, shared=%s)",
         agent_type,

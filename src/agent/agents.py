@@ -145,7 +145,7 @@ _BABYLON_PATTERNS = re.compile(
 _COST_PATTERNS = re.compile(
     r"""
     \bcost\b | \bspend | \bspent\b | \bpricing\b | \bprice\b
-    | \bodcr\b | \bcapacity\s+reserv
+    | \bodcr\b | \bcapacity\s+reserve
     | how\s+much\s+did | gpu\s+abuse
     | billing | budget
     | instance.type.*cost
@@ -273,7 +273,7 @@ async def run_sub_agent(
     Returns:
         Structured result dict with summary, findings, and metadata.
     """
-    from src.agent.orchestrator import _build_client, _execute_tool
+    from src.agent.orchestrator import _build_client, _execute_tool, _trim_history
 
     start = _time.monotonic()
     agent_cfg = AGENTS.get(agent_type)
@@ -420,6 +420,7 @@ async def run_sub_agent(
             )
 
         messages.append({"role": "user", "content": tool_results})
+        messages[:] = _trim_history(messages)
         _maybe_inject_budget_warning(messages, _round, agent_cfg.max_rounds)
 
     elapsed_total = round(_time.monotonic() - start, 1)
@@ -443,7 +444,7 @@ async def run_sub_agent(
     }
 
 
-async def run_sub_agent_streaming(
+async def run_sub_agent_streaming(  # noqa: C901
     agent_type: str,
     task: str,
     context: dict | None = None,
@@ -551,6 +552,11 @@ async def run_sub_agent_streaming(
             yield sse_error(f"Claude API error: {e}")
             yield sse_done()
             return
+        except Exception as e:
+            logger.exception("Unexpected error in %s streaming sub-agent", agent_type)
+            yield sse_error(f"Agent error: {e}")
+            yield sse_done()
+            return
 
         assistant_content = response.content
         tool_use_blocks = []
@@ -584,15 +590,19 @@ async def run_sub_agent_streaming(
 
             yield sse_tool_start(tool_name, tool_input)
 
-            tool_task = asyncio.create_task(_execute_tool(tool_name, tool_input))
-            elapsed = 0
-            while not tool_task.done():
-                done, _ = await asyncio.wait({tool_task}, timeout=10)
-                if not done:
-                    elapsed += 10
-                    label = agent_cfg.slow_tool_labels.get(tool_name, f"Processing {tool_name}")
-                    yield sse_status(f"{agent_cfg.name}: {label}... ({elapsed}s)")
-            result = tool_task.result()
+            try:
+                tool_task = asyncio.create_task(_execute_tool(tool_name, tool_input))
+                elapsed = 0
+                while not tool_task.done():
+                    done, _ = await asyncio.wait({tool_task}, timeout=10)
+                    if not done:
+                        elapsed += 10
+                        label = agent_cfg.slow_tool_labels.get(tool_name, f"Processing {tool_name}")
+                        yield sse_status(f"{agent_cfg.name}: {label}... ({elapsed}s)")
+                result = tool_task.result()
+            except Exception as e:
+                logger.exception("Tool %s failed in %s streaming sub-agent", tool_name, agent_type)
+                result = {"error": str(e)}
 
             yield sse_tool_result(tool_name, result)
 
@@ -611,6 +621,7 @@ async def run_sub_agent_streaming(
             )
 
         messages.append({"role": "user", "content": tool_results})
+        messages[:] = _trim_history(messages)
         yield sse_event("history", {"messages": _serialize_messages(messages)})
 
     logger.info(

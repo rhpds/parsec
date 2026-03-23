@@ -6,6 +6,10 @@ Tool definitions are organized in two ways:
    ORCHESTRATOR_TOOLS (used by the sub-agent architecture)
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # Verdict tool for alert investigations (not included in the default TOOLS list —
 # only appended during alert investigation mode).
 SUBMIT_ALERT_VERDICT_TOOL = {
@@ -927,10 +931,14 @@ TOOLS = [
 def _tools_by_name(*names: str) -> list[dict]:
     """Return tool definitions from TOOLS matching the given names."""
     by_name = {t["name"]: t for t in TOOLS}
-    return [by_name[n] for n in names if n in by_name]
+    result = []
+    for n in names:
+        if n in by_name:
+            result.append(by_name[n])
+        else:
+            logger.warning("Unknown tool name in agent grouping: %s", n)
+    return result
 
-
-SHARED_TOOLS = _tools_by_name("query_provisions_db", "query_aws_account_db")
 
 COST_TOOLS = _tools_by_name(
     "query_aws_costs",
@@ -961,6 +969,7 @@ BABYLON_TOOLS = _tools_by_name(
     "query_babylon_catalog",
     "query_aap2",
     "fetch_github_file",
+    "search_github_repo",
     "lookup_catalog_item",
     "query_provisions_db",
     "query_aws_account_db",

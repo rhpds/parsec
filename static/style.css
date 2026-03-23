@@ -898,7 +898,7 @@ main#chat {
     border-radius: 6px;
     font-size: 13px;
     color: var(--text-muted);
-    background: var(--bg-secondary);
+    background: var(--bg-elevated);
     border-left: 3px solid var(--accent);
 }
 

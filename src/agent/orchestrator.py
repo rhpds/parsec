@@ -51,14 +51,6 @@ REPORTS_DIR = os.path.join(
 )
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
-# Status labels for tools that take >10s (shown in keepalive SSE events)
-_SLOW_TOOL_LABELS = {
-    "query_cloudtrail": "Scanning CloudTrail Lake",
-    "query_aws_account": "Querying AWS account",
-    "query_babylon_catalog": "Querying Babylon cluster",
-    "query_aap2": "Querying AAP2 controller",
-}
-
 
 async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
     """Dispatch a tool call to the appropriate handler."""
@@ -533,7 +525,17 @@ async def _handle_delegation(
     while not event_queue.empty():
         yield event_queue.get_nowait(), None
 
-    result = sub_task.result()
+    try:
+        result = sub_task.result()
+    except Exception as e:
+        logger.exception("Sub-agent %s delegation failed", agent_type)
+        result = {
+            "agent": agent_type,
+            "status": "error",
+            "summary": f"Sub-agent failed: {e}",
+            "tool_calls": 0,
+            "duration_seconds": 0,
+        }
 
     logger.info(
         "Sub-agent %s delegation complete: status=%s tool_calls=%d duration=%.1fs",
