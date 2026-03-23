@@ -889,6 +889,37 @@ main#chat {
     to { transform: rotate(360deg); }
 }
 
+.agent-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    margin: 8px 0;
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text-muted);
+    background: var(--bg-secondary);
+    border-left: 3px solid var(--accent);
+}
+
+.agent-banner.agent-running .agent-icon {
+    animation: spin 2s linear infinite;
+    display: inline-block;
+}
+
+.agent-banner.agent-done {
+    opacity: 0.6;
+    border-left-color: var(--text-muted);
+}
+
+.agent-banner .agent-label {
+    font-weight: 600;
+}
+
+.agent-banner .agent-status {
+    font-style: italic;
+}
+
 @keyframes pulse {
     0%, 100% { opacity: 0.5; }
     50% { opacity: 1; }

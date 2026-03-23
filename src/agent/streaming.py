@@ -1,12 +1,19 @@
 """SSE (Server-Sent Events) helpers for streaming agent responses."""
 
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def sse_event(event: str, data: dict | str) -> str:
     """Format a single SSE event."""
     if isinstance(data, dict):
-        data = json.dumps(data)
+        try:
+            data = json.dumps(data)
+        except (TypeError, ValueError) as exc:
+            logger.error("Failed to serialize SSE %s event: %s", event, exc)
+            data = json.dumps(data, default=str)
     return f"event: {event}\ndata: {data}\n\n"
 
 
@@ -33,6 +40,16 @@ def sse_report(filename: str, format: str, download_url: str) -> str:
 def sse_status(message: str) -> str:
     """Send a status update (shown as a subtle progress indicator)."""
     return sse_event("status", {"message": message})
+
+
+def sse_agent_start(agent_type: str, agent_name: str) -> str:
+    """Signal that a sub-agent has started execution."""
+    return sse_event("agent_start", {"agent": agent_type, "name": agent_name})
+
+
+def sse_agent_done(agent_type: str) -> str:
+    """Signal that a sub-agent has finished execution."""
+    return sse_event("agent_done", {"agent": agent_type})
 
 
 def sse_error(message: str) -> str:

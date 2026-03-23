@@ -17,7 +17,12 @@ _RETRY_RE = re.compile(r"FAILED - RETRYING:.*\((\d+) retries left\)")
 
 _JSON_ERROR_KEYS = ("msg", "stderr", "message", "error", "reason")
 
+_PRIMARY_ERROR_KEYS = {"msg", "stderr"}
+
 MAX_LINE_CHARS = 1500
+MAX_FATAL_LINE_CHARS = 20000
+MAX_ERROR_FIELD_CHARS = 12000
+MAX_SECONDARY_FIELD_CHARS = 1500
 
 _NOISE_PREFIXES = ("skipping:", "changed:", "included:", "ASYNC ", "[WARNING]:")
 
@@ -51,7 +56,10 @@ def _extract_json_errors(line: str) -> str | None:
     for key in _JSON_ERROR_KEYS:
         val = data.get(key)
         if val:
-            text = str(val)[:500]
+            limit = (
+                MAX_ERROR_FIELD_CHARS if key in _PRIMARY_ERROR_KEYS else MAX_SECONDARY_FIELD_CHARS
+            )
+            text = str(val)[:limit]
             parts.append(f'"{key}": {text!r}')
 
     if "cmd" in data:
@@ -63,15 +71,96 @@ def _extract_json_errors(line: str) -> str | None:
     return ", ".join(parts) if parts else None
 
 
-def _truncate_line(line: str) -> str:
-    """Truncate a long line, preserving extracted error fields."""
-    if len(line) <= MAX_LINE_CHARS:
+def _extract_k8s_pod_status(line: str) -> str | None:
+    """Extract container status summary from a K8s pod resource in a fatal line.
+
+    Pod failure lines from k8s_info often contain the entire pod YAML including
+    managedFields, network metadata, etc.  This extracts just the diagnostic
+    parts: pod phase, conditions, and container statuses (waiting reasons,
+    restart counts, termination messages).
+    """
+    start = line.find("=> {")
+    if start == -1:
+        return None
+
+    json_str = line[start + 3 :].strip()
+    try:
+        data = json.loads(json_str)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+    resources = data.get("resources")
+    if not isinstance(resources, list) or not resources:
+        return None
+
+    pod = resources[0]
+    if not isinstance(pod, dict) or pod.get("kind") != "Pod":
+        return None
+
+    status = pod.get("status", {})
+    if not isinstance(status, dict):
+        return None
+
+    parts: list[str] = []
+
+    phase = status.get("phase", "")
+    if phase:
+        parts.append(f"Pod Phase: {phase}")
+
+    for cond in status.get("conditions", []):
+        if isinstance(cond, dict) and cond.get("status") != "True":
+            ctype = cond.get("type", "?")
+            msg = str(cond.get("message", "N/A"))[:300]
+            parts.append(f"  Condition {ctype}: {cond.get('status')} — {msg}")
+
+    for label, key in [("Init", "initContainerStatuses"), ("Container", "containerStatuses")]:
+        for cs in status.get(key, []):
+            if not isinstance(cs, dict):
+                continue
+            name = cs.get("name", "?")
+            ready = cs.get("ready", False)
+            restarts = cs.get("restartCount", 0)
+            state_info = ""
+            for state_type, state_data in cs.get("state", {}).items():
+                if isinstance(state_data, dict):
+                    reason = state_data.get("reason", "")
+                    message = str(state_data.get("message", ""))[:500]
+                    state_info = state_type
+                    if reason:
+                        state_info += f"({reason})"
+                    if message:
+                        state_info += f": {message}"
+            if not ready or restarts > 0:
+                parts.append(
+                    f"  {label} [{name}]: ready={ready}, restarts={restarts}, state={state_info}"
+                )
+
+    return "\n".join(parts) if parts else None
+
+
+def _truncate_line(line: str, *, is_fatal: bool = False) -> str:
+    """Truncate a long line, preserving extracted error fields.
+
+    Fatal/error lines get a much larger budget so diagnostic content
+    (e.g. pod YAML dumps, multi-line error messages) isn't lost.
+    For K8s pod failures, extracts container status as a fallback.
+    """
+    max_chars = MAX_FATAL_LINE_CHARS if is_fatal else MAX_LINE_CHARS
+    if len(line) <= max_chars:
         return line
 
     errors = _extract_json_errors(line)
-    prefix = line[:800]
+
+    k8s_status = None
+    if is_fatal and not errors:
+        k8s_status = _extract_k8s_pod_status(line)
+
+    prefix_len = min(2000, max_chars // 3) if is_fatal else 800
+    prefix = line[:prefix_len]
     if errors:
-        return f"{prefix}... " f"[extracted: {errors}] " f"[truncated from {len(line):,} chars]"
+        return f"{prefix}... [extracted: {errors}] [truncated from {len(line):,} chars]"
+    if k8s_status:
+        return f"{prefix}...\n[K8s Pod Status:\n{k8s_status}]\n[truncated from {len(line):,} chars]"
     return f"{prefix}... [truncated from {len(line):,} chars]"
 
 
@@ -183,7 +272,7 @@ def trim_ansible_log(content: str) -> str:
                 result.append(f"  [... retried {retry_count} times before failing]")
                 prev_was_retry = False
                 retry_count = 0
-            result.append(_truncate_line(line))
+            result.append(_truncate_line(line, is_fatal=True))
             continue
 
         if _is_unconditional_keep(stripped):
