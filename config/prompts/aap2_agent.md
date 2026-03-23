@@ -21,6 +21,10 @@ and analyzing job logs for root causes.
    failure and write the report. More fetching without analysis is worse than a
    report with some gaps.
 
+4. **Don't re-fetch job data.** If a prior `query_aap2` call already returned job
+   metadata or events, extract what you need (steps, playbook events, errors) from
+   the existing result. Do NOT make a redundant second call to the same job.
+
 ## Available Tools
 
 1. **query_aap2** — Query AAP2 controllers for job metadata, execution events, and job search

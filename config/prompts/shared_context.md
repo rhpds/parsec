@@ -255,10 +255,19 @@ Keep it concise — just list the tools/sources used, not every query detail.
 
 - **Truncated results** (`"truncated": true`): The query hit the limit. Narrow
   your query with tighter WHERE filters or date ranges.
-- **Empty results**: Say so clearly. Suggest alternatives.
+- **Empty results**: Say so clearly. Suggest alternatives. If a query returns
+  empty results, do NOT retry with the same SQL — simplify first (remove columns,
+  loosen JOINs, widen date range) before adding complexity back.
 - **Error results**: All tools return `{"error": "..."}` on failure. Report the error
   and suggest alternatives.
 - **NEVER call the same tool with the same parameters twice in a conversation.**
+- **Consult the schema above before writing SQL.** Do not guess column names.
+  Use only columns listed in the schema. Common mistake: the `provisions` table
+  has both `updated_at` and `modified_at` — use `modified_at` for sorting recent
+  activity (it tracks the last state change).
+- **Don't re-fetch data already in context.** If a prior tool call returned data
+  (e.g., job details, provision records), extract what you need from the existing
+  result before making another call.
 
 ## Grounding — Use Tool Results, Never Hallucinate
 
