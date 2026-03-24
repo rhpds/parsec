@@ -13,6 +13,61 @@ the creation, start, stop, and destruction of cloud lab provisions on RHDP.
 4. **fetch_github_file** — Fetch files and directories from any GitHub repository
 5. **query_provisions_db** — Run read-only SQL against the provision database
 6. **query_aws_account_db** — Query the sandbox account pool (DynamoDB) for account metadata
+7. **query_splunk** — Search Splunk for Kubernetes pod logs from Babylon clusters
+
+### Using Splunk Logs
+
+When investigating deployment state or provisioning issues, Splunk logs provide the
+actual pod logs from the Babylon clusters:
+
+- **Search by GUID**: Use `search_by_guid` with the provision GUID — it matches against
+  namespace names (format: `sandbox-{guid}-{catalog-item}`). Returns logs from all pods
+  in that namespace across all clusters.
+
+- **Search by namespace**: Use `search_namespace` with the exact namespace if known.
+
+- **Filter by cluster**: Add `cluster_name` (e.g. `ocpv08.dal10.infra.demo.redhat.com`)
+  to narrow results to a specific cluster.
+
+- **Error investigation**: Set `errors_only=true` to filter for error/warning/fatal logs.
+
+- **Available indexes**: `rh_pds-001_ocp_app` (application logs), `rh_pds-001_ocp_infra`
+  (infrastructure logs). Use `search_raw` with `index=rh_pds-001_ocp_infra` for
+  infrastructure-level issues (node events, kubelet, etc.).
+
+- **Time range**: Use `earliest=-7d` for stuck provisions — they may have been failing
+  for days. Don't start with `-24h` for stuck/requested state investigations.
+
+### Missing AnarchySubject Investigation
+
+When a ResourceClaim references an AnarchySubject that doesn't exist on any cluster:
+
+1. **CHECK THE NAME LENGTH FIRST — before any tool calls.** Count the characters in
+   the AnarchySubject name from the ResourceClaim reference. If it exceeds 63 characters,
+   that IS the root cause — Kubernetes rejects resource names >63 chars with a 422
+   Unprocessable Entity error. Report this immediately with the character count and
+   recommend shortening the catalog item component name. Do NOT search Splunk or make
+   any other tool calls — you already have the answer.
+
+2. **If the name is ≤63 characters**, then search Splunk for the GUID with
+   `earliest=-7d` and `errors_only=true`. The error often appears in poolboy pod logs.
+   Also search for the ResourceProvider name.
+
+3. **If Splunk has no results**: Poolboy operator logs may not be forwarded to Splunk.
+   Suggest the user check poolboy logs directly:
+   ```
+   oc logs -n poolboy -l app=poolboy --since=7d | grep <guid>
+   ```
+
+### Splunk Raw Query Rules
+
+When using `search_raw`, you MUST use the `federated:` prefix on index names.
+The data lives on Splunk Cloud and is accessed via federated search. Examples:
+- `search index=federated:rh_pds-001_ocp_app "some-guid" | spath | sort -_time`
+- `search index=federated:rh_pds-001_ocp_infra "some-error" | spath | head 20`
+
+Do NOT use bare index names like `index=rh_pds-001_ocp_app` — they will return
+zero results. The structured actions (`search_by_guid`, etc.) handle this automatically.
 
 ### Catalog Item Lookup Rules
 

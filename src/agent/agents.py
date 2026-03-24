@@ -138,6 +138,8 @@ _BABYLON_PATTERNS = re.compile(
     | \bworkshop\b
     | deployment\s+state
     | what.*(?:deploy|provision)s?\b
+    | \bsplunk\b.*\blog
+    | \blog.*\bsplunk\b
     """,
     re.IGNORECASE | re.VERBOSE,
 )

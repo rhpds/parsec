@@ -83,6 +83,18 @@ github:
   # Auth via PAT in Authorization header (uses github.token above).
   mcp_url: "https://api.githubcopilot.com/mcp/"
 
+splunk:
+  # Red Hat Corporate Splunk REST API endpoint.
+  # Uses federated search to query Splunk Cloud (rhcorporate.splunkcloud.com)
+  # via the on-prem API host (splunk-api.corp.redhat.com:8089).
+  # Set token via PARSEC_SPLUNK__TOKEN env var or parsec-secrets.
+  # Requires VPN or internal network access (port 8089).
+  host: "https://splunk-api.corp.redhat.com"
+  token: ""
+  # username: ""
+  # password: ""
+  verify_ssl: false  # self-signed cert on internal endpoint
+
 alert_api_key: ""
 
 learnings:
