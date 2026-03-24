@@ -83,6 +83,15 @@ github:
   # Auth via PAT in Authorization header (uses github.token above).
   mcp_url: "https://api.githubcopilot.com/mcp/"
 
+splunk:
+  # Red Hat Corporate Splunk Cloud instance
+  # Set token via PARSEC_SPLUNK__TOKEN env var or parsec-secrets
+  host: "https://rhcorporate.splunkcloud.com"
+  token: ""
+  # For local dev only: paste SSO session cookie value
+  # session_cookie: ""
+  verify_ssl: true
+
 alert_api_key: ""
 
 learnings:

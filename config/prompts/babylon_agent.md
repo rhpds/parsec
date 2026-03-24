@@ -13,6 +13,27 @@ the creation, start, stop, and destruction of cloud lab provisions on RHDP.
 4. **fetch_github_file** — Fetch files and directories from any GitHub repository
 5. **query_provisions_db** — Run read-only SQL against the provision database
 6. **query_aws_account_db** — Query the sandbox account pool (DynamoDB) for account metadata
+7. **query_splunk** — Search Splunk for Kubernetes pod logs from Babylon clusters
+
+### Using Splunk Logs
+
+When investigating deployment state or provisioning issues, Splunk logs provide the
+actual pod logs from the Babylon clusters:
+
+- **Search by GUID**: Use `search_by_guid` with the provision GUID — it matches against
+  namespace names (format: `sandbox-{guid}-{catalog-item}`). Returns logs from all pods
+  in that namespace across all clusters.
+
+- **Search by namespace**: Use `search_namespace` with the exact namespace if known.
+
+- **Filter by cluster**: Add `cluster_name` (e.g. `ocpv08.dal10.infra.demo.redhat.com`)
+  to narrow results to a specific cluster.
+
+- **Error investigation**: Set `errors_only=true` to filter for error/warning/fatal logs.
+
+- **Available indexes**: `rh_pds-001_ocp_app` (application logs), `rh_pds-001_ocp_infra`
+  (infrastructure logs). Use `search_raw` with `index=rh_pds-001_ocp_infra` for
+  infrastructure-level issues (node events, kubelet, etc.).
 
 ### Catalog Item Lookup Rules
 

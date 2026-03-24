@@ -830,6 +830,84 @@ TOOLS = [
         },
     },
     {
+        "name": "query_splunk",
+        "description": (
+            "Search Splunk logs for Babylon Kubernetes pod logs and AAP2 controller logs. "
+            "Use search_by_guid to find all logs for a provision GUID (appears in namespace names). "
+            "Use search_aap2_logs to search AAP2 controller server logs. "
+            "Use search_namespace for exact namespace searches. "
+            "Use search_raw for custom SPL queries. "
+            "Available indexes: rh_pds-001_ocp_app (OCP app logs), rh_pds-001_ocp_infra (OCP infra logs), rh_pds-001_aap (AAP2 logs)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "search_by_guid",
+                        "search_namespace",
+                        "search_aap2_logs",
+                        "search_raw",
+                    ],
+                    "description": (
+                        "search_by_guid: Find OCP pod logs by GUID (in namespace name). "
+                        "search_namespace: Find OCP pod logs by exact namespace. "
+                        "search_aap2_logs: Search AAP2 controller logs. "
+                        "search_raw: Run a custom SPL query."
+                    ),
+                },
+                "guid": {
+                    "type": "string",
+                    "description": "Provision GUID to search for (used in search_by_guid, search_aap2_logs).",
+                },
+                "namespace": {
+                    "type": "string",
+                    "description": "Exact Kubernetes namespace name (used in search_namespace).",
+                },
+                "cluster_name": {
+                    "type": "string",
+                    "description": (
+                        "OCP cluster domain to filter by (e.g. 'ocpv08.dal10.infra.demo.redhat.com'). "
+                        "Optional filter for OCP log searches."
+                    ),
+                },
+                "controller": {
+                    "type": "string",
+                    "description": (
+                        "AAP2 controller hostname (e.g. 'aap2-prod-us-west-2-01.aap.infra.demo.redhat.com'). "
+                        "Required for search_aap2_logs."
+                    ),
+                },
+                "search_terms": {
+                    "type": "string",
+                    "description": "Additional text to search for in log messages.",
+                },
+                "earliest": {
+                    "type": "string",
+                    "description": "Earliest time for search (Splunk time format). Default: '-24h'. Examples: '-7d', '-1h', '2026-03-20T00:00:00'.",
+                },
+                "latest": {
+                    "type": "string",
+                    "description": "Latest time for search. Default: 'now'.",
+                },
+                "errors_only": {
+                    "type": "boolean",
+                    "description": "If true, only return error/warning/fatal level logs. Default: false.",
+                },
+                "raw_query": {
+                    "type": "string",
+                    "description": "Raw SPL query for search_raw action. Must start with 'search' or '|'. Read-only queries only.",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum results to return. Default: 200, max: 500.",
+                },
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "query_aap2",
         "description": (
             "Query an AAP2 (Ansible Automation Platform) controller for job details, "
@@ -955,6 +1033,7 @@ COST_TOOLS = _tools_by_name(
 
 AAP2_TOOLS = _tools_by_name(
     "query_aap2",
+    "query_splunk",
     "fetch_github_file",
     "lookup_catalog_item",
     "search_github_repo",
@@ -967,6 +1046,7 @@ AAP2_TOOLS = _tools_by_name(
 
 BABYLON_TOOLS = _tools_by_name(
     "query_babylon_catalog",
+    "query_splunk",
     "query_aap2",
     "fetch_github_file",
     "search_github_repo",

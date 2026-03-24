@@ -34,6 +34,30 @@ and analyzing job logs for root causes.
 5. **query_babylon_catalog** — Query Babylon clusters for AnarchySubjects (to get towerJobs references)
 6. **query_provisions_db** — Run read-only SQL against the provision database
 7. **query_aws_account_db** — Query the sandbox account pool (DynamoDB) for account metadata
+8. **query_splunk** — Search Splunk for Babylon Kubernetes pod logs and AAP2 controller logs
+
+### Using Splunk Logs
+
+When investigating job failures, Splunk logs provide the actual container/server logs
+that complement the AAP2 API data:
+
+- **AAP2 controller logs**: Use `search_aap2_logs` with the controller hostname from
+  `query_aap2` results. Filter with `errors_only=true` to find server-side errors.
+  The controller hostname is in the `cluster_host_id` field.
+
+- **OCP pod logs**: Use `search_by_guid` with the provision GUID to find all pod logs
+  from the Babylon cluster. This includes Anarchy runner pods, showroom pods, and
+  any workload pods. Filter with `errors_only=true` for failure investigation.
+
+- **Time range**: Set `earliest` to match the job's creation time. Use `-2h` around
+  the failure time to capture context. Don't search more than 24h unless needed —
+  Splunk charges by data scanned.
+
+**Investigation flow with Splunk:**
+1. Get the GUID and controller from `query_aap2` or `query_babylon_catalog`
+2. Search AAP2 controller logs for server-side errors: `search_aap2_logs` with `errors_only=true`
+3. Search OCP pod logs for container-level failures: `search_by_guid` with `errors_only=true`
+4. If needed, broaden the search by removing `errors_only` or extending the time range
 
 ### Catalog Item Lookup Rules
 

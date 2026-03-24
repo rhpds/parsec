@@ -15,6 +15,7 @@ from src.connections.babylon import init_babylon
 from src.connections.gcp import init_gcp
 from src.connections.github_mcp import init_github_mcp
 from src.connections.postgres import close_pool, init_pool
+from src.connections.splunk import init_splunk
 from src.routes.alert import router as alert_router
 from src.routes.conversations import ensure_conversations_dir
 from src.routes.conversations import router as conversations_router
@@ -52,6 +53,7 @@ async def lifespan(app: FastAPI):
         ("Babylon", init_babylon),
         ("AAP2", init_aap2),
         ("GitHub MCP", init_github_mcp),
+        ("Splunk", init_splunk),
     ]:
         try:
             init_fn()
