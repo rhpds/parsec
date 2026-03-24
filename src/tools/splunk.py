@@ -7,10 +7,13 @@ from src.connections.splunk import get_splunk_client
 
 logger = logging.getLogger(__name__)
 
-# Splunk index names for RHDP logs
-OCP_APP_INDEX = "rh_pds-001_ocp_app"
-OCP_INFRA_INDEX = "rh_pds-001_ocp_infra"
-AAP_INDEX = "rh_pds-001_aap"
+# Splunk index names for RHDP logs.
+# Data lives on Splunk Cloud (rhcorporate.splunkcloud.com) but API access goes
+# through the on-prem REST endpoint (splunk-api.corp.redhat.com:8089) using
+# federated search. The "federated:" prefix routes queries to the Cloud instance.
+OCP_APP_INDEX = "federated:rh_pds-001_ocp_app"
+OCP_INFRA_INDEX = "federated:rh_pds-001_ocp_infra"
+AAP_INDEX = "federated:rh_pds-001_aap"
 
 
 def _sanitize_query_value(value: str) -> str:
@@ -34,17 +37,22 @@ def _build_ocp_query(
     errors_only: bool,
     search_terms: str,
 ) -> str:
-    """Build an OCP app log query with common filters."""
+    """Build an OCP app log query with common filters.
+
+    Federated search returns raw JSON in _raw without auto-extracting fields.
+    We use raw text matching for pre-spath filters and add | spath to extract
+    fields for the result set.
+    """
     query = f"index={OCP_APP_INDEX} {namespace_filter}"
     if cluster_name:
         cluster_name = _sanitize_query_value(cluster_name)
-        query += f' openshift.labels.cluster_name="{cluster_name}"'
+        query += f' "{cluster_name}"'
     if errors_only:
-        query += " (level=error OR level=fatal OR level=warning)"
+        query += ' ("error" OR "fatal" OR "warning")'
     if search_terms:
         search_terms = _sanitize_query_value(search_terms)
         query += f' "{search_terms}"'
-    return query + " | sort -_time"
+    return query + " | spath | sort -_time"
 
 
 def _build_query(  # noqa: C901
@@ -62,30 +70,32 @@ def _build_query(  # noqa: C901
         if not guid:
             return {"error": "guid is required for search_by_guid action"}
         guid = _sanitize_query_value(guid)
-        ns_filter = f'kubernetes.namespace_name="*{guid}*"'
+        # GUID appears in namespace_name in _raw JSON — use raw text match
+        ns_filter = f'"{guid}"'
         return _build_ocp_query(ns_filter, cluster_name, errors_only, search_terms), OCP_APP_INDEX
 
     if action == "search_namespace":
         if not namespace:
             return {"error": "namespace is required for search_namespace action"}
         namespace = _sanitize_query_value(namespace)
-        ns_filter = f'kubernetes.namespace_name="{namespace}"'
+        ns_filter = f'"{namespace}"'
         return _build_ocp_query(ns_filter, cluster_name, errors_only, search_terms), OCP_APP_INDEX
 
     if action == "search_aap2_logs":
         if not controller:
             return {"error": "controller is required for search_aap2_logs action"}
         controller = _sanitize_query_value(controller)
-        query = f'index={AAP_INDEX} cluster_host_id="{controller}"'
+        # Federated search: use raw text match, then spath for field extraction
+        query = f'index={AAP_INDEX} "{controller}"'
         if guid:
             guid = _sanitize_query_value(guid)
             query += f' "{guid}"'
         if errors_only:
-            query += " (level=ERROR OR level=CRITICAL OR level=WARNING OR failed=true)"
+            query += ' ("ERROR" OR "CRITICAL" OR "WARNING" OR "failed")'
         if search_terms:
             search_terms = _sanitize_query_value(search_terms)
             query += f' "{search_terms}"'
-        return query + " | sort -_time", AAP_INDEX
+        return query + " | spath | sort -_time", AAP_INDEX
 
     if action == "search_raw":
         if not raw_query:
