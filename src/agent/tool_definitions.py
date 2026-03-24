@@ -1006,11 +1006,40 @@ TOOLS = [
 # ---------------------------------------------------------------------------
 
 
+def _is_splunk_configured() -> bool:
+    """Check if Splunk is configured (has host + auth credentials)."""
+    try:
+        from src.config import get_config
+
+        cfg = get_config()
+        splunk_cfg = cfg.get("splunk", {})
+        host = splunk_cfg.get("host", "")
+        token = splunk_cfg.get("token", "")
+        username = splunk_cfg.get("username", "")
+        password = splunk_cfg.get("password", "")  # noqa: S105
+        session_cookie = splunk_cfg.get("session_cookie", "")
+        return bool(host and (token or (username and password) or session_cookie))
+    except Exception:
+        return False
+
+
+# Tools that require specific backends to be configured
+_CONDITIONAL_TOOLS: dict[str, bool] = {
+    "query_splunk": _is_splunk_configured(),
+}
+
+
 def _tools_by_name(*names: str) -> list[dict]:
-    """Return tool definitions from TOOLS matching the given names."""
+    """Return tool definitions from TOOLS matching the given names.
+
+    Skips tools that require unconfigured backends (e.g. query_splunk
+    when Splunk is not configured) so the agent never sees them.
+    """
     by_name = {t["name"]: t for t in TOOLS}
     result = []
     for n in names:
+        if n in _CONDITIONAL_TOOLS and not _CONDITIONAL_TOOLS[n]:
+            continue
         if n in by_name:
             result.append(by_name[n])
         else:

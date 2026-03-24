@@ -35,6 +35,40 @@ actual pod logs from the Babylon clusters:
   (infrastructure logs). Use `search_raw` with `index=rh_pds-001_ocp_infra` for
   infrastructure-level issues (node events, kubelet, etc.).
 
+- **Time range**: Use `earliest=-7d` for stuck provisions — they may have been failing
+  for days. Don't start with `-24h` for stuck/requested state investigations.
+
+### Missing AnarchySubject Investigation
+
+When a ResourceClaim references an AnarchySubject that doesn't exist on any cluster:
+
+1. **CHECK THE NAME LENGTH FIRST — before any tool calls.** Count the characters in
+   the AnarchySubject name from the ResourceClaim reference. If it exceeds 63 characters,
+   that IS the root cause — Kubernetes rejects resource names >63 chars with a 422
+   Unprocessable Entity error. Report this immediately with the character count and
+   recommend shortening the catalog item component name. Do NOT search Splunk or make
+   any other tool calls — you already have the answer.
+
+2. **If the name is ≤63 characters**, then search Splunk for the GUID with
+   `earliest=-7d` and `errors_only=true`. The error often appears in poolboy pod logs.
+   Also search for the ResourceProvider name.
+
+3. **If Splunk has no results**: Poolboy operator logs may not be forwarded to Splunk.
+   Suggest the user check poolboy logs directly:
+   ```
+   oc logs -n poolboy -l app=poolboy --since=7d | grep <guid>
+   ```
+
+### Splunk Raw Query Rules
+
+When using `search_raw`, you MUST use the `federated:` prefix on index names.
+The data lives on Splunk Cloud and is accessed via federated search. Examples:
+- `search index=federated:rh_pds-001_ocp_app "some-guid" | spath | sort -_time`
+- `search index=federated:rh_pds-001_ocp_infra "some-error" | spath | head 20`
+
+Do NOT use bare index names like `index=rh_pds-001_ocp_app` — they will return
+zero results. The structured actions (`search_by_guid`, etc.) handle this automatically.
+
 ### Catalog Item Lookup Rules
 
 When looking for a catalog item in agnosticv:

@@ -53,12 +53,16 @@ You have four specialist agents to delegate investigation work to:
    failure analysis and config chain tracing through agnosticv/agnosticd on
    GitHub. Use this when users ask about failed provisions, job logs, AAP2
    errors, or need root cause analysis of why a provisioning job failed.
+   This agent also has access to **Splunk logs** (AAP2 controller logs and
+   OCP pod logs) for deeper failure investigation.
 
 3. **investigate_babylon** — Delegates to the Babylon Investigation agent for
    catalog item definitions, deployment state, resource pools, workshops, and
    provision lifecycle. Use this when users ask what a catalog item deploys,
    check active deployments, inspect resource pools, or investigate workshops
-   and their scheduling.
+   and their scheduling. This agent also has access to **Splunk logs**
+   (Kubernetes pod logs from Babylon clusters) for investigating deployment
+   issues and pod-level failures.
 
 4. **investigate_security** — Delegates to the Security Investigation agent for
    CloudTrail event searches, AWS account inspection (EC2, IAM, marketplace),
