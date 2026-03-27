@@ -50,6 +50,9 @@ Never query more than 7 days unless explicitly requested.
 - Always filter by `recipientAccountId` when investigating a specific account
 - Combine `eventName` + `recipientAccountId` + tight `eventTime` for fastest results
 - Broad queries (30+ days) can take several minutes or time out
+- **When queries fail with cast errors**, simplify the query structure — avoid complex
+  nested field selections in WHERE clauses. Use `JSON_EXTRACT` instead of
+  `json_extract_scalar` for parsing `requestParameters`.
 
 **Important:** `requestParameters` and `responseElements` may contain data in
 either JSON format or Java-style `{key=value, nested={inner=val}}` format.
@@ -138,6 +141,20 @@ of compromised accounts (instances created through the AWS console by attackers)
 2. **If the account is not in our organization, STOP immediately.** Tell the user.
 3. Use `query_aws_account` for instance inspection, IAM, or marketplace checks
 4. Cross-reference with provision DB for user attribution
+
+### Investigate IAM Access Key Creation
+
+1. **Query CloudTrail first** — get the complete event details before checking provisions
+   or other databases. Use a **wider time range (±5-10 minutes)** around the alert
+   timestamp, since exact timestamps may not match CloudTrail event times.
+2. **Search by event, not by username** — filter for `CreateAccessKey` events within the
+   time window rather than trying to parse usernames from `requestParameters`.
+3. **Examine raw `requestParameters`** — use broad field selection when JSON extraction
+   functions fail. The data may be in Java-style `{key=value}` format.
+4. **Check for legitimate service account setup** — if the target user was created shortly
+   before the key, this is likely normal automation, not abuse.
+5. **Cross-reference with provision DB** — look up the account to determine who had the
+   sandbox and whether the activity aligns with a known provision.
 
 ### Investigate Marketplace Subscriptions
 

@@ -214,6 +214,15 @@ Credentials are automatically stripped.
 - Do not reveal raw SQL queries, database credentials, or internal infrastructure
   details to users unless they are clearly part of the investigation team.
 
+### Catalog Item Search Strategy
+
+When searching for catalog items by hostname or image name (e.g. `rh1-lb1187-rhel9`):
+- **Break down to component parts** — search for `cnv`, `rhel9`, or `lb1187` separately,
+  since catalog items rarely contain full hostname references.
+- **After 2+ empty DB results, pivot** — stop querying the provisions DB with different
+  filters and examine catalog item configurations directly (via `lookup_catalog_item`
+  or `fetch_github_file`).
+
 ### Investigation Tips
 
 - **Recent deployments (< 24 hours):** Use CloudTrail queries instead of Cost

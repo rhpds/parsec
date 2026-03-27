@@ -99,6 +99,9 @@ to find the job directly.
 - Failed events include the error message in `error_msg`
 - The `controller` parameter accepts both short names and full hostnames from `towerHost`
 - **Always use `get_job_log` over `get_job`** — it returns metadata plus the trimmed log
+- **Job ID typos are common.** If a job ID is not found on the expected controller,
+  ask the user to double-check the number before sweeping all controllers. If you do
+  sweep, check all remaining controllers in a single batch — don't try them one at a time.
 
 ### Investigate AAP2 Job Failures
 
@@ -426,6 +429,8 @@ Format: `https://github.com/{owner}/{repo}/blob/{ref}/{path}`
 | Timeout | Increase timeout in deployer settings or reduce scope |
 | Vault errors | Verify vault credentials are available |
 | Package install | Check repo configuration, satellite access |
+| PVC not found (CNV) | Check `infra-openshift-cnv-resources` role's `create_instance.yaml` for PVC validation logic |
+| Certificate (LetsEncrypt/ZeroSSL) | Check AgnosticD config variables (`certbot_provider`, `acme_*`) — don't rely on job logs alone |
 
 ### Tracing Failures to Source Code
 

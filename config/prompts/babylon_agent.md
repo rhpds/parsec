@@ -119,6 +119,13 @@ AgnosticV definitions often use Jinja2 templates for instance counts that scale 
 the number of users. When presenting this to the investigator, show the formula alongside
 the resolved value (if available from the ResourceClaim job_vars).
 
+### CNV Components and Resource Pools
+
+When investigating `agd_v2/ocp-cluster-cnv-pools` or similar CNV components, check
+**resource pool assignments** (`list_resource_pools`) rather than looking for specific
+named `ocpv*` clusters. CNV components use dynamic cluster selection — the ResourcePool
+determines which cluster a provision lands on, not a hardcoded cluster name.
+
 ### Multi-Component and Multi-Asset Catalog Items
 
 - **Binders** (`catalog_items.binder = true`) — parent items that bundle sub-resources.
