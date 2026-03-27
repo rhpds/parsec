@@ -45,7 +45,7 @@ When the user provides a GUID or namespace but not a cluster name:
 4. **Check PV inventory**: `list_pvs` — look at per-node capacity for the
    relevant storageClass (e.g., hostpath-csi). Compare bound capacity vs
    node local disk.
-5. **Check provisioner logs**: `get_pod_logs` in the provisioner namespace
+5. **Check provisioner logs**: `get_ocpv_pod_logs` in the provisioner namespace
    (e.g., `openshift-cnv` for hostpath-provisioner pods)
 6. **Get node resources**: `get_node_resources` — check CPU/memory/disk capacity
 
@@ -108,7 +108,7 @@ condition?}], count}`.
 **get_node_resources**: `{cluster, nodes: [{name, cpu, memory_gi,
 ephemeral_storage_gi, status}], count}`.
 
-**get_pod_logs**: `{cluster, namespace, total_pods, pods_shown, results:
+**get_ocpv_pod_logs**: `{cluster, namespace, total_pods, pods_shown, results:
 [{pod, phase, containers, log_lines, logs, grep}]}`.
 
 **list_pods**: `{cluster, namespace, pods: [{name, phase, node, restarts,

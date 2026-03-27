@@ -7,7 +7,9 @@ from typing import Any
 
 from src.connections.babylon import (
     get_configured_clusters,
+    k8s_get,
     k8s_get_resource,
+    k8s_get_text,
     k8s_list,
     k8s_list_cluster_wide,
     resolve_cluster_from_comment,
@@ -600,12 +602,16 @@ async def query_babylon_catalog(
             return await _list_anarchy_actions(target_cluster, namespace, search, guid, max_results)
         elif action == "list_multiworkshops":
             return await _list_multiworkshops(target_cluster, namespace, search, max_results)
+        elif action == "get_babylon_pod_logs":
+            return await _get_babylon_pod_logs(
+                target_cluster, namespace, name, search, guid, max_results
+            )
         else:
             return {
                 "error": f"Unknown action: {action}. Use: search_catalog, "
                 "get_component, list_deployments, get_deployment, "
                 "list_anarchy_subjects, list_resource_pools, list_workshops, "
-                "list_multiworkshops, list_anarchy_actions"
+                "list_multiworkshops, list_anarchy_actions, get_babylon_pod_logs"
             }
     except Exception as e:
         logger.exception("Babylon query failed: action=%s cluster=%s", action, target_cluster)
@@ -1150,4 +1156,114 @@ async def _list_multiworkshops(
         "multiworkshops": multiworkshops,
         "count": len(multiworkshops),
         "truncated": len(multiworkshops) >= max_results,
+    }
+
+
+async def _get_babylon_pod_logs(
+    cluster: str,
+    namespace: str,
+    name: str,
+    search: str,
+    guid: str,
+    max_results: int,
+) -> dict:
+    """Get pod logs from a Babylon cluster.
+
+    Lists pods in a namespace, optionally filtered by name/label/guid,
+    then fetches logs from matching pods. Returns structured results
+    with pod metadata and log lines.
+
+    Args:
+        cluster: Babylon cluster name.
+        namespace: Kubernetes namespace (required, e.g. "poolboy").
+        name: Pod name substring filter (optional).
+        search: Text to grep for in logs (optional).
+        guid: GUID to grep for in logs (optional).
+        max_results: Max log lines per pod.
+    """
+    if not namespace:
+        return {"error": "namespace is required for get_babylon_pod_logs"}
+
+    # List pods in the namespace
+    try:
+        pod_list = await k8s_get(cluster, f"/api/v1/namespaces/{namespace}/pods?limit=100")
+    except Exception as e:
+        error_msg = str(e)
+        if "Forbidden" in error_msg or "403" in error_msg:
+            return {
+                "error": f"No permission to list pods in {namespace} on {cluster}. "
+                "The rhdp-readonly SA needs pods/log access (pending RBAC update).",
+                "cluster": cluster,
+                "namespace": namespace,
+            }
+        return {"error": f"Failed to list pods in {namespace}: {e}", "cluster": cluster}
+
+    pods = pod_list.get("items", [])
+    if not pods:
+        return {
+            "cluster": cluster,
+            "namespace": namespace,
+            "pods": [],
+            "message": f"No pods found in {namespace}",
+        }
+
+    # Filter pods by name if specified
+    if name:
+        name_lower = name.lower()
+        pods = [p for p in pods if name_lower in p["metadata"]["name"].lower()]
+
+    # Cap pods to avoid fetching too many logs
+    max_pods = 5
+    pod_results = []
+
+    for pod in pods[:max_pods]:
+        pod_name = pod["metadata"]["name"]
+        pod_phase = pod.get("status", {}).get("phase", "Unknown")
+        containers = [c["name"] for c in pod.get("spec", {}).get("containers", [])]
+
+        # Fetch logs (tail limited)
+        tail_lines = min(max_results, 500)
+        params: dict[str, str | int] = {"tailLines": tail_lines}
+
+        log_text = ""
+        try:
+            log_text = await k8s_get_text(
+                cluster,
+                f"/api/v1/namespaces/{namespace}/pods/{pod_name}/log",
+                params=params,
+            )
+        except Exception as e:
+            log_text = f"[Error fetching logs: {e}]"
+
+        # Filter log lines by search term or GUID if specified
+        lines = log_text.splitlines()
+        grep_term = search or guid or ""
+        if grep_term:
+            grep_lower = grep_term.lower()
+            lines = [ln for ln in lines if grep_lower in ln.lower()]
+
+        # Strip secrets from log lines
+        filtered_lines = []
+        for ln in lines[:max_results]:
+            if _SECRET_PATTERNS.search(ln):
+                continue
+            filtered_lines.append(ln)
+
+        pod_results.append(
+            {
+                "pod": pod_name,
+                "phase": pod_phase,
+                "containers": containers,
+                "log_lines": len(filtered_lines),
+                "logs": "\n".join(filtered_lines) if filtered_lines else "(no matching lines)",
+                "grep": grep_term or "(none)",
+            }
+        )
+
+    return {
+        "cluster": cluster,
+        "namespace": namespace,
+        "total_pods": len(pods),
+        "pods_shown": len(pod_results),
+        "results": pod_results,
     }

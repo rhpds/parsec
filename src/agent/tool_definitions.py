@@ -541,7 +541,7 @@ TOOLS = [
                         "list_workshops",
                         "list_multiworkshops",
                         "list_anarchy_actions",
-                        "get_pod_logs",
+                        "get_babylon_pod_logs",
                     ],
                     "description": (
                         "Action to perform. "
@@ -562,9 +562,9 @@ TOOLS = [
                         "Requires namespace. Always check this alongside list_workshops. "
                         "list_anarchy_actions: List AnarchyActions (provision/start/stop/"
                         "destroy lifecycle events). Filter by guid or search. "
-                        "get_pod_logs: Get pod logs from a namespace (e.g. poolboy, "
-                        "babylon-anarchy-*). Requires namespace. Use name to filter pods, "
-                        "search or guid to grep log content."
+                        "get_babylon_pod_logs: Get pod logs from Babylon management clusters "
+                        "(e.g. poolboy, babylon-anarchy-*). Requires namespace. Use name to "
+                        "filter pods, search or guid to grep log content."
                     ),
                 },
                 "cluster": {
@@ -961,7 +961,7 @@ TOOLS = [
                         "list_storage_classes",
                         "list_vms",
                         "get_node_resources",
-                        "get_pod_logs",
+                        "get_ocpv_pod_logs",
                         "list_pods",
                         "nodes_top",
                         "pods_top",
@@ -975,7 +975,7 @@ TOOLS = [
                         "list_storage_classes: Available storage classes on the cluster. "
                         "list_vms: VirtualMachines and VMIs in a namespace with status and conditions. "
                         "get_node_resources: Node CPU, memory, and storage capacity. "
-                        "get_pod_logs: Pod logs with optional name filter and grep. "
+                        "get_ocpv_pod_logs: Pod logs from OCPV clusters with optional name filter and grep. "
                         "list_pods: Pods in a namespace with status and restart count. "
                         "nodes_top: Current CPU and memory utilization per node (from metrics API). "
                         "pods_top: Current CPU and memory usage per pod in a namespace. "
@@ -993,7 +993,7 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "Kubernetes namespace. Required for: list_pvcs, list_vms, "
-                        "get_pod_logs, list_pods, pods_top. Format: sandbox-{guid}-{catalog-item}."
+                        "get_ocpv_pod_logs, list_pods, pods_top. Format: sandbox-{guid}-{catalog-item}."
                     ),
                 },
                 "name": {

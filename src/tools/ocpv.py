@@ -47,7 +47,7 @@ async def query_ocpv_cluster(
     Args:
         action: Action to perform (find_namespace, list_pvcs, list_pvs,
                 list_storage_classes, list_vms, get_node_resources,
-                get_pod_logs, list_pods).
+                get_ocpv_pod_logs, list_pods).
         cluster: OCPV cluster short name (e.g., 'ocpv08'). If omitted,
                  resolved from sandbox_comment or searched.
         namespace: Kubernetes namespace (required for namespace-scoped actions).
@@ -92,8 +92,8 @@ async def query_ocpv_cluster(
             return await _list_vms(target_cluster, namespace, name, max_results)
         elif action == "get_node_resources":
             return await _get_node_resources(target_cluster, name)
-        elif action == "get_pod_logs":
-            return await _get_pod_logs(target_cluster, namespace, name, search, max_results)
+        elif action == "get_ocpv_pod_logs":
+            return await _get_ocpv_pod_logs(target_cluster, namespace, name, search, max_results)
         elif action == "list_pods":
             return await _list_pods(target_cluster, namespace, name, max_results)
         elif action == "nodes_top":
@@ -106,7 +106,7 @@ async def query_ocpv_cluster(
             return {
                 "error": f"Unknown action: {action}. Use: find_namespace, "
                 "list_pvcs, list_pvs, list_storage_classes, list_vms, "
-                "get_node_resources, get_pod_logs, list_pods, nodes_top, "
+                "get_node_resources, get_ocpv_pod_logs, list_pods, nodes_top, "
                 "pods_top, list_machines"
             }
     except Exception as e:
@@ -412,7 +412,7 @@ async def _get_node_resources(cluster: str, name: str) -> dict[str, Any]:
     }
 
 
-async def _get_pod_logs(
+async def _get_ocpv_pod_logs(
     cluster: str,
     namespace: str,
     name: str,
@@ -421,7 +421,7 @@ async def _get_pod_logs(
 ) -> dict[str, Any]:
     """Get pod logs from a namespace with optional grep filtering."""
     if not namespace:
-        return {"error": "namespace is required for get_pod_logs"}
+        return {"error": "namespace is required for get_ocpv_pod_logs"}
 
     # List pods
     try:

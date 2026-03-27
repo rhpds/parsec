@@ -250,6 +250,14 @@ async def k8s_get(cluster_name: str, path: str) -> dict:
     return resp.json()
 
 
+async def k8s_get_text(cluster_name: str, path: str, params: dict | None = None) -> str:
+    """Make a GET request to the Kubernetes API and return raw text (for pod logs)."""
+    client = await _get_client(cluster_name)
+    resp = await client.get(path, params=params or {})
+    resp.raise_for_status()
+    return resp.text
+
+
 async def k8s_list(
     cluster_name: str,
     group: str,
