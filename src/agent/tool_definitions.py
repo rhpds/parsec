@@ -541,6 +541,7 @@ TOOLS = [
                         "list_workshops",
                         "list_multiworkshops",
                         "list_anarchy_actions",
+                        "get_pod_logs",
                     ],
                     "description": (
                         "Action to perform. "
@@ -560,7 +561,10 @@ TOOLS = [
                         "events with multiple workshop assets, seat counts, dates). "
                         "Requires namespace. Always check this alongside list_workshops. "
                         "list_anarchy_actions: List AnarchyActions (provision/start/stop/"
-                        "destroy lifecycle events). Filter by guid or search."
+                        "destroy lifecycle events). Filter by guid or search. "
+                        "get_pod_logs: Get pod logs from a namespace (e.g. poolboy, "
+                        "babylon-anarchy-*). Requires namespace. Use name to filter pods, "
+                        "search or guid to grep log content."
                     ),
                 },
                 "cluster": {
@@ -908,6 +912,77 @@ TOOLS = [
         },
     },
     {
+        "name": "query_ocpv_cluster",
+        "description": (
+            "Query an OCPV (OpenShift Virtualization) cluster for infrastructure "
+            "state. Used to inspect PVCs, PVs, VMs, pods, nodes, and storage "
+            "classes on the CNV clusters where lab VMs run."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "find_namespace",
+                        "list_pvcs",
+                        "list_pvs",
+                        "list_storage_classes",
+                        "list_vms",
+                        "get_node_resources",
+                        "get_pod_logs",
+                        "list_pods",
+                    ],
+                    "description": (
+                        "Action to perform. "
+                        "find_namespace: Search OCPV clusters for a namespace (auto-discovers cluster). "
+                        "list_pvcs: PVCs in a namespace with status, storageClass, volumeMode. "
+                        "list_pvs: Cluster-wide PV summary grouped by node and storageClass. "
+                        "list_storage_classes: Available storage classes on the cluster. "
+                        "list_vms: VirtualMachines and VMIs in a namespace with status and conditions. "
+                        "get_node_resources: Node CPU, memory, and storage capacity. "
+                        "get_pod_logs: Pod logs with optional name filter and grep. "
+                        "list_pods: Pods in a namespace with status and restart count."
+                    ),
+                },
+                "cluster": {
+                    "type": "string",
+                    "description": (
+                        "OCPV cluster short name (e.g., 'ocpv08'). If omitted, "
+                        "resolved from sandbox_comment or by searching all clusters."
+                    ),
+                },
+                "namespace": {
+                    "type": "string",
+                    "description": (
+                        "Kubernetes namespace. Required for: list_pvcs, list_vms, "
+                        "get_pod_logs, list_pods. Format: sandbox-{guid}-{catalog-item}."
+                    ),
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Filter results by name substring.",
+                },
+                "search": {
+                    "type": "string",
+                    "description": "Grep filter for pod log content.",
+                },
+                "sandbox_comment": {
+                    "type": "string",
+                    "description": (
+                        "Sandbox DynamoDB comment field for auto-resolving the OCPV cluster. "
+                        "Pass the raw comment from query_aws_account_db."
+                    ),
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum results to return (default 50).",
+                },
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "query_aap2",
         "description": (
             "Query an AAP2 (Ansible Automation Platform) controller for job details, "
@@ -1097,6 +1172,15 @@ SECURITY_TOOLS = _tools_by_name(
     "generate_report",
 )
 
+OCPV_TOOLS = _tools_by_name(
+    "query_ocpv_cluster",
+    "query_babylon_catalog",
+    "query_provisions_db",
+    "query_aws_account_db",
+    "render_chart",
+    "generate_report",
+)
+
 ORCHESTRATOR_DIRECT_TOOLS = _tools_by_name(
     "query_provisions_db",
     "query_aws_account_db",
@@ -1243,11 +1327,45 @@ INVESTIGATE_SECURITY_TOOL = {
     },
 }
 
+INVESTIGATE_OCPV_TOOL = {
+    "name": "investigate_ocpv",
+    "description": (
+        "Delegate an OCPV infrastructure investigation to the OCPV agent. "
+        "This agent can inspect OpenShift Virtualization clusters: PVCs, PVs, "
+        "VMs, pods, nodes, and storage classes. Use this when investigating "
+        "CNV provision failures, storage issues (PVC pending, volume binding "
+        "errors), VM scheduling problems, or node resource constraints on "
+        "the OCPV clusters where lab VMs run."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": (
+                    "A clear description of the OCPV infrastructure investigation. "
+                    "Include namespace names, GUIDs, or sandbox names. The agent "
+                    "will resolve the cluster and inspect the infrastructure."
+                ),
+            },
+            "context": {
+                "type": "object",
+                "description": (
+                    "Optional context such as sandbox comment field for cluster "
+                    "resolution, namespace, or Babylon data."
+                ),
+            },
+        },
+        "required": ["task"],
+    },
+}
+
 DELEGATION_TOOLS = [
     INVESTIGATE_COSTS_TOOL,
     INVESTIGATE_AAP2_TOOL,
     INVESTIGATE_BABYLON_TOOL,
     INVESTIGATE_SECURITY_TOOL,
+    INVESTIGATE_OCPV_TOOL,
 ]
 
 ORCHESTRATOR_TOOLS = ORCHESTRATOR_DIRECT_TOOLS + DELEGATION_TOOLS

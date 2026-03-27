@@ -30,7 +30,13 @@ from src.agent.streaming import (
     sse_tool_start,
 )
 from src.agent.system_prompt import get_agent_prompt
-from src.agent.tool_definitions import AAP2_TOOLS, BABYLON_TOOLS, COST_TOOLS, SECURITY_TOOLS
+from src.agent.tool_definitions import (
+    AAP2_TOOLS,
+    BABYLON_TOOLS,
+    COST_TOOLS,
+    OCPV_TOOLS,
+    SECURITY_TOOLS,
+)
 from src.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -110,6 +116,21 @@ AGENTS: dict[str, AgentConfig] = {
             "query_aws_account": "Querying AWS account",
         },
     ),
+    "ocpv": AgentConfig(
+        name="OCPV Infrastructure",
+        agent_type="ocpv",
+        tools=OCPV_TOOLS,
+        prompt_file="config/prompts/ocpv_agent.md",
+        max_rounds=8,
+        description=(
+            "Inspects OCPV clusters: PVCs, PVs, VMs, pods, "
+            "nodes, and storage classes for CNV infrastructure issues."
+        ),
+        slow_tool_labels={
+            "query_ocpv_cluster": "Querying OCPV cluster",
+            "query_babylon_catalog": "Querying Babylon cluster",
+        },
+    ),
 }
 
 
@@ -165,6 +186,18 @@ _SECURITY_PATTERNS = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+_OCPV_PATTERNS = re.compile(
+    r"""
+    \bocpv\b | \bcnv\b.*(?:storage|pvc|volume|node|vm)
+    | \bpvc\b.*(?:pending|stuck|fail|bound)
+    | \bhostpath\b | volume.?binding
+    | \bvirtualmachine\b | \bvmi\b
+    | storage\s+class | node\s+resource
+    | cnv\s+cluster | ocpv\d+
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
 
 def classify_fast(question: str) -> str | None:
     """Regex fast-path: returns agent type or None for orchestrator.
@@ -185,6 +218,8 @@ def classify_fast(question: str) -> str | None:
         return "cost"
     if _SECURITY_PATTERNS.search(question) and not _COST_PATTERNS.search(question):
         return "security"
+    if _OCPV_PATTERNS.search(question):
+        return "ocpv"
     return None
 
 
