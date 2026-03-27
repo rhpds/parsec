@@ -39,7 +39,12 @@ from src.tools.babylon import query_babylon_catalog
 from src.tools.cloudtrail import query_cloudtrail
 from src.tools.cost_monitor import query_cost_monitor
 from src.tools.gcp_costs import query_gcp_costs
-from src.tools.github_files import fetch_github_file, lookup_catalog_item, search_github_repo
+from src.tools.github_files import (
+    fetch_github_file,
+    lookup_catalog_item,
+    search_agnosticv_prs,
+    search_github_repo,
+)
 from src.tools.marketplace_agreements import query_marketplace_agreements
 from src.tools.ocpv import query_ocpv_cluster
 from src.tools.provision_db import execute_query
@@ -210,6 +215,13 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:  # noqa: C901
             repo=tool_input["repo"],
             search=tool_input["search"],
             ref=tool_input.get("ref", ""),
+        )
+
+    elif tool_name == "search_agnosticv_prs":
+        return await search_agnosticv_prs(
+            search=tool_input["search"],
+            state=tool_input.get("state", "open"),
+            max_results=tool_input.get("max_results", 10),
         )
 
     elif tool_name == "query_splunk":

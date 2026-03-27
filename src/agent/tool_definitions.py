@@ -750,6 +750,37 @@ TOOLS = [
         },
     },
     {
+        "name": "search_agnosticv_prs",
+        "description": (
+            "Search open PRs across all agnosticv repos for a catalog item or keyword. "
+            "Use this when lookup_catalog_item returns 'not found' but the catalog item "
+            "is referenced in a running job — it may exist only on an unmerged PR branch. "
+            "Searches PR titles and changed file paths."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "search": {
+                    "type": "string",
+                    "description": (
+                        "Keyword to search for in PR titles and changed file paths. "
+                        "Use the catalog item name (e.g. 'lb1912-infoscale')."
+                    ),
+                },
+                "state": {
+                    "type": "string",
+                    "enum": ["open", "closed", "all"],
+                    "description": "PR state filter. Default: 'open'.",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Max PRs to return (default 10).",
+                },
+            },
+            "required": ["search"],
+        },
+    },
+    {
         "name": "render_chart",
         "description": (
             "Render a chart in the chat UI. Use this to visualize cost data, "
@@ -1147,6 +1178,7 @@ AAP2_TOOLS = _tools_by_name(
     "fetch_github_file",
     "lookup_catalog_item",
     "search_github_repo",
+    "search_agnosticv_prs",
     "query_babylon_catalog",
     "query_provisions_db",
     "query_aws_account_db",
@@ -1160,6 +1192,7 @@ BABYLON_TOOLS = _tools_by_name(
     "query_aap2",
     "fetch_github_file",
     "search_github_repo",
+    "search_agnosticv_prs",
     "lookup_catalog_item",
     "query_provisions_db",
     "query_aws_account_db",

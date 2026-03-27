@@ -63,10 +63,11 @@ that complement the AAP2 API data:
 
 When looking for a catalog item in agnosticv:
 1. **ALWAYS start with `lookup_catalog_item`** — it searches ALL agnosticv repos instantly.
-2. If it returns `found: false` with no similar items, the item **does not exist**. Do NOT
-   fall back to other methods.
-3. If it returns `found: true`, use `fetch_github_file` with the exact path from the result.
-4. If it returns similar items, present them and ask which one was meant.
+2. If it returns `found: true`, use `fetch_github_file` with the exact path from the result.
+3. If it returns similar items, present them and ask which one was meant.
+4. If it returns `found: false` **but the item is referenced in a running/failed job**,
+   use `search_agnosticv_prs` to check open PRs — the catalog item may exist only on
+   an unmerged PR branch. If found, use `fetch_github_file` with the PR's branch as `ref`.
 
 ## AAP2 Job Investigation
 

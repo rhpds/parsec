@@ -306,3 +306,132 @@ async def search_github_repo(
     except Exception as exc:
         logger.exception("GitHub tree search failed")
         return {"error": f"GitHub tree search failed: {exc}"}
+
+
+async def search_agnosticv_prs(
+    search: str,
+    state: str = "open",
+    max_results: int = 10,
+) -> dict:
+    """Search open PRs across agnosticv repos for a catalog item or keyword.
+
+    Useful when lookup_catalog_item returns not found — the item may exist
+    only on an unmerged PR branch.
+
+    Args:
+        search: Keyword to search for in PR titles and changed file paths.
+        state: PR state filter — "open" (default), "closed", or "all".
+        max_results: Max PRs to return per repo (default 10).
+    """
+    token = get_token()
+    if not token:
+        return {"error": "GitHub token not configured — cannot search PRs"}
+
+    search_lower = search.lower()
+    all_matches: list[dict] = []
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for owner, repo in _AGNOSTICV_REPOS:
+            try:
+                # Search PRs by title
+                resp = await client.get(
+                    f"https://api.github.com/repos/{owner}/{repo}/pulls",
+                    params={"state": state, "per_page": 50, "sort": "updated", "direction": "desc"},
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/vnd.github+json",
+                    },
+                )
+                if resp.status_code == 403:
+                    return {
+                        "error": "GitHub token lacks 'Pull requests: Read' permission. "
+                        "Update the fine-grained PAT to include this scope.",
+                        "search": search,
+                    }
+                if resp.status_code != 200:
+                    logger.warning(
+                        "GitHub PR list failed for %s/%s: %d", owner, repo, resp.status_code
+                    )
+                    continue
+
+                prs = resp.json()
+
+                for pr in prs:
+                    title = pr.get("title", "")
+                    pr_number = pr.get("number", 0)
+                    branch = pr.get("head", {}).get("ref", "")
+
+                    # Check title match
+                    title_match = search_lower in title.lower()
+
+                    # Check changed files for path match
+                    file_match = False
+                    matched_files: list[str] = []
+                    if not title_match:
+                        # Only fetch files if title didn't match (save API calls)
+                        try:
+                            files_resp = await client.get(
+                                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files",
+                                params={"per_page": 100},
+                                headers={
+                                    "Authorization": f"Bearer {token}",
+                                    "Accept": "application/vnd.github+json",
+                                },
+                            )
+                            if files_resp.status_code == 200:
+                                pr_files = files_resp.json()
+                                for f in pr_files:
+                                    if search_lower in f.get("filename", "").lower():
+                                        file_match = True
+                                        matched_files.append(f["filename"])
+                        except Exception:
+                            pass
+                    else:
+                        # Title matched — still get files for context
+                        try:
+                            files_resp = await client.get(
+                                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files",
+                                params={"per_page": 100},
+                                headers={
+                                    "Authorization": f"Bearer {token}",
+                                    "Accept": "application/vnd.github+json",
+                                },
+                            )
+                            if files_resp.status_code == 200:
+                                pr_files = files_resp.json()
+                                matched_files = [f["filename"] for f in pr_files]
+                        except Exception:
+                            pass
+
+                    if title_match or file_match:
+                        all_matches.append(
+                            {
+                                "owner": owner,
+                                "repo": repo,
+                                "pr_number": pr_number,
+                                "title": title,
+                                "branch": branch,
+                                "state": pr.get("state", ""),
+                                "author": pr.get("user", {}).get("login", ""),
+                                "url": pr.get("html_url", ""),
+                                "created_at": pr.get("created_at", ""),
+                                "updated_at": pr.get("updated_at", ""),
+                                "files": matched_files[:20],
+                            }
+                        )
+
+                        if len(all_matches) >= max_results:
+                            break
+
+            except Exception as exc:
+                logger.warning("PR search failed for %s/%s: %s", owner, repo, exc)
+
+            if len(all_matches) >= max_results:
+                break
+
+    return {
+        "results": all_matches,
+        "count": len(all_matches),
+        "search": search,
+        "repos_searched": [f"{o}/{r}" for o, r in _AGNOSTICV_REPOS],
+    }
