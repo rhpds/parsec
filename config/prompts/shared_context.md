@@ -121,6 +121,18 @@ WHERE u.email NOT LIKE '%@redhat.com'
   AND u.email NOT LIKE '%@demo.redhat.com'
 ```
 
+**Find a user by name** (use `full_name`, not a non-existent `name` column):
+```sql
+SELECT id, email, full_name FROM users
+WHERE full_name ILIKE '%Jane Smith%'
+```
+Then join with provisions using the integer `id`, not the email:
+```sql
+SELECT p.uuid, p.last_state, p.provisioned_at
+FROM provisions p
+WHERE p.user_id = 42  -- integer FK from users.id
+```
+
 **Recent provisions — use provisioned_at, NOT created_at for timing.**
 Use today's date (provided at the end of the system prompt) for relative ranges:
 ```sql
