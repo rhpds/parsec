@@ -227,6 +227,10 @@ spec:
               value: "/app/babylon/integration.kubeconfig"
             - name: PARSEC_BABYLON__CLUSTERS__BABYDEV__KUBECONFIG
               value: "/app/babylon/babydev.kubeconfig"
+{% for name in ocpv_kubeconfigs.keys() %}
+            - name: PARSEC_OCPV__CLUSTERS__{{ name | upper }}__KUBECONFIG
+              value: "/app/ocpv/{{ name }}.kubeconfig"
+{% endfor %}
           envFrom:
             - secretRef:
                 name: parsec-cloud-credentials
@@ -249,6 +253,9 @@ spec:
               mountPath: /app/data
             - name: babylon-kubeconfigs
               mountPath: /app/babylon
+              readOnly: true
+            - name: ocpv-kubeconfigs
+              mountPath: /app/ocpv
               readOnly: true
           resources:
             requests:
@@ -304,6 +311,11 @@ spec:
         - name: babylon-kubeconfigs
           secret:
             secretName: babylon-kubeconfigs
+            defaultMode: 0400
+            optional: true
+        - name: ocpv-kubeconfigs
+          secret:
+            secretName: ocpv-kubeconfigs
             defaultMode: 0400
             optional: true
 ---

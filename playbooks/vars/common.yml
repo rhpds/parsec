@@ -22,7 +22,7 @@ provision_db_port: "54327"
 aws_region: "us-east-1"
 
 # OAuth
-oauth_allowed_groups: "rhpds-admins,parsec-local-users"
+oauth_allowed_groups: "rhpds-admins,parsec-local-users,ace-octo-team"
 
 # Babylon clusters (rhdp-readonly SA kubeconfigs)
 babylon_kubeconfigs:
@@ -32,3 +32,12 @@ babylon_kubeconfigs:
   partner1: "{{ lookup('env', 'HOME') }}/secrets/babylon-readonly/partner1.kubeconfig"
   integration: "{{ lookup('env', 'HOME') }}/secrets/babylon-readonly/integration.kubeconfig"
   babydev: "{{ lookup('env', 'HOME') }}/secrets/babylon-readonly/babydev.kubeconfig"
+
+# OCPV clusters (labagator-reader SA kubeconfigs)
+ocpv_kubeconfigs:
+  ocpv05: "{{ lookup('env', 'HOME') }}/secrets/ocpv-readonly/ocpv05.kubeconfig"
+  ocpv06: "{{ lookup('env', 'HOME') }}/secrets/ocpv-readonly/ocpv06.kubeconfig"
+  ocpv07: "{{ lookup('env', 'HOME') }}/secrets/ocpv-readonly/ocpv07.kubeconfig"
+  ocpv08: "{{ lookup('env', 'HOME') }}/secrets/ocpv-readonly/ocpv08.kubeconfig"
+  ocpv09: "{{ lookup('env', 'HOME') }}/secrets/ocpv-readonly/ocpv09.kubeconfig"
+  ocpv10: "{{ lookup('env', 'HOME') }}/secrets/ocpv-readonly/ocpv10.kubeconfig"
