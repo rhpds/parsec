@@ -329,6 +329,52 @@ async def _list_vms(cluster: str, namespace: str, name: str, max_results: int) -
         interfaces = vmi_status.get("interfaces", [])
         ip = interfaces[0].get("ipAddress", "") if interfaces else ""
 
+        # Extract spec details
+        tmpl_spec = vm.get("spec", {}).get("template", {}).get("spec", {})
+        domain = tmpl_spec.get("domain", {})
+
+        # CPU
+        cpu_spec = domain.get("cpu", {})
+        cores = cpu_spec.get("cores", 1)
+        sockets = cpu_spec.get("sockets", 1)
+        threads = cpu_spec.get("threads", 1)
+        total_vcpus = cores * sockets * threads
+
+        # Memory
+        mem_spec = domain.get("memory", {})
+        guest_mem = mem_spec.get("guest", "")
+
+        # Disks and volumes
+        disks = domain.get("devices", {}).get("disks", [])
+        volumes = tmpl_spec.get("volumes", [])
+        disk_list = []
+        for d in disks:
+            disk_info = d.get("disk", d.get("cdrom", {}))
+            disk_list.append(
+                {
+                    "name": d.get("name", ""),
+                    "bus": disk_info.get("bus", ""),
+                }
+            )
+
+        volume_list = []
+        for v in volumes:
+            vol_entry: dict[str, str] = {"name": v.get("name", "")}
+            if "dataVolume" in v:
+                vol_entry["type"] = "dataVolume"
+                vol_entry["source"] = v["dataVolume"].get("name", "")
+            elif "persistentVolumeClaim" in v:
+                vol_entry["type"] = "pvc"
+                vol_entry["source"] = v["persistentVolumeClaim"].get("claimName", "")
+            elif "cloudInitNoCloud" in v:
+                vol_entry["type"] = "cloudInit"
+            elif "containerDisk" in v:
+                vol_entry["type"] = "containerDisk"
+                vol_entry["source"] = v["containerDisk"].get("image", "")
+            else:
+                vol_entry["type"] = "other"
+            volume_list.append(vol_entry)
+
         vm_info: dict[str, Any] = {
             "name": vm_name,
             "status": print_status,
@@ -336,6 +382,10 @@ async def _list_vms(cluster: str, namespace: str, name: str, max_results: int) -
             "phase": phase,
             "node": node or None,
             "ip": ip or None,
+            "vcpus": total_vcpus,
+            "memory": guest_mem,
+            "disks": disk_list,
+            "volumes": volume_list,
         }
 
         # Add scheduling conditions for non-running VMs

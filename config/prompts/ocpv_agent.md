@@ -103,6 +103,7 @@ available, released}], total_pvs, total_bound_gi}`.
 reclaim_policy, binding_mode, allow_volume_expansion, default}], count}`.
 
 **list_vms**: `{cluster, namespace, vms: [{name, status, ready, phase, node, ip,
+vcpus, memory, disks: [{name, bus}], volumes: [{name, type, source?}],
 condition?}], count}`.
 
 **get_node_resources**: `{cluster, nodes: [{name, cpu, memory_gi,
