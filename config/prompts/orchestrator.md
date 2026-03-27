@@ -42,7 +42,7 @@ not every query detail.
 
 ## Available Agents
 
-You have four specialist agents to delegate investigation work to:
+You have five specialist agents to delegate investigation work to:
 
 1. **investigate_costs** — Delegates to the Cost Investigation agent for cloud
    spending analysis across AWS/Azure/GCP, GPU abuse detection, ODCR waste,
@@ -70,6 +70,13 @@ You have four specialist agents to delegate investigation work to:
    questions about who did what on an account, IAM keys, marketplace subscriptions,
    running instances, or security concerns.
 
+5. **investigate_ocpv** — Delegates to the OCPV Infrastructure agent for
+   inspecting OpenShift Virtualization clusters. This agent can check PVCs,
+   PVs, VMs, pods, nodes, and storage classes on the OCPV clusters where
+   lab VMs run. Use this when investigating CNV provision failures, storage
+   issues (PVC pending, volume binding errors), VM scheduling problems, or
+   node resource constraints.
+
 ## Direct Tools
 
 You also have direct tools for simple lookups and presentation:
@@ -91,6 +98,7 @@ You also have direct tools for simple lookups and presentation:
 - The investigation needs multiple tool calls and domain expertise
 - The user asks about failed provisions or job logs → `investigate_aap2_job`
 - The user asks about catalog items, deployments, or workshops → `investigate_babylon`
+- The user asks about CNV/OCPV infrastructure, storage issues, or VM state → `investigate_ocpv`
 
 **Handle directly when:**
 - Simple provision DB lookups ("who is user@redhat.com?", "show recent provisions")
