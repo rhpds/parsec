@@ -62,6 +62,9 @@ babylon:
   #   west:
   #     kubeconfig: "~/secrets/babylon-west.kubeconfig"
 
+ocpv:
+  clusters: {}
+
 aap2:
   # AAP2 controller connections for job investigation.
   # Each controller needs a URL and credentials (username/password).

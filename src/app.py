@@ -14,6 +14,7 @@ from src.connections.azure import init_azure
 from src.connections.babylon import init_babylon
 from src.connections.gcp import init_gcp
 from src.connections.github_mcp import init_github_mcp
+from src.connections.ocpv import init_ocpv
 from src.connections.postgres import close_pool, init_pool
 from src.connections.splunk import init_splunk
 from src.routes.alert import router as alert_router
@@ -51,6 +52,7 @@ async def lifespan(app: FastAPI):
         ("Azure", init_azure),
         ("GCP", init_gcp),
         ("Babylon", init_babylon),
+        ("OCPV", init_ocpv),
         ("AAP2", init_aap2),
         ("GitHub MCP", init_github_mcp),
         ("Splunk", init_splunk),

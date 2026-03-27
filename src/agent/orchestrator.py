@@ -41,6 +41,7 @@ from src.tools.cost_monitor import query_cost_monitor
 from src.tools.gcp_costs import query_gcp_costs
 from src.tools.github_files import fetch_github_file, lookup_catalog_item, search_github_repo
 from src.tools.marketplace_agreements import query_marketplace_agreements
+from src.tools.ocpv import query_ocpv_cluster
 from src.tools.provision_db import execute_query
 from src.tools.splunk import query_splunk
 
@@ -53,7 +54,7 @@ REPORTS_DIR = os.path.join(
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
 
-async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
+async def _execute_tool(tool_name: str, tool_input: dict) -> dict:  # noqa: C901
     """Dispatch a tool call to the appropriate handler."""
     if tool_name == "query_provisions_db":
         return await execute_query(tool_input["sql"])
@@ -162,6 +163,17 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
             env_type=tool_input.get("env_type", ""),
             account_id=tool_input.get("account_id", ""),
             guid=tool_input.get("guid", ""),
+            max_results=tool_input.get("max_results", 50),
+        )
+
+    elif tool_name == "query_ocpv_cluster":
+        return await query_ocpv_cluster(
+            action=tool_input["action"],
+            cluster=tool_input.get("cluster", ""),
+            namespace=tool_input.get("namespace", ""),
+            name=tool_input.get("name", ""),
+            search=tool_input.get("search", ""),
+            sandbox_comment=tool_input.get("sandbox_comment", ""),
             max_results=tool_input.get("max_results", 50),
         )
 
@@ -492,6 +504,7 @@ _DELEGATION_TOOL_MAP = {
     "investigate_aap2_job": "aap2",
     "investigate_babylon": "babylon",
     "investigate_security": "security",
+    "investigate_ocpv": "ocpv",
 }
 
 
