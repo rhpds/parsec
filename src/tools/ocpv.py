@@ -56,6 +56,7 @@ async def query_ocpv_cluster(
         sandbox_comment: Sandbox DynamoDB comment field for cluster resolution.
         max_results: Max results to return (default 50).
     """
+    target_cluster = ""
     try:
         # Resolve cluster
         target_cluster = cluster.lower() if cluster else ""
