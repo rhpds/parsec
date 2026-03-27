@@ -96,11 +96,18 @@ async def query_ocpv_cluster(
             return await _get_pod_logs(target_cluster, namespace, name, search, max_results)
         elif action == "list_pods":
             return await _list_pods(target_cluster, namespace, name, max_results)
+        elif action == "nodes_top":
+            return await _nodes_top(target_cluster, name)
+        elif action == "pods_top":
+            return await _pods_top(target_cluster, namespace, name, max_results)
+        elif action == "list_machines":
+            return await _list_machines(target_cluster, name, max_results)
         else:
             return {
                 "error": f"Unknown action: {action}. Use: find_namespace, "
                 "list_pvcs, list_pvs, list_storage_classes, list_vms, "
-                "get_node_resources, get_pod_logs, list_pods"
+                "get_node_resources, get_pod_logs, list_pods, nodes_top, "
+                "pods_top, list_machines"
             }
     except Exception as e:
         logger.exception("OCPV query failed: action=%s cluster=%s", action, target_cluster)
@@ -532,4 +539,178 @@ async def _list_pods(cluster: str, namespace: str, name: str, max_results: int) 
         "namespace": namespace,
         "pods": pods,
         "count": len(pods),
+    }
+
+
+def _parse_cpu_nanocores(cpu_str: str) -> float:
+    """Parse K8s CPU string (e.g., '18556768841n', '2500m', '4') to cores."""
+    if cpu_str.endswith("n"):
+        return int(cpu_str[:-1]) / 1_000_000_000
+    if cpu_str.endswith("m"):
+        return int(cpu_str[:-1]) / 1000
+    return float(cpu_str)
+
+
+def _parse_memory_ki(mem_str: str) -> int:
+    """Parse K8s memory string (e.g., '88164824Ki') to GiB."""
+    if mem_str.endswith("Ki"):
+        return int(mem_str[:-2]) // (1024 * 1024)
+    if mem_str.endswith("Mi"):
+        return int(mem_str[:-2]) // 1024
+    if mem_str.endswith("Gi"):
+        return int(mem_str[:-2])
+    return 0
+
+
+async def _nodes_top(cluster: str, name: str) -> dict[str, Any]:
+    """Get current CPU and memory usage per node from metrics API."""
+    # Get metrics
+    metrics = await k8s_list_cluster(cluster, "metrics.k8s.io", "v1beta1", "nodes")
+    metrics_items = metrics.get("items", [])
+
+    # Get capacity for utilization %
+    capacity_result = await k8s_list_cluster(cluster, "", "v1", "nodes")
+    capacity_items = capacity_result.get("items", [])
+    capacity_by_name = {}
+    for node in capacity_items:
+        node_name = node["metadata"]["name"]
+        cap = node.get("status", {}).get("capacity", {})
+        cpu_cap = int(cap.get("cpu", "0"))
+        mem_ki = cap.get("memory", "0")
+        mem_gi = int(mem_ki.replace("Ki", "")) // (1024 * 1024) if "Ki" in str(mem_ki) else 0
+        capacity_by_name[node_name] = {"cpu": cpu_cap, "memory_gi": mem_gi}
+
+    if name:
+        name_lower = name.lower()
+        metrics_items = [i for i in metrics_items if name_lower in i["metadata"]["name"].lower()]
+
+    nodes = []
+    for item in metrics_items:
+        node_name = item["metadata"]["name"]
+        usage = item.get("usage", {})
+        cpu_used = round(_parse_cpu_nanocores(usage.get("cpu", "0")), 1)
+        mem_used_gi = _parse_memory_ki(usage.get("memory", "0"))
+
+        cap = capacity_by_name.get(node_name, {})
+        cpu_cap = cap.get("cpu", 0)
+        mem_cap = cap.get("memory_gi", 0)
+
+        cpu_pct = round(cpu_used / cpu_cap * 100, 1) if cpu_cap else 0
+        mem_pct = round(mem_used_gi / mem_cap * 100, 1) if mem_cap else 0
+
+        nodes.append(
+            {
+                "name": node_name,
+                "cpu_used": cpu_used,
+                "cpu_capacity": cpu_cap,
+                "cpu_pct": cpu_pct,
+                "memory_used_gi": mem_used_gi,
+                "memory_capacity_gi": mem_cap,
+                "memory_pct": mem_pct,
+            }
+        )
+
+    # Sort by CPU utilization descending
+    nodes.sort(key=lambda n: n["cpu_pct"], reverse=True)
+
+    return {
+        "cluster": cluster,
+        "nodes": nodes,
+        "count": len(nodes),
+    }
+
+
+async def _pods_top(cluster: str, namespace: str, name: str, max_results: int) -> dict[str, Any]:
+    """Get current CPU and memory usage per pod from metrics API."""
+    if not namespace:
+        return {"error": "namespace is required for pods_top"}
+
+    metrics = await k8s_list_cluster(cluster, "metrics.k8s.io", "v1beta1", "pods")
+    items = metrics.get("items", [])
+
+    # Filter by namespace
+    items = [i for i in items if i["metadata"]["namespace"] == namespace]
+
+    if name:
+        name_lower = name.lower()
+        items = [i for i in items if name_lower in i["metadata"]["name"].lower()]
+
+    pods = []
+    for item in items[:max_results]:
+        containers = item.get("containers", [])
+        total_cpu = 0.0
+        total_mem = 0
+        for c in containers:
+            usage = c.get("usage", {})
+            total_cpu += _parse_cpu_nanocores(usage.get("cpu", "0"))
+            total_mem += _parse_memory_ki(usage.get("memory", "0"))
+
+        pods.append(
+            {
+                "name": item["metadata"]["name"],
+                "cpu_cores": round(total_cpu, 2),
+                "memory_gi": total_mem,
+                "containers": len(containers),
+            }
+        )
+
+    # Sort by CPU descending
+    pods.sort(key=lambda p: p["cpu_cores"], reverse=True)
+
+    return {
+        "cluster": cluster,
+        "namespace": namespace,
+        "pods": pods,
+        "count": len(pods),
+    }
+
+
+async def _list_machines(cluster: str, name: str, max_results: int) -> dict[str, Any]:
+    """List Machines and MachineSets from machine.openshift.io API."""
+    # Get MachineSets
+    ms_result = await k8s_list_cluster(cluster, "machine.openshift.io", "v1beta1", "machinesets")
+    ms_items = ms_result.get("items", [])
+
+    # Get Machines
+    m_result = await k8s_list_cluster(cluster, "machine.openshift.io", "v1beta1", "machines")
+    m_items = m_result.get("items", [])
+
+    if name:
+        name_lower = name.lower()
+        ms_items = [i for i in ms_items if name_lower in i["metadata"]["name"].lower()]
+        m_items = [i for i in m_items if name_lower in i["metadata"]["name"].lower()]
+
+    machinesets = []
+    for ms in ms_items[:max_results]:
+        spec = ms.get("spec", {})
+        status = ms.get("status", {})
+        machinesets.append(
+            {
+                "name": ms["metadata"]["name"],
+                "namespace": ms["metadata"]["namespace"],
+                "replicas": spec.get("replicas", 0),
+                "ready_replicas": status.get("readyReplicas", 0),
+                "available_replicas": status.get("availableReplicas", 0),
+            }
+        )
+
+    machines = []
+    for m in m_items[:max_results]:
+        status = m.get("status", {})
+        machines.append(
+            {
+                "name": m["metadata"]["name"],
+                "namespace": m["metadata"]["namespace"],
+                "phase": status.get("phase", "Unknown"),
+                "node": status.get("nodeRef", {}).get("name", ""),
+                "provider_id": status.get("providerStatus", {}).get("instanceId", ""),
+            }
+        )
+
+    return {
+        "cluster": cluster,
+        "machinesets": machinesets,
+        "machineset_count": len(machinesets),
+        "machines": machines,
+        "machine_count": len(machines),
     }

@@ -932,6 +932,9 @@ TOOLS = [
                         "get_node_resources",
                         "get_pod_logs",
                         "list_pods",
+                        "nodes_top",
+                        "pods_top",
+                        "list_machines",
                     ],
                     "description": (
                         "Action to perform. "
@@ -942,7 +945,10 @@ TOOLS = [
                         "list_vms: VirtualMachines and VMIs in a namespace with status and conditions. "
                         "get_node_resources: Node CPU, memory, and storage capacity. "
                         "get_pod_logs: Pod logs with optional name filter and grep. "
-                        "list_pods: Pods in a namespace with status and restart count."
+                        "list_pods: Pods in a namespace with status and restart count. "
+                        "nodes_top: Current CPU and memory utilization per node (from metrics API). "
+                        "pods_top: Current CPU and memory usage per pod in a namespace. "
+                        "list_machines: MachineSets and Machines from machine.openshift.io API."
                     ),
                 },
                 "cluster": {
@@ -956,7 +962,7 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "Kubernetes namespace. Required for: list_pvcs, list_vms, "
-                        "get_pod_logs, list_pods. Format: sandbox-{guid}-{catalog-item}."
+                        "get_pod_logs, list_pods, pods_top. Format: sandbox-{guid}-{catalog-item}."
                     ),
                 },
                 "name": {

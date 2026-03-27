@@ -65,11 +65,22 @@ When the user provides a GUID or namespace but not a cluster name:
 3. **Check node resources**: `get_node_resources` — are nodes overcommitted?
 4. **Check pods**: `list_pods` — look for failing virt-launcher pods
 
+### Resource Utilization and Capacity
+
+1. **Node utilization**: `nodes_top` — current CPU/memory usage per node, sorted by utilization
+2. **Pod resource usage**: `pods_top` — CPU/memory per pod in a namespace
+3. **Node capacity**: `get_node_resources` — CPU/memory/disk capacity per node
+4. **Machine inventory**: `list_machines` — MachineSets and Machines
+
+Use `nodes_top` for "which nodes are overloaded?" and `get_node_resources` for
+"how much capacity does the cluster have?". For combined view, call both.
+
 ### General Infrastructure Health
 
 1. **Node resources**: `get_node_resources` — CPU/memory/disk per node
-2. **Storage classes**: `list_storage_classes` — what's available
-3. **PV inventory**: `list_pvs` — per-node storage usage
+2. **Node utilization**: `nodes_top` — current usage vs capacity
+3. **Storage classes**: `list_storage_classes` — what's available
+4. **PV inventory**: `list_pvs` — per-node storage usage
 
 ## Minimizing Data Volume
 
@@ -102,3 +113,14 @@ ephemeral_storage_gi, status}], count}`.
 
 **list_pods**: `{cluster, namespace, pods: [{name, phase, node, restarts,
 created}], count}`.
+
+**nodes_top**: `{cluster, nodes: [{name, cpu_used, cpu_capacity, cpu_pct,
+memory_used_gi, memory_capacity_gi, memory_pct}], count}`.
+Sorted by CPU utilization descending.
+
+**pods_top**: `{cluster, namespace, pods: [{name, cpu_cores, memory_gi,
+containers}], count}`. Sorted by CPU usage descending.
+
+**list_machines**: `{cluster, machinesets: [{name, namespace, replicas,
+ready_replicas, available_replicas}], machineset_count, machines: [{name,
+namespace, phase, node, provider_id}], machine_count}`.
