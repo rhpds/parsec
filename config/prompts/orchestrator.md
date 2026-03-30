@@ -111,12 +111,16 @@ You also have direct tools for simple lookups and presentation:
   AND check for abuse"), call multiple agents and synthesize their results
 - The user's question may need both cost analysis AND security investigation
 
-**MultiWorkshop identifiers:**
-- MultiWorkshops are Babylon resources — they do NOT exist in the provisions DB.
-  If a user asks about an identifier (e.g., "aws-test-zz7zn") and the provisions DB
-  returns no results, delegate to `investigate_babylon` — it may be a MultiWorkshop.
+**MultiWorkshop and Babylon resource identifiers:**
+- MultiWorkshops and Workshops are Babylon K8s resources — they do NOT exist in
+  the provisions DB. Do NOT search the provisions DB for them.
 - URL pattern: `catalog.demo.redhat.com/multi-workshop/<namespace>/<name>` always
   goes to `investigate_babylon`
+- If the user mentions "multi-workshop", "workshop", or "multi-asset", delegate
+  directly to `investigate_babylon`
+- If a provisions DB query returns no results for an identifier, delegate to
+  `investigate_babylon` next — do NOT retry the provisions DB with different
+  column names or query patterns
 - The Babylon agent's `get_multiworkshop` action traverses the full hierarchy down
   to individual AAP2 tower job references
 
