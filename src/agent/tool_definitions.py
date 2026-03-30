@@ -540,6 +540,7 @@ TOOLS = [
                         "list_resource_pools",
                         "list_workshops",
                         "list_multiworkshops",
+                        "get_multiworkshop",
                         "list_anarchy_actions",
                         "get_babylon_pod_logs",
                     ],
@@ -560,6 +561,11 @@ TOOLS = [
                         "list_multiworkshops: List MultiWorkshops in a namespace (multi-asset "
                         "events with multiple workshop assets, seat counts, dates). "
                         "Requires namespace. Always check this alongside list_workshops. "
+                        "get_multiworkshop: Deep traversal of a specific MultiWorkshop — "
+                        "fetches the MultiWorkshop, all child Workshops, their ResourceClaims, "
+                        "and ALL AnarchySubject components with tower job references. Returns "
+                        "full hierarchy showing which components failed and their AAP2 job IDs. "
+                        "Requires name and namespace. Omit cluster to auto-search all clusters. "
                         "list_anarchy_actions: List AnarchyActions (provision/start/stop/"
                         "destroy lifecycle events). Filter by guid or search. "
                         "get_babylon_pod_logs: Get pod logs from Babylon management clusters "
@@ -571,11 +577,11 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "Babylon cluster name to query. If empty, resolved from "
-                        "sandbox_comment. For list_anarchy_subjects and "
-                        "list_anarchy_actions with a guid, omit cluster to "
-                        "automatically search ALL configured clusters until the "
-                        "GUID is found. Use query_aws_account_db to get the "
-                        "comment field first when cluster is unknown."
+                        "sandbox_comment. For list_anarchy_subjects, "
+                        "list_anarchy_actions (with guid), and get_multiworkshop, "
+                        "omit cluster to automatically search ALL configured "
+                        "clusters until found. Use query_aws_account_db to get "
+                        "the comment field first when cluster is unknown."
                     ),
                 },
                 "name": {

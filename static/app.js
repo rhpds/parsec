@@ -442,7 +442,17 @@ form.addEventListener("submit", async (e) => {
 
     input.value = "";
     input.style.height = "auto";
-    sendBtn.disabled = true;
+
+    // Set up cancel button
+    var abortController = new AbortController();
+    sendBtn.textContent = "Cancel";
+    sendBtn.classList.add("cancelling");
+    sendBtn.type = "button";
+    function onCancel() {
+        abortController.abort();
+        sendBtn.removeEventListener("click", onCancel);
+    }
+    sendBtn.addEventListener("click", onCancel);
 
     // Collapse any active choice buttons from previous messages
     collapseActiveChoices("Skipped");
@@ -738,6 +748,7 @@ form.addEventListener("submit", async (e) => {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
+            signal: abortController.signal,
         });
 
         if (!response.ok) {
@@ -773,16 +784,40 @@ form.addEventListener("submit", async (e) => {
             }
         }
     } catch (err) {
-        if (!streamStarted) statusEl.remove();
-        const errorEl = document.createElement("div");
-        errorEl.className = "error-message";
-        errorEl.textContent = err.message;
-        contentEl.appendChild(errorEl);
+        if (err.name === "AbortError") {
+            // User cancelled — clean up gracefully
+            if (!streamStarted) statusEl.remove();
+            const cancelEl = document.createElement("div");
+            cancelEl.className = "status-indicator cancelled";
+            cancelEl.textContent = "Investigation cancelled.";
+            contentEl.appendChild(cancelEl);
+            // Remove any lingering spinners
+            const oldStatus = contentEl.querySelector(".status-indicator:not(.cancelled)");
+            if (oldStatus) oldStatus.remove();
+            // Mark running agent banners as cancelled
+            contentEl.querySelectorAll(".agent-banner.agent-running").forEach(function(b) {
+                b.classList.remove("agent-running");
+                b.classList.add("agent-cancelled");
+                var statusSpan = b.querySelector(".agent-status");
+                if (statusSpan) statusSpan.textContent = "cancelled";
+            });
+        } else {
+            if (!streamStarted) statusEl.remove();
+            const errorEl = document.createElement("div");
+            errorEl.className = "error-message";
+            errorEl.textContent = err.message;
+            contentEl.appendChild(errorEl);
+        }
     }
 
     // History is updated via the "history" SSE event from the server,
     // which includes the full message array with tool calls and results.
 
+    // Restore Send button
+    sendBtn.removeEventListener("click", onCancel);
+    sendBtn.textContent = "Send";
+    sendBtn.classList.remove("cancelling");
+    sendBtn.type = "submit";
     sendBtn.disabled = false;
     input.focus();
 });

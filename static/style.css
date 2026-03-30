@@ -996,6 +996,29 @@ footer {
     transform: none;
 }
 
+#send-btn.cancelling {
+    background: #c53030;
+    color: #fff;
+}
+
+#send-btn.cancelling:hover {
+    background: #e53e3e;
+    box-shadow: 0 2px 12px rgba(197, 48, 48, 0.3);
+}
+
+.agent-banner.agent-cancelled {
+    opacity: 0.6;
+}
+
+.agent-banner.agent-cancelled .agent-status {
+    color: #c53030;
+}
+
+.status-indicator.cancelled {
+    color: var(--text-dim);
+    font-style: italic;
+}
+
 #query-form #new-chat-btn {
     padding: 11px 16px;
     font-size: 13px;

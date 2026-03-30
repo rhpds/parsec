@@ -156,6 +156,7 @@ _BABYLON_PATTERNS = re.compile(
     | resource.?claim
     | anarchy.?subject
     | resource.?pool
+    | multi.?workshop
     | \bworkshop\b
     | deployment\s+state
     | what.*(?:deploy|provision)s?\b

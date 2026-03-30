@@ -246,6 +246,9 @@ When searching for catalog items by hostname or image name (e.g. `rh1-lb1187-rhe
   investigating a catalog item or workshop, query `provisions` first to get
   usage statistics (provision counts, user metrics, active vs retired) before
   reaching for other tools. This gives you context for deeper investigation.
+- **Identifier not found in provisions DB:** If a GUID or name returns zero rows,
+  do NOT retry with different column guesses. It may be a MultiWorkshop or Workshop
+  name that only exists as a Babylon K8s resource — delegate to the Babylon agent.
 
 ## Source Citations
 

@@ -158,7 +158,37 @@ comment, then pass it as `sandbox_comment` to `query_babylon_catalog`.
 - **list_resource_pools**: List ResourcePools from the `poolboy` namespace.
 - **list_workshops**: List Workshops in a user namespace.
 - **list_multiworkshops**: List MultiWorkshops in a user namespace.
+- **get_multiworkshop**: Deep traversal of a specific MultiWorkshop — returns full hierarchy
+  with all child Workshops, ResourceClaims, resource components, and AAP2 tower job refs.
 - **list_anarchy_actions**: List AnarchyActions (provision/start/stop/destroy lifecycle events).
+
+### Multi-Workshop Investigation
+
+MultiWorkshops are multi-asset events that bundle multiple Workshops together. Each
+Workshop provisions its own ResourceClaim(s), and each ResourceClaim can have multiple
+AnarchySubject components (e.g., an Azure sandbox + a CNV lab environment).
+
+**Recognizing MultiWorkshops:**
+- URL pattern: `catalog.demo.redhat.com/multi-workshop/<namespace>/<name>` — extract
+  namespace and name directly
+- Names like `xxx-yyyyy` (e.g. `aws-test-zz7zn`) that don't appear in the provisions
+  DB may be MultiWorkshop names
+- If a user asks about failures for an identifier that isn't found in the provisions DB,
+  try `get_multiworkshop` — it may be a MultiWorkshop
+
+**Using `get_multiworkshop`:**
+- Provide `name` and `namespace`. Omit `cluster` to auto-search all clusters.
+- Returns the FULL hierarchy: MultiWorkshop → child Workshops → ResourceClaims →
+  ALL AnarchySubject components with tower job references
+- Each resource component shows: name, healthy, ready, GUID, current_state, tower_jobs
+- Failed components show the exact AAP2 job ID and controller — use `query_aap2` with
+  `get_job_log` to get failure details
+
+**Multi-component failures:**
+- A ResourceClaim can have multiple resources (e.g., `azure` sandbox + `zt-lab-developer-cnv`)
+- The sandbox may provision successfully while the lab component fails
+- Always check ALL resources in the result — the failure is often on a secondary component,
+  not the first one
 
 ### Workshop Scheduling
 
