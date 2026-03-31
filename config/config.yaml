@@ -86,6 +86,15 @@ github:
   # Auth via PAT in Authorization header (uses github.token above).
   mcp_url: "https://api.githubcopilot.com/mcp/"
 
+icinga:
+  # Icinga MCP server URL (SSE transport).
+  # Runs as a sidecar container (quay.io/rhpds/monitoring-mcp) sharing the
+  # network namespace (network_mode: service:parsec in compose, same pod in k8s).
+  # The MCP server's transport security requires Host=localhost, so always use
+  # localhost (not the service name).
+  # Set in config.local.yaml or PARSEC_ICINGA__MCP_URL.
+  mcp_url: ""
+
 splunk:
   # Red Hat Corporate Splunk REST API endpoint.
   # Uses federated search to query Splunk Cloud (rhcorporate.splunkcloud.com)

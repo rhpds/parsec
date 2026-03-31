@@ -231,6 +231,8 @@ spec:
             - name: PARSEC_OCPV__CLUSTERS__{{ name | upper }}__KUBECONFIG
               value: "/app/ocpv/{{ name }}.kubeconfig"
 {% endfor %}
+            - name: PARSEC_ICINGA__MCP_URL
+              value: "http://localhost:3000/sse"
           envFrom:
             - secretRef:
                 name: parsec-cloud-credentials
@@ -292,6 +294,27 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 12
+        - name: icinga-mcp
+          image: quay.io/rhpds/monitoring-mcp:{{ icinga_mcp_image_tag | default('v0.3.1') }}
+          args: ["--transport", "sse", "--host", "0.0.0.0", "--port", "3000"]
+          envFrom:
+            - secretRef:
+                name: icinga-credentials
+                optional: true
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
       volumes:
         - name: config
           configMap:

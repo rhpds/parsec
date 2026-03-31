@@ -45,6 +45,7 @@ from src.tools.github_files import (
     search_agnosticv_prs,
     search_github_repo,
 )
+from src.tools.icinga import query_icinga
 from src.tools.marketplace_agreements import query_marketplace_agreements
 from src.tools.ocpv import query_ocpv_cluster
 from src.tools.provision_db import execute_query
@@ -237,6 +238,23 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:  # noqa: C901
             errors_only=tool_input.get("errors_only", False),
             raw_query=tool_input.get("raw_query", ""),
             max_results=tool_input.get("max_results", 200),
+        )
+
+    elif tool_name == "query_icinga":
+        return await query_icinga(
+            action=tool_input["action"],
+            search=tool_input.get("search", ""),
+            host=tool_input.get("host", ""),
+            service=tool_input.get("service", ""),
+            filter_expr=tool_input.get("filter_expr", ""),
+            detailed=tool_input.get("detailed", False),
+            object_type=tool_input.get("object_type", ""),
+            name=tool_input.get("name", ""),
+            author=tool_input.get("author", "parsec"),
+            comment=tool_input.get("comment", ""),
+            comment_name=tool_input.get("comment_name", ""),
+            start_time=tool_input.get("start_time"),
+            end_time=tool_input.get("end_time"),
         )
 
     elif tool_name == "render_chart":
@@ -517,6 +535,7 @@ _DELEGATION_TOOL_MAP = {
     "investigate_babylon": "babylon",
     "investigate_security": "security",
     "investigate_ocpv": "ocpv",
+    "investigate_icinga": "icinga",
 }
 
 

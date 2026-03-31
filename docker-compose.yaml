@@ -16,3 +16,16 @@ services:
       - PARSEC_AUTH__ALLOWED_GROUPS=
       - PARSEC_AUTH__ALLOWED_USERS=
     restart: unless-stopped
+
+  icinga-mcp:
+    image: quay.io/rhpds/monitoring-mcp:v0.3.1
+    command: ["--transport", "sse", "--host", "0.0.0.0", "--port", "3000"]
+    network_mode: "service:parsec"
+    depends_on:
+      - parsec
+    environment:
+      - ICINGA_API_URL=${ICINGA_API_URL:-}
+      - ICINGA_USER=${ICINGA_USER:-}
+      - ICINGA_PASSWORD=${ICINGA_PASSWORD:-}
+      - ICINGA_VERIFY_SSL=${ICINGA_VERIFY_SSL:-false}
+    restart: unless-stopped

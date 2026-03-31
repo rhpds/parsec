@@ -26,6 +26,7 @@ _AGENT_PROMPT_FILES: dict[str, str] = {
     "babylon": os.path.join(_PROMPTS_DIR, "babylon_agent.md"),
     "security": os.path.join(_PROMPTS_DIR, "security_agent.md"),
     "ocpv": os.path.join(_PROMPTS_DIR, "ocpv_agent.md"),
+    "icinga": os.path.join(_PROMPTS_DIR, "icinga_agent.md"),
 }
 
 _SHARED_CONTEXT_PATH = os.path.join(_PROMPTS_DIR, "shared_context.md")
