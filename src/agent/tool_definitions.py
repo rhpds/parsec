@@ -539,6 +539,7 @@ TOOLS = [
                         "list_anarchy_subjects",
                         "list_resource_pools",
                         "list_workshops",
+                        "get_workshop",
                         "list_multiworkshops",
                         "get_multiworkshop",
                         "list_anarchy_actions",
@@ -558,6 +559,10 @@ TOOLS = [
                         "(pool sizing and pre-provisioned resources). "
                         "list_workshops: List Workshops in a namespace (attendee counts, "
                         "provision status). Requires namespace. "
+                        "get_workshop: Deep traversal of a specific Workshop — fetches the "
+                        "Workshop, its ResourceClaims, and ALL AnarchySubject components with "
+                        "tower job references. Requires name. Namespace optional (searches "
+                        "cluster-wide if omitted). Omit cluster to auto-search all clusters. "
                         "list_multiworkshops: List MultiWorkshops in a namespace (multi-asset "
                         "events with multiple workshop assets, seat counts, dates). "
                         "Requires namespace. Always check this alongside list_workshops. "

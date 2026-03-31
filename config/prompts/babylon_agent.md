@@ -157,6 +157,8 @@ comment, then pass it as `sandbox_comment` to `query_babylon_catalog`.
 - **list_anarchy_subjects**: List AnarchySubjects across anarchy namespaces. Filter by guid.
 - **list_resource_pools**: List ResourcePools from the `poolboy` namespace.
 - **list_workshops**: List Workshops in a user namespace.
+- **get_workshop**: Deep traversal of a specific Workshop — returns ResourceClaims with all
+  resource components and tower job refs. Name required, namespace optional.
 - **list_multiworkshops**: List MultiWorkshops in a user namespace.
 - **get_multiworkshop**: Deep traversal of a specific MultiWorkshop — returns full hierarchy
   with all child Workshops, ResourceClaims, resource components, and AAP2 tower job refs.
@@ -188,6 +190,13 @@ AnarchySubject components (e.g., an Azure sandbox + a CNV lab environment).
 - Each resource component shows: name, healthy, ready, GUID, current_state, tower_jobs
 - Failed components show the exact AAP2 job ID and controller — use `query_aap2` with
   `get_job_log` to get failure details
+
+**Using `get_workshop`:**
+- For a specific Workshop (not a MultiWorkshop), use `get_workshop` with the Workshop
+  name. It returns the full ResourceClaim traversal with all components and tower jobs.
+- Workshop names look like `catalog-item-name-XXXXX` (e.g. `tests.zt-ocp-pipelines-tenant.dev-z486v`)
+- URL pattern: `catalog.demo.redhat.com/workshop/<namespace>/<name>` or
+  `workshops/<namespace>/<name>` → extract namespace + name, use `get_workshop`
 
 **Multi-component failures:**
 - A ResourceClaim can have multiple resources (e.g., `azure` sandbox + `zt-lab-developer-cnv`)

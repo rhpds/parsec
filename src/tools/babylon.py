@@ -635,9 +635,11 @@ async def query_babylon_catalog(
             action, configured, namespace, search, guid, max_results
         )
 
-    # For get_multiworkshop, search all clusters if no cluster specified
+    # For get_multiworkshop/get_workshop, search all clusters if no cluster specified
     if not target_cluster and action == "get_multiworkshop" and name:
         return await _search_all_clusters_for_multiworkshop(configured, name, namespace)
+    if not target_cluster and action == "get_workshop" and name:
+        return await _search_all_clusters_for_workshop(configured, name, namespace)
 
     if not target_cluster:
         return {
@@ -672,6 +674,8 @@ async def query_babylon_catalog(
             return await _list_multiworkshops(target_cluster, namespace, search, max_results)
         elif action == "get_multiworkshop":
             return await _get_multiworkshop(target_cluster, name, namespace)
+        elif action == "get_workshop":
+            return await _get_workshop(target_cluster, name, namespace)
         elif action == "get_babylon_pod_logs":
             return await _get_babylon_pod_logs(
                 target_cluster, namespace, name, search, guid, max_results
@@ -681,8 +685,8 @@ async def query_babylon_catalog(
                 "error": f"Unknown action: {action}. Use: search_catalog, "
                 "get_component, list_deployments, get_deployment, "
                 "list_anarchy_subjects, list_resource_pools, list_workshops, "
-                "list_multiworkshops, get_multiworkshop, list_anarchy_actions, "
-                "get_babylon_pod_logs"
+                "get_workshop, list_multiworkshops, get_multiworkshop, "
+                "list_anarchy_actions, get_babylon_pod_logs"
             }
     except Exception as e:
         logger.exception("Babylon query failed: action=%s cluster=%s", action, target_cluster)
@@ -1107,6 +1111,147 @@ async def _list_workshops(
         "workshops": workshops,
         "count": len(workshops),
         "truncated": len(workshops) >= max_results,
+    }
+
+
+async def _get_workshop(
+    cluster: str,
+    name: str,
+    namespace: str,
+) -> dict:
+    """Get a Workshop and traverse its ResourceClaims with all components.
+
+    Fetches the Workshop, then each ResourceClaim from status.resourceClaims,
+    extracting all AnarchySubject components and their tower job references.
+    """
+    if not name:
+        return {"error": "name is required for get_workshop."}
+
+    # If namespace is not provided, search cluster-wide
+    if not namespace:
+        try:
+            all_ws = await k8s_list_cluster_wide(
+                cluster,
+                WORKSHOP_GROUP,
+                WORKSHOP_VERSION,
+                WORKSHOP_PLURAL,
+            )
+            for item in all_ws.get("items", []):
+                if item.get("metadata", {}).get("name") == name:
+                    namespace = item["metadata"]["namespace"]
+                    break
+            if not namespace:
+                return {
+                    "error": f"Workshop '{name}' not found on cluster {cluster}.",
+                    "cluster": cluster,
+                }
+        except Exception as e:
+            return {
+                "error": f"Failed to search for Workshop {name}: {e}",
+                "cluster": cluster,
+            }
+
+    # Fetch the Workshop
+    try:
+        ws = await k8s_get_resource(
+            cluster,
+            WORKSHOP_GROUP,
+            WORKSHOP_VERSION,
+            WORKSHOP_PLURAL,
+            namespace,
+            name,
+        )
+    except Exception as e:
+        return {
+            "error": f"Failed to get Workshop {name} in {namespace}: {e}",
+            "cluster": cluster,
+        }
+
+    ws_meta = ws.get("metadata", {})
+    ws_spec = ws.get("spec", {})
+    ws_status = ws.get("status", {})
+    ws_labels = ws_meta.get("labels", {})
+    ws_annotations = ws_meta.get("annotations", {})
+
+    provision_count = ws_status.get("provisionCount", {})
+    if not isinstance(provision_count, dict):
+        provision_count = {}
+
+    result: dict[str, Any] = {
+        "cluster": cluster,
+        "name": ws_meta.get("name", ""),
+        "namespace": ws_meta.get("namespace", ""),
+        "display_name": ws_spec.get("displayName", ""),
+        "catalog_item": ws_labels.get("babylon.gpte.redhat.com/catalogItemName", ""),
+        "workshop_id": ws_labels.get("babylon.gpte.redhat.com/workshop-id", ""),
+        "requester": ws_annotations.get("demo.redhat.com/requester", ""),
+        "multiworkshop": ws_labels.get("babylon.gpte.redhat.com/multiworkshop", ""),
+        "lifespan": ws_spec.get("lifespan", {}),
+        "provision_count": {
+            "ordered": provision_count.get("ordered", 0),
+            "active": provision_count.get("active", 0),
+            "failed": provision_count.get("failed", 0),
+            "retries": provision_count.get("retries", 0),
+        },
+        "user_count": ws_status.get("userCount", {}),
+    }
+
+    # Fetch each ResourceClaim
+    rc_refs = ws_status.get("resourceClaims", {})
+    if not isinstance(rc_refs, dict):
+        rc_refs = {}
+
+    resource_claims: list[dict] = []
+    for rc_name in rc_refs:
+        try:
+            rc = await k8s_get_resource(
+                cluster,
+                RESOURCE_CLAIM_GROUP,
+                RESOURCE_CLAIM_VERSION,
+                RESOURCE_CLAIM_PLURAL,
+                namespace,
+                rc_name,
+            )
+        except Exception as e:
+            resource_claims.append({"name": rc_name, "error": str(e)})
+            continue
+
+        rc_status = rc.get("status", {})
+        rc_info: dict[str, Any] = {
+            "name": rc_name,
+            "state": rc_status.get("summary", {}).get("state", "unknown"),
+            "healthy": rc_status.get("healthy"),
+            "ready": rc_status.get("ready"),
+        }
+
+        # Extract ALL resource components (AnarchySubjects)
+        rc_info["resources"] = _extract_resource_components(rc)
+        resource_claims.append(rc_info)
+
+    result["resource_claims"] = resource_claims
+
+    return result
+
+
+async def _search_all_clusters_for_workshop(
+    clusters: list[str],
+    name: str,
+    namespace: str,
+) -> dict:
+    """Search all configured clusters for a Workshop by name."""
+    errors: list[str] = []
+
+    for cluster_name in clusters:
+        try:
+            result = await _get_workshop(cluster_name, name, namespace)
+            if "error" not in result or "resource_claims" in result:
+                return result
+        except Exception as e:
+            errors.append(f"{cluster_name}: {e}")
+
+    return {
+        "error": f"Workshop '{name}' not found on any cluster. "
+        f"Searched: {clusters}. Errors: {errors}",
     }
 
 
