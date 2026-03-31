@@ -177,7 +177,8 @@ AnarchySubject components (e.g., an Azure sandbox + a CNV lab environment).
   try `get_multiworkshop` — it may be a MultiWorkshop
 
 **Using `get_multiworkshop`:**
-- Provide `name` and `namespace`. Omit `cluster` to auto-search all clusters.
+- Provide `name`. Namespace is optional — if omitted, searches cluster-wide.
+  Omit `cluster` to auto-search all clusters.
 - Returns the FULL hierarchy: MultiWorkshop → child Workshops → ResourceClaims →
   ALL AnarchySubject components with tower job references
 - Each resource component shows: name, healthy, ready, GUID, current_state, tower_jobs

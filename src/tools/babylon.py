@@ -636,7 +636,7 @@ async def query_babylon_catalog(
         )
 
     # For get_multiworkshop, search all clusters if no cluster specified
-    if not target_cluster and action == "get_multiworkshop" and name and namespace:
+    if not target_cluster and action == "get_multiworkshop" and name:
         return await _search_all_clusters_for_multiworkshop(configured, name, namespace)
 
     if not target_cluster:
@@ -1243,11 +1243,30 @@ async def _get_multiworkshop(
     """
     if not name:
         return {"error": "name is required for get_multiworkshop."}
+
+    # If namespace is not provided, search cluster-wide for the MultiWorkshop
     if not namespace:
-        return {
-            "error": "namespace is required for get_multiworkshop. "
-            "MultiWorkshop namespaces are user-scoped (e.g. 'user-jdoe-redhat-com')."
-        }
+        try:
+            all_mws = await k8s_list_cluster_wide(
+                cluster,
+                MULTI_WORKSHOP_GROUP,
+                MULTI_WORKSHOP_VERSION,
+                MULTI_WORKSHOP_PLURAL,
+            )
+            for item in all_mws.get("items", []):
+                if item.get("metadata", {}).get("name") == name:
+                    namespace = item["metadata"]["namespace"]
+                    break
+            if not namespace:
+                return {
+                    "error": f"MultiWorkshop '{name}' not found on cluster {cluster}.",
+                    "cluster": cluster,
+                }
+        except Exception as e:
+            return {
+                "error": f"Failed to search for MultiWorkshop {name}: {e}",
+                "cluster": cluster,
+            }
 
     # 1. Fetch the MultiWorkshop
     try:
