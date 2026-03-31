@@ -285,10 +285,13 @@ Keep it concise — just list the tools/sources used, not every query detail.
 - **Error results**: All tools return `{"error": "..."}` on failure. Report the error
   and suggest alternatives.
 - **NEVER call the same tool with the same parameters twice in a conversation.**
-- **Consult the schema above before writing SQL.** Do not guess column names.
-  Use only columns listed in the schema. Common mistake: the `provisions` table
-  has both `updated_at` and `modified_at` — use `modified_at` for sorting recent
-  activity (it tracks the last state change).
+- **CRITICAL: Consult the schema above before writing SQL.** Do not guess column
+  names — use ONLY columns listed in the schema. If a query fails with "column
+  does not exist", re-read the schema section above. Do NOT run `SELECT *` to
+  discover columns — the schema is already provided. Common mistakes:
+  - `provisions` has NO `email` column — join with `users` via `user_id`
+  - `provisions` has `catalog_id`, NOT `catalog_item_name` — join with `catalog_items`
+  - `provisions` has both `updated_at` and `modified_at` — use `modified_at`
 - **Don't re-fetch data already in context.** If a prior tool call returned data
   (e.g., job details, provision records), extract what you need from the existing
   result before making another call.
