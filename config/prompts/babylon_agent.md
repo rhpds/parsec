@@ -168,13 +168,17 @@ MultiWorkshops are multi-asset events that bundle multiple Workshops together. E
 Workshop provisions its own ResourceClaim(s), and each ResourceClaim can have multiple
 AnarchySubject components (e.g., an Azure sandbox + a CNV lab environment).
 
-**Recognizing MultiWorkshops:**
+**Recognizing MultiWorkshops vs GUIDs:**
+- **5-char codes** (e.g. `z486v`, `zz7zn`) are **GUIDs** — search with
+  `list_anarchy_subjects` using the `guid` parameter first. Do NOT pass these
+  to `get_multiworkshop` as the name.
+- **Longer hyphenated names** (e.g. `aws-test-zz7zn`, `my-workshop-abc12`) are
+  **MultiWorkshop names** — use `get_multiworkshop` with the full name.
 - URL pattern: `catalog.demo.redhat.com/multi-workshop/<namespace>/<name>` — extract
   namespace and name directly
-- Names like `xxx-yyyyy` (e.g. `aws-test-zz7zn`) that don't appear in the provisions
-  DB may be MultiWorkshop names
 - If a user asks about failures for an identifier that isn't found in the provisions DB,
-  try `get_multiworkshop` — it may be a MultiWorkshop
+  try `get_multiworkshop` if it looks like a name, or `list_anarchy_subjects` with
+  `guid` if it looks like a GUID
 
 **Using `get_multiworkshop`:**
 - Provide `name`. Namespace is optional — if omitted, searches cluster-wide.
