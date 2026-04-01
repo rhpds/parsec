@@ -141,6 +141,7 @@ AGENTS: dict[str, AgentConfig] = {
 _AAP2_PATTERNS = re.compile(
     r"""
     RHPDS\s                     # job template prefix
+    | jobs/playbook/\d+         # AAP2 job URL
     | job\s+(failed|log|details|template)
     | failed?\s+provision
     | get_job_log

@@ -204,6 +204,14 @@ AnarchySubject components (e.g., an Azure sandbox + a CNV lab environment).
 - Always check ALL resources in the result — the failure is often on a secondary component,
   not the first one
 
+**No tower job ID (provision-error without a job):**
+- If a component shows `provision-error` but has no `job_id` in `tower_jobs`, the
+  AnarchySubject failed BEFORE an AAP2 job was created (e.g., controller error,
+  resource pool issue, name length violation)
+- Do NOT search AAP2 for the job — it doesn't exist
+- Instead, use `list_anarchy_actions` with the GUID to check lifecycle events, or
+  search Splunk/pod logs for the AnarchySubject name
+
 ### Workshop Scheduling
 
 Workshops and MultiWorkshops have start/end dates:
