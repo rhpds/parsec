@@ -34,6 +34,7 @@ from src.agent.tool_definitions import (
     AAP2_TOOLS,
     BABYLON_TOOLS,
     COST_TOOLS,
+    ICINGA_TOOLS,
     OCPV_TOOLS,
     SECURITY_TOOLS,
 )
@@ -131,6 +132,22 @@ AGENTS: dict[str, AgentConfig] = {
             "query_babylon_catalog": "Querying Babylon cluster",
         },
     ),
+    "icinga": AgentConfig(
+        name="Icinga Monitoring",
+        agent_type="icinga",
+        tools=ICINGA_TOOLS,
+        prompt_file="config/prompts/icinga_agent.md",
+        max_rounds=15,
+        description=(
+            "Triages Icinga2 alerts by correlating live monitoring state "
+            "with check script source and Icinga config from GitHub."
+        ),
+        slow_tool_labels={
+            "query_icinga": "Querying Icinga monitoring",
+            "fetch_github_file": "Fetching from GitHub",
+            "search_github_repo": "Searching GitHub repo",
+        },
+    ),
 }
 
 
@@ -200,6 +217,18 @@ _OCPV_PATTERNS = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+_ICINGA_PATTERNS = re.compile(
+    r"""
+    \bicinga\b | \bmonitoring\s+(alert|status|check|state|problem)
+    | host\s+(down|unreachable|state|check)
+    | service\s+(critical|warning|unknown|check|state)
+    | \bdowntime\b.*(?:schedul|activ|remov)
+    | \backnowledg
+    | monitoring\s+health | infra.*health\s+check
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
 
 def classify_fast(question: str) -> str | None:
     """Regex fast-path: returns agent type or None for orchestrator.
@@ -222,6 +251,8 @@ def classify_fast(question: str) -> str | None:
         return "security"
     if _OCPV_PATTERNS.search(question):
         return "ocpv"
+    if _ICINGA_PATTERNS.search(question):
+        return "icinga"
     return None
 
 

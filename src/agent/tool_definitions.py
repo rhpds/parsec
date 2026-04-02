@@ -1032,6 +1032,127 @@ TOOLS = [
         },
     },
     {
+        "name": "query_icinga",
+        "description": (
+            "Query the Icinga2 monitoring system for host and service status, "
+            "current problems, downtimes, and comments. Can also acknowledge "
+            "problems, schedule downtimes, and reschedule checks. Use this to "
+            "investigate infrastructure monitoring alerts, check host/service "
+            "health, and correlate monitoring state with RHDP provisioning issues."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "get_hosts",
+                        "get_services",
+                        "get_problems",
+                        "get_downtimes",
+                        "get_comments",
+                        "acknowledge_problem",
+                        "schedule_downtime",
+                        "reschedule_check",
+                        "add_comment",
+                        "remove_comment",
+                        "remove_downtime",
+                        "remove_acknowledgement",
+                        "send_custom_notification",
+                    ],
+                    "description": (
+                        "Action to perform. "
+                        "get_hosts: Search/filter Icinga hosts by name or filter expression. "
+                        "get_services: Search/filter Icinga services, optionally by host. "
+                        "get_problems: Get all hosts and services in non-OK state. "
+                        "get_downtimes: Get active downtimes, optionally filtered by host/service. "
+                        "get_comments: Get comments on hosts/services. "
+                        "acknowledge_problem: Acknowledge a host or service problem. "
+                        "schedule_downtime: Schedule a maintenance downtime window. "
+                        "reschedule_check: Force an immediate recheck. "
+                        "add_comment: Add a comment to a host or service. "
+                        "remove_comment: Remove a specific comment by name. "
+                        "remove_downtime: Remove all downtimes from a host or service. "
+                        "remove_acknowledgement: Remove acknowledgement from a host or service. "
+                        "send_custom_notification: Send a custom notification."
+                    ),
+                },
+                "search": {
+                    "type": "string",
+                    "description": (
+                        "Simple text search for get_hosts/get_services "
+                        "(e.g. search='web' to find web servers)."
+                    ),
+                },
+                "host": {
+                    "type": "string",
+                    "description": (
+                        "Host name filter for get_services, get_downtimes, get_comments "
+                        "(fuzzy match)."
+                    ),
+                },
+                "service": {
+                    "type": "string",
+                    "description": "Service name filter for get_downtimes, get_comments.",
+                },
+                "filter_expr": {
+                    "type": "string",
+                    "description": (
+                        "Advanced Icinga filter expression for get_hosts/get_services "
+                        "(e.g. 'host.state==1' for DOWN hosts)."
+                    ),
+                },
+                "detailed": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, return full output including groups for "
+                        "get_hosts/get_services. Default: false."
+                    ),
+                },
+                "object_type": {
+                    "type": "string",
+                    "enum": ["Host", "Service"],
+                    "description": (
+                        "Required for write actions (acknowledge_problem, schedule_downtime, "
+                        "reschedule_check, add_comment, remove_downtime, remove_acknowledgement, "
+                        "send_custom_notification). Whether the target is a Host or Service."
+                    ),
+                },
+                "name": {
+                    "type": "string",
+                    "description": (
+                        "Object name for write actions. For hosts: the host name. "
+                        "For services: 'hostname!servicename' format."
+                    ),
+                },
+                "author": {
+                    "type": "string",
+                    "description": "Author for write actions. Default: 'parsec'.",
+                },
+                "comment": {
+                    "type": "string",
+                    "description": "Comment text for acknowledge, downtime, add_comment, notification.",
+                },
+                "comment_name": {
+                    "type": "string",
+                    "description": (
+                        "Full comment name for remove_comment "
+                        "(get this from get_comments results)."
+                    ),
+                },
+                "start_time": {
+                    "type": "number",
+                    "description": "Unix timestamp for downtime start (schedule_downtime).",
+                },
+                "end_time": {
+                    "type": "number",
+                    "description": "Unix timestamp for downtime end (schedule_downtime).",
+                },
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "query_aap2",
         "description": (
             "Query an AAP2 (Ansible Automation Platform) controller for job details, "
@@ -1147,9 +1268,21 @@ def _is_splunk_configured() -> bool:
         return False
 
 
+def _is_icinga_configured() -> bool:
+    """Check if Icinga MCP is configured (has mcp_url)."""
+    try:
+        from src.config import get_config
+
+        cfg = get_config()
+        return bool(cfg.get("icinga", {}).get("mcp_url", ""))
+    except Exception:
+        return False
+
+
 # Tools that require specific backends to be configured
 _CONDITIONAL_TOOLS: dict[str, bool] = {
     "query_splunk": _is_splunk_configured(),
+    "query_icinga": _is_icinga_configured(),
 }
 
 
@@ -1228,6 +1361,14 @@ OCPV_TOOLS = _tools_by_name(
     "query_babylon_catalog",
     "query_provisions_db",
     "query_aws_account_db",
+    "render_chart",
+    "generate_report",
+)
+
+ICINGA_TOOLS = _tools_by_name(
+    "query_icinga",
+    "fetch_github_file",
+    "search_github_repo",
     "render_chart",
     "generate_report",
 )
@@ -1411,12 +1552,47 @@ INVESTIGATE_OCPV_TOOL = {
     },
 }
 
+INVESTIGATE_ICINGA_TOOL = {
+    "name": "investigate_icinga",
+    "description": (
+        "Delegate a monitoring investigation to the Icinga Monitoring agent. "
+        "This agent can query Icinga2 for host and service status, current "
+        "problems, downtimes, and comments. It can also acknowledge problems, "
+        "schedule downtimes, and force rechecks. Use this when users ask about "
+        "infrastructure monitoring state, host/service health, monitoring alerts, "
+        "or need to correlate Icinga problems with RHDP provisioning issues."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": (
+                    "A clear description of the monitoring investigation to perform. "
+                    "Include host names, service names, or describe the monitoring "
+                    "concern. The agent will query Icinga for current status and "
+                    "active problems."
+                ),
+            },
+            "context": {
+                "type": "object",
+                "description": (
+                    "Optional context such as sandbox account data, provision info, "
+                    "or host/service names already looked up."
+                ),
+            },
+        },
+        "required": ["task"],
+    },
+}
+
 DELEGATION_TOOLS = [
     INVESTIGATE_COSTS_TOOL,
     INVESTIGATE_AAP2_TOOL,
     INVESTIGATE_BABYLON_TOOL,
     INVESTIGATE_SECURITY_TOOL,
     INVESTIGATE_OCPV_TOOL,
+    INVESTIGATE_ICINGA_TOOL,
 ]
 
 ORCHESTRATOR_TOOLS = ORCHESTRATOR_DIRECT_TOOLS + DELEGATION_TOOLS

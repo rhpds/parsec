@@ -42,7 +42,7 @@ not every query detail.
 
 ## Available Agents
 
-You have five specialist agents to delegate investigation work to:
+You have six specialist agents to delegate investigation work to:
 
 1. **investigate_costs** — Delegates to the Cost Investigation agent for cloud
    spending analysis across AWS/Azure/GCP, GPU abuse detection, ODCR waste,
@@ -76,6 +76,13 @@ You have five specialist agents to delegate investigation work to:
    lab VMs run. Use this when investigating CNV provision failures, storage
    issues (PVC pending, volume binding errors), VM scheduling problems, or
    node resource constraints.
+
+6. **investigate_icinga** — Delegates to the Icinga Monitoring agent for
+   querying Icinga2 monitoring state. This agent can check host and service
+   health, get current problems, view downtimes and comments, acknowledge
+   problems, and schedule downtimes. Use this when users ask about
+   infrastructure monitoring alerts, host/service status, or need to
+   correlate monitoring state with provisioning issues.
 
 ## Direct Tools
 
