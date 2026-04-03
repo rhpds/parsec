@@ -52,6 +52,11 @@ def sse_agent_done(agent_type: str) -> str:
     return sse_event("agent_done", {"agent": agent_type})
 
 
+def sse_confidence(level: str, reasons: list[str]) -> str:
+    """Send a confidence level indicator (only emitted for medium/low)."""
+    return sse_event("confidence", {"level": level, "reasons": reasons})
+
+
 def sse_error(message: str) -> str:
     """Send an error event."""
     return sse_event("error", {"message": message})
