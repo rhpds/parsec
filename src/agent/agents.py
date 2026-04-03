@@ -319,7 +319,24 @@ def _maybe_inject_budget_warning(messages: list, current_round: int, max_rounds:
         )
 
 
-async def run_sub_agent(
+def _compute_confidence(tool_outcomes: list[dict]) -> tuple[str, list[str]]:
+    """Compute confidence level and reasons from tool outcomes.
+
+    Returns (level, reasons) where level is "high", "medium", or "low".
+    """
+    errors = [o for o in tool_outcomes if o["status"] == "error"]
+    empties = [o for o in tool_outcomes if o["status"] == "empty"]
+    if len(errors) >= 2:
+        level = "low"
+    elif errors or empties:
+        level = "medium"
+    else:
+        level = "high"
+    reasons = [f"{o['tool']}: {o['reason']}" for o in tool_outcomes if o["status"] != "success"]
+    return level, reasons
+
+
+async def run_sub_agent(  # noqa: C901
     agent_type: str,
     task: str,
     context: dict | None = None,
@@ -382,6 +399,7 @@ async def run_sub_agent(
     messages: list[dict] = [{"role": "user", "content": f"{task}{context_str}{history_context}"}]
     investigation_log: list[str] = []
     tool_call_count = 0
+    tool_outcomes: list[dict] = []  # Track tool results for confidence
     text_parts: list[str] = []
     _client = client
 
@@ -469,6 +487,18 @@ async def run_sub_agent(
 
             await _emit(sse_tool_result(tool_name, result))
 
+            # Track outcome for confidence
+            if "error" in result:
+                tool_outcomes.append(
+                    {"tool": tool_name, "status": "error", "reason": str(result["error"])[:100]}
+                )
+            elif isinstance(result, dict) and result.get("count", -1) == 0:
+                tool_outcomes.append(
+                    {"tool": tool_name, "status": "empty", "reason": "no results returned"}
+                )
+            else:
+                tool_outcomes.append({"tool": tool_name, "status": "success"})
+
             if tool_name == "generate_report" and "error" not in result:
                 download_url = f"/api/reports/{result['filename']}"
                 await _emit(sse_report(result["filename"], result["format"], download_url))
@@ -502,6 +532,13 @@ async def run_sub_agent(
         tool_call_count,
         elapsed_total,
     )
+
+    # Compute and emit confidence
+    from src.agent.streaming import sse_confidence
+
+    confidence_level, reasons = _compute_confidence(tool_outcomes)
+    if confidence_level != "high":
+        await _emit(sse_confidence(confidence_level, reasons))
 
     return {
         "agent": agent_type,
@@ -579,6 +616,7 @@ async def run_sub_agent_streaming(  # noqa: C901
         task[:120],
     )
     tool_call_count = 0
+    tool_outcomes: list[dict] = []  # Track tool results for confidence
     start_time = _time.monotonic()
     _client = client
 
@@ -646,6 +684,13 @@ async def run_sub_agent_streaming(  # noqa: C901
                 tool_call_count,
                 _time.monotonic() - start_time,
             )
+            # Emit confidence
+            from src.agent.streaming import sse_confidence
+
+            confidence_level, reasons = _compute_confidence(tool_outcomes)
+            if confidence_level != "high":
+                yield sse_confidence(confidence_level, reasons)
+
             yield sse_event("agent_done", {"agent": agent_type})
             yield sse_event("history", {"messages": _serialize_messages(messages)})
             yield sse_done()
@@ -676,6 +721,18 @@ async def run_sub_agent_streaming(  # noqa: C901
 
             yield sse_tool_result(tool_name, result)
 
+            # Track outcome for confidence
+            if "error" in result:
+                tool_outcomes.append(
+                    {"tool": tool_name, "status": "error", "reason": str(result["error"])[:100]}
+                )
+            elif isinstance(result, dict) and result.get("count", -1) == 0:
+                tool_outcomes.append(
+                    {"tool": tool_name, "status": "empty", "reason": "no results returned"}
+                )
+            else:
+                tool_outcomes.append({"tool": tool_name, "status": "success"})
+
             if tool_name == "generate_report" and "error" not in result:
                 download_url = f"/api/reports/{result['filename']}"
                 yield sse_report(result["filename"], result["format"], download_url)
@@ -700,6 +757,13 @@ async def run_sub_agent_streaming(  # noqa: C901
         tool_call_count,
         _time.monotonic() - start_time,
     )
+    # Emit confidence
+    from src.agent.streaming import sse_confidence
+
+    confidence_level, reasons = _compute_confidence(tool_outcomes)
+    if confidence_level != "high":
+        yield sse_confidence(confidence_level, reasons)
+
     yield sse_event("agent_done", {"agent": agent_type})
     max_rounds_text = (
         "\n\nI've used all my planned tool calls but haven't finished. "

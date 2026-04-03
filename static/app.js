@@ -643,6 +643,30 @@ form.addEventListener("submit", async (e) => {
                 break;
             }
 
+            case "confidence": {
+                ensureStreamStarted();
+                var level = data.level;
+                var reasons = data.reasons || [];
+                if (level === "medium" || level === "low") {
+                    var callout = document.createElement("div");
+                    callout.className = "confidence-callout " + level;
+                    var title = level === "low" ? "Low confidence" : "Medium confidence";
+                    var icon = level === "low" ? "\u26A0\uFE0F" : "\u26A0";
+                    var html = '<div class="confidence-title">' + icon + " " + title + "</div>";
+                    if (reasons.length > 0) {
+                        html += "<ul>";
+                        reasons.forEach(function(r) {
+                            html += "<li>" + r.replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</li>";
+                        });
+                        html += "</ul>";
+                    }
+                    callout.innerHTML = html;
+                    contentEl.appendChild(callout);
+                    scrollToBottom();
+                }
+                break;
+            }
+
             case "history":
                 // Store full message history (includes tool calls/results)
                 conversationHistory = data.messages;
@@ -699,6 +723,42 @@ form.addEventListener("submit", async (e) => {
                     // Move wrapper to top of content
                     contentEl.insertBefore(liveWrapper, contentEl.firstChild);
                 }
+
+                // Scan final text for [confidence: ...] markers from the agent
+                var allTextEls = contentEl.querySelectorAll(".md-text, .md-text-live");
+                allTextEls.forEach(function(el) {
+                    var html = el.innerHTML;
+                    var markerRegex = /\[confidence:\s*(medium|low)\s*\|\s*([^\]]+)\]/gi;
+                    var match;
+                    while ((match = markerRegex.exec(html)) !== null) {
+                        var markerLevel = match[1].toLowerCase();
+                        var markerReason = match[2].trim();
+                        // Create callout if not already present from SSE event
+                        var existing = contentEl.querySelector(".confidence-callout");
+                        if (!existing) {
+                            var mc = document.createElement("div");
+                            mc.className = "confidence-callout " + markerLevel;
+                            var mTitle = markerLevel === "low" ? "Low confidence" : "Medium confidence";
+                            mc.innerHTML = '<div class="confidence-title">\u26A0 ' + mTitle + "</div><ul><li>" + markerReason.replace(/</g, "&lt;") + "</li></ul>";
+                            contentEl.appendChild(mc);
+                        } else {
+                            // Merge: downgrade level if needed, add reason
+                            if (markerLevel === "low" && existing.classList.contains("medium")) {
+                                existing.classList.remove("medium");
+                                existing.classList.add("low");
+                                existing.querySelector(".confidence-title").innerHTML = '\u26A0\uFE0F Low confidence';
+                            }
+                            var ul = existing.querySelector("ul");
+                            if (ul) {
+                                var li = document.createElement("li");
+                                li.textContent = markerReason;
+                                ul.appendChild(li);
+                            }
+                        }
+                    }
+                    // Strip markers from displayed text
+                    el.innerHTML = html.replace(/\[confidence:\s*(?:medium|low)\s*\|\s*[^\]]+\]/gi, "");
+                });
 
                 // Extract choice buttons from {{choices}} blocks before rendering final text
                 var finalText = currentChunk || fullText;
