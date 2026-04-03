@@ -17,6 +17,17 @@ MCP_PORT="3000"
 cd "$PROJECT_DIR"
 mkdir -p logs
 
+_container_cmd() {
+    # Use podman or docker, whichever is available
+    if command -v podman >/dev/null 2>&1; then
+        echo "podman"
+    elif command -v docker >/dev/null 2>&1; then
+        echo "docker"
+    else
+        echo ""
+    fi
+}
+
 _mcp_is_configured() {
     # Check if Icinga env vars are set in .env or config.local.yaml
     if [ -f .env ] && grep -q 'ICINGA_API_URL=.' .env 2>/dev/null; then
@@ -32,23 +43,38 @@ _mcp_start() {
     if ! _mcp_is_configured; then
         return 0
     fi
-    if docker inspect "$MCP_CONTAINER" >/dev/null 2>&1; then
-        docker rm -f "$MCP_CONTAINER" >/dev/null 2>&1
+    local cmd
+    cmd=$(_container_cmd)
+    if [ -z "$cmd" ]; then
+        echo "Warning: Icinga MCP needs podman or docker (not found)"
+        return 0
     fi
+    $cmd rm -f "$MCP_CONTAINER" >/dev/null 2>&1 || true
+
+    # Pull with empty auth to avoid cached robot credentials
+    local anon_auth
+    anon_auth=$(mktemp)
+    echo '{}' > "$anon_auth"
+    $cmd pull --authfile "$anon_auth" "$MCP_IMAGE" >/dev/null 2>&1 || true
+    rm -f "$anon_auth"
+
     echo "Starting Icinga MCP sidecar..."
-    docker run -d --name "$MCP_CONTAINER" \
+    $cmd run -d --name "$MCP_CONTAINER" \
         -p "$MCP_PORT:$MCP_PORT" \
         --env-file <(grep '^ICINGA_' .env 2>/dev/null || true) \
         "$MCP_IMAGE" \
         --transport sse --host 0.0.0.0 --port "$MCP_PORT" \
         >/dev/null 2>&1 \
     && echo "Icinga MCP running on port $MCP_PORT" \
-    || echo "Warning: Icinga MCP failed to start (docker not available?)"
+    || echo "Warning: Icinga MCP failed to start"
 }
 
 _mcp_stop() {
-    if docker inspect "$MCP_CONTAINER" >/dev/null 2>&1; then
-        docker rm -f "$MCP_CONTAINER" >/dev/null 2>&1
+    local cmd
+    cmd=$(_container_cmd)
+    [ -z "$cmd" ] && return 0
+    if $cmd inspect "$MCP_CONTAINER" >/dev/null 2>&1; then
+        $cmd rm -f "$MCP_CONTAINER" >/dev/null 2>&1
         echo "Icinga MCP stopped"
     fi
 }

@@ -353,7 +353,7 @@ spec:
     - ReadWriteMany
   resources:
     requests:
-      storage: 3Gi
+      storage: {{ pvc_data_size | default('10Gi') }}
 ---
 {% if deployment_hpa_enabled | default(false) %}
 # HorizontalPodAutoscaler
