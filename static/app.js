@@ -1331,12 +1331,30 @@ function renderSharedMessages(messages, interactive) {
 
                 // Show tool calls as collapsed summary
                 if (toolCalls.length > 0) {
+                    // Count total queries including sub-agent tool calls
+                    var agentNames = {
+                        cost: "Cost Investigation", aap2: "AAP2 Investigation",
+                        babylon: "Babylon Investigation", security: "Security Investigation",
+                        ocpv: "OCPV Investigation", icinga: "Icinga Investigation"
+                    };
+                    var totalQueries = 0;
+                    var delegations = [];
+                    toolCalls.forEach(function(tc) {
+                        var result = toolResultMap[tc.id];
+                        if (tc.name === "delegate_to_agent" && result && result.tool_calls) {
+                            totalQueries += result.tool_calls;
+                            delegations.push({ tc: tc, result: result });
+                        } else {
+                            totalQueries++;
+                        }
+                    });
+
                     var wrapper = document.createElement("details");
                     wrapper.className = "tool-calls-summary";
                     var tcSummaryEl = document.createElement("summary");
-                    tcSummaryEl.textContent = toolCalls.length === 1
+                    tcSummaryEl.textContent = totalQueries === 1
                         ? "1 query executed"
-                        : toolCalls.length + " queries executed";
+                        : totalQueries + " queries executed";
                     if (toolCalls.length > 1) {
                         addExpandCollapseToggle(tcSummaryEl, wrapper);
                     }
@@ -1344,6 +1362,8 @@ function renderSharedMessages(messages, interactive) {
                     var inner = document.createElement("div");
                     inner.className = "tool-calls-inner";
                     toolCalls.forEach(function(tc) {
+                        // Skip delegations — rendered as agent banners below
+                        if (tc.name === "delegate_to_agent") return;
                         var tcEl = document.createElement("details");
                         tcEl.className = "tool-call";
                         var tcSummary = document.createElement("summary");
@@ -1371,6 +1391,47 @@ function renderSharedMessages(messages, interactive) {
                     });
                     wrapper.appendChild(inner);
                     contentEl.appendChild(wrapper);
+
+                    // Render sub-agent banners and findings for delegations
+                    delegations.forEach(function(d) {
+                        var agentType = d.result.agent || (d.tc.input && d.tc.input.agent) || "unknown";
+                        var agentLabel = agentNames[agentType] || agentType;
+
+                        var agentBanner = document.createElement("div");
+                        agentBanner.className = "agent-banner agent-done";
+                        agentBanner.dataset.agent = agentType;
+                        var iconSpan = document.createElement("span");
+                        iconSpan.className = "agent-icon";
+                        iconSpan.textContent = "\u2699";
+                        var labelSpan = document.createElement("span");
+                        labelSpan.className = "agent-label";
+                        labelSpan.textContent = agentLabel;
+                        var statusSpan2 = document.createElement("span");
+                        statusSpan2.className = "agent-status";
+                        statusSpan2.textContent = "done";
+                        agentBanner.appendChild(iconSpan);
+                        agentBanner.appendChild(document.createTextNode(" "));
+                        agentBanner.appendChild(labelSpan);
+                        agentBanner.appendChild(document.createTextNode(" "));
+                        agentBanner.appendChild(statusSpan2);
+                        contentEl.appendChild(agentBanner);
+
+                        // Render findings as markdown (filter out raw tool result lines)
+                        var findings = d.result.findings || [];
+                        if (findings.length > 0) {
+                            var findingsText = findings.filter(function(f) {
+                                return typeof f === "string" && !f.startsWith("[Tool:");
+                            }).join("\n\n");
+                            if (findingsText.trim()) {
+                                var findingsDiv = document.createElement("div");
+                                findingsDiv.className = "md-text";
+                                findingsDiv.innerHTML = marked.parse(findingsText);  // safe: server-generated markdown
+                                contentEl.appendChild(findingsDiv);
+                                // Use findings as the exportable text instead of summary
+                                textParts.push(findingsText);
+                            }
+                        }
+                    });
 
                     // Reconstruct report download links and charts
                     toolCalls.forEach(function(tc) {

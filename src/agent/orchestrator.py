@@ -625,6 +625,9 @@ async def _handle_delegation(
                 "agent": result.get("agent"),
                 "status": result.get("status"),
                 "summary": result.get("summary", ""),
+                "findings": result.get("findings", []),
+                "tool_calls": result.get("tool_calls", 0),
+                "duration_seconds": result.get("duration_seconds", 0),
                 "note": (
                     "The detailed analysis above was already streamed "
                     "to the user. Do NOT repeat or re-summarize it. "
