@@ -1019,6 +1019,40 @@ footer {
     font-style: italic;
 }
 
+.confidence-callout {
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 13px;
+    margin-top: 12px;
+    line-height: 1.5;
+}
+
+.confidence-callout.medium {
+    background: rgba(237, 137, 54, 0.12);
+    border-left: 3px solid #ed8936;
+    color: #ed8936;
+}
+
+.confidence-callout.low {
+    background: rgba(229, 62, 62, 0.12);
+    border-left: 3px solid #e53e3e;
+    color: #e53e3e;
+}
+
+.confidence-callout .confidence-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.confidence-callout ul {
+    margin: 4px 0 0 0;
+    padding-left: 18px;
+}
+
+.confidence-callout li {
+    margin-bottom: 2px;
+}
+
 #query-form #new-chat-btn {
     padding: 11px 16px;
     font-size: 13px;
