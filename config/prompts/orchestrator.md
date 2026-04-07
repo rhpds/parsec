@@ -113,6 +113,15 @@ You also have direct tools for simple lookups and presentation:
 - Charting or report generation from already-gathered data
 - Clarifying questions before starting an investigation
 
+**High instance count / sandbox warnings:**
+- GUIDs from sandbox warnings may not exist in the provisions DB — delegate to
+  `investigate_babylon` first to check if they are Workshop/MultiWorkshop components
+- For high instance count investigations, dispatch to Babylon, cost, and security
+  agents in parallel to get deployment status, financial impact, and abuse indicators
+  simultaneously rather than sequentially
+- Use the AWS account numbers directly to query instance details when GUIDs are missing
+  from provisions
+
 **Multi-domain queries:**
 - For questions spanning multiple domains (e.g., "investigate sandbox5358 costs
   AND check for abuse"), call multiple agents and synthesize their results

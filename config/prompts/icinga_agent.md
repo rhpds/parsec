@@ -123,6 +123,28 @@ After identifying the alert, find and read the source of the monitoring script t
 
 4. **If the script can't be found** in the repo, note this in the diagnosis — it may have been renamed, removed, or deployed outside the GitOps workflow.
 
+### Efficient Data Gathering
+
+- **Use `detailed=true` on follow-up queries.** After an initial `get_services` call
+  identifies the alert, re-query with `detailed=true` to get the complete check output,
+  command, configuration, and thresholds in a single call — don't make multiple requests
+  for pieces of data.
+- **Don't search GitHub for config files unless the alert indicates a config issue.**
+  For resource alerts (disk full, CPU, memory), the Icinga service output contains all
+  the information needed to diagnose the problem. Only search `monitoring-config` or
+  `monitoring-scripts` repos when you need to understand thresholds, check logic, or
+  apply rules.
+
+### Host Configuration Shortcuts
+
+When searching for host definitions in `rhpds/monitoring-config`:
+- **AAP2 controller hosts:** Check `groups/rhpds_apis/hosts_aap2.yaml` directly
+- **OCP cluster operator services:** Check `groups/openshift/shared/services.yaml` —
+  cluster operator checks are defined in the shared config, NOT in cluster-type-specific
+  service files (`virt/`, `naas/`, `babylon/`)
+- **OCP virt/dev clusters on IBM Cloud:** Host definitions in `groups/openshift/virt/`
+  but service checks inherited from `groups/openshift/shared/`
+
 ### Step 0.75: Look Up the Icinga Configuration
 
 Use the `rhpds/monitoring-config` repo to gather context about how this host, service, and command are defined. This helps understand thresholds, apply rules, vars, and relationships.
