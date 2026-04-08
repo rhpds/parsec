@@ -15,7 +15,7 @@ Natural language cloud cost and provisioning investigation tool for the RHDP pla
 
 | Tool | Source | Use Case |
 |------|--------|----------|
-| `query_provisions_db` | PostgreSQL (read-only) | User lookups, provision history, catalog items, account mappings |
+| `query_provisions_db` | Reporting MCP (read-only) | User lookups, provision history, catalog items, account mappings |
 | `query_aws_costs` | AWS Cost Explorer | AWS spending by service, instance type, or account |
 | `query_azure_costs` | Azure billing CSVs | Azure spending by subscription, GPU VM detection |
 | `query_gcp_costs` | GCP BigQuery | GCP spending by service or project |
@@ -40,7 +40,7 @@ Ask for a report in the chat and Claude will generate a formatted Markdown or As
 ### Prerequisites
 
 - Python 3.11+
-- Access to the RHDP provision database (read-only user)
+- Access to the Reporting MCP server (provision DB passthrough)
 - AWS credentials (cost-monitor IAM user)
 - Azure client credentials for billing blob access
 - GCP service account for BigQuery billing export
@@ -136,7 +136,7 @@ Parsec queries Babylon clusters to understand what catalog items should deploy a
 
 ## Security
 
-- **Provision DB**: Read-only PostgreSQL user, SELECT-only SQL validation, 30s statement timeout, 500-row limit
+- **Provision DB**: Read-only access via Reporting MCP, SELECT-only SQL validation, 500-row limit
 - **Cloud APIs**: Structured parameters with no injection surface
 - **Babylon**: Read-only SA, secrets auto-stripped from all results
 - **GitHub**: Read-only access via GitHub's remote MCP server, secrets auto-redacted from fetched files
@@ -145,7 +145,7 @@ Parsec queries Babylon clusters to understand what catalog items should deploy a
 
 ## Tech Stack
 
-- **Backend**: FastAPI, Anthropic SDK, boto3, azure-storage-blob, google-cloud-bigquery, httpx, MCP Python SDK
+- **Backend**: FastAPI, Anthropic SDK, boto3, azure-storage-blob, google-cloud-bigquery, httpx, MCP Python SDK (Streamable HTTP)
 - **Frontend**: Plain HTML/CSS/JS with marked.js for Markdown rendering
 - **Config**: Dynaconf (YAML + env var overrides)
 - **Deployment**: Ansible playbook, Jinja2 manifests, UBI 9 container on OpenShift
