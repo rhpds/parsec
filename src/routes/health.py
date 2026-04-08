@@ -19,15 +19,11 @@ async def health():
 
 @router.get("/health/ready")
 async def readiness():
-    """Readiness probe — checks Reporting MCP connectivity."""
+    """Readiness probe — checks MCP init succeeded, doesn't trigger init."""
     if not reporting_mcp.get_mcp_url():
         return {"status": "ready", "db": "reporting_mcp_not_configured"}
 
-    try:
-        result = await reporting_mcp.call_tool("list_tables", {"schema": "public"})
-        if "error" in result:
-            return {"status": "not_ready", "db": result["error"]}
+    if reporting_mcp.get_server_instructions():
         return {"status": "ready", "db": "via_reporting_mcp"}
-    except Exception as e:
-        logger.exception("Readiness check failed")
-        return {"status": "not_ready", "db": str(e)}
+
+    return {"status": "not_ready", "db": "reporting_mcp_not_initialized"}
