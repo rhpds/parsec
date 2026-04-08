@@ -305,7 +305,9 @@ async def read_resource(uri: str) -> dict[str, Any]:
             ClientSession(read_stream, write_stream) as session,
         ):
             await session.initialize()
-            result = await session.read_resource(uri)
+            from pydantic import AnyUrl
+
+            result = await session.read_resource(AnyUrl(uri))
 
             parts: list[str] = []
             for block in result.contents:
