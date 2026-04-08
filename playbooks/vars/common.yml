@@ -31,7 +31,7 @@ babylon_kubeconfigs:
   babydev: "{{ lookup('env', 'HOME') }}/secrets/babylon-readonly/babydev.kubeconfig"
 
 # Reporting MCP (cross-namespace, demo-reporting)
-reporting_mcp_url: ""
+reporting_mcp_url: "http://reporting-mcp.demo-reporting.svc:8080/mcp"
 
 # OCPV clusters (labagator-reader SA kubeconfigs)
 ocpv_kubeconfigs:
