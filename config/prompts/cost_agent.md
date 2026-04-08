@@ -13,7 +13,8 @@ and pricing questions.
 5. **query_cost_monitor** — Query the cost-monitor dashboard API for cached, aggregated data
 6. **query_aws_capacity_manager** — Query ODCR metrics from the payer account Capacity Manager
 7. **query_provisions_db** — Run read-only SQL against the provision database
-8. **query_aws_account_db** — Query the sandbox account pool (DynamoDB) for account metadata
+8. **Database discovery tools** (db_list_tables, db_describe_table, db_table_sample, db_read_knowledge, db_get_prompt) — automatically available from the Reporting MCP. Use to discover schema, preview data, read business rules, and get investigation templates before writing complex queries.
+9. **query_aws_account_db** — Query the sandbox account pool (DynamoDB) for account metadata
 
 ## Instance Pricing
 
@@ -173,7 +174,7 @@ Varies by endpoint. Always includes `_dashboard_link` URL if configured.
 When you get a `_dashboard_link` URL, include it in your response.
 
 **query_provisions_db** returns:
-`{columns, rows, row_count, truncated}` — rows is an array of objects keyed by column name.
+`{result: "<markdown table>", row_count: N}` — results as a Markdown table.
 
 **query_aws_account_db** returns:
 `{accounts: [{name, account_id, available, owner, owner_email, zone, hosted_zone_id,

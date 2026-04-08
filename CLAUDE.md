@@ -19,7 +19,7 @@ src/
     learnings.py             # Post-conversation AI analysis and learning
     log_trimmer.py           # Token-aware history trimming
   tools/
-    provision_db.py          # Raw SQL against provision DB (read-only)
+    provision_db.py          # SQL queries via Reporting MCP (read-only)
     aws_costs.py             # AWS Cost Explorer queries
     aws_pricing.py           # EC2 pricing lookup (static cache, no AWS creds)
     aws_capacity_manager.py  # ODCR metrics from EC2 Capacity Manager
@@ -36,7 +36,7 @@ src/
     splunk.py                # Splunk log queries (Babylon pods, AAP2 logs)
     github_files.py          # GitHub file/directory fetching via remote MCP server
   connections/
-    postgres.py              # asyncpg pool
+    reporting_mcp.py         # Reporting MCP client (Streamable HTTP)
     aws.py                   # boto3 session
     azure.py                 # Azure blob client
     gcp.py                   # BigQuery client

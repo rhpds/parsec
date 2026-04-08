@@ -97,6 +97,14 @@ def get_agent_prompt(agent_type: str) -> str:
         domain = _read_file(domain_path)
         prompt = f"{shared}\n\n{domain}"
 
+    # Inject MCP server instructions (schema reference, JOIN patterns, pitfalls)
+    if agent_type != "orchestrator":
+        from src.connections.reporting_mcp import get_server_instructions
+
+        mcp_instructions = get_server_instructions()
+        if mcp_instructions:
+            prompt += "\n\n## Reporting Database Reference (from MCP)\n\n" + mcp_instructions
+
     learnings = _get_learnings()
     if learnings:
         prompt += "\n\n" + learnings

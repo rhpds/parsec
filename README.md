@@ -145,7 +145,7 @@ Parsec queries Babylon clusters to understand what catalog items should deploy a
 
 ## Tech Stack
 
-- **Backend**: FastAPI, asyncpg, Anthropic SDK, boto3, azure-storage-blob, google-cloud-bigquery, httpx, MCP Python SDK
+- **Backend**: FastAPI, Anthropic SDK, boto3, azure-storage-blob, google-cloud-bigquery, httpx, MCP Python SDK
 - **Frontend**: Plain HTML/CSS/JS with marked.js for Markdown rendering
 - **Config**: Dynaconf (YAML + env var overrides)
 - **Deployment**: Ansible playbook, Jinja2 manifests, UBI 9 container on OpenShift

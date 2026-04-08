@@ -16,7 +16,7 @@ from src.connections.gcp import init_gcp
 from src.connections.github_mcp import init_github_mcp
 from src.connections.icinga_mcp import init_icinga_mcp
 from src.connections.ocpv import init_ocpv
-from src.connections.postgres import close_pool, init_pool
+from src.connections.reporting_mcp import fetch_server_instructions, init_reporting_mcp
 from src.connections.splunk import init_splunk
 from src.routes.alert import router as alert_router
 from src.routes.conversations import ensure_conversations_dir
@@ -40,14 +40,6 @@ async def lifespan(app: FastAPI):
     cfg = get_config()
     logger.info("Parsec starting up (model=%s)", cfg.anthropic.get("model", "unknown"))
 
-    # Initialize connections — non-fatal so the app starts even if a backend is unreachable
-    for name, init_coro in [("Provision DB", init_pool)]:
-        try:
-            await init_coro()
-            logger.info("%s initialized", name)
-        except Exception:
-            logger.exception("%s initialization failed — will retry on first query", name)
-
     for name, init_fn in [
         ("AWS", init_aws),
         ("Azure", init_azure),
@@ -57,6 +49,7 @@ async def lifespan(app: FastAPI):
         ("AAP2", init_aap2),
         ("GitHub MCP", init_github_mcp),
         ("Icinga MCP", init_icinga_mcp),
+        ("Reporting MCP", init_reporting_mcp),
         ("Splunk", init_splunk),
     ]:
         try:
@@ -65,6 +58,12 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.exception("%s initialization failed — will retry on first query", name)
 
+    # Fetch MCP instructions (async, non-blocking for startup)
+    try:
+        await fetch_server_instructions()
+    except Exception:
+        logger.exception("Failed to fetch Reporting MCP instructions at startup")
+
     # Ensure data directories exist
     ensure_conversations_dir()
     ensure_shares_dir()
@@ -72,8 +71,6 @@ async def lifespan(app: FastAPI):
     logger.info("Startup complete")
     yield
 
-    # Shutdown
-    await close_pool()
     logger.info("Parsec shut down")
 
 

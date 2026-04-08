@@ -15,9 +15,6 @@ mgmt_service_account:
 vertex_project_id: "itpc-gcp-product-all-claude"
 vertex_region: "us-east5"
 
-# Provision DB
-provision_db_port: "54327"
-
 # AWS
 aws_region: "us-east-1"
 
@@ -32,6 +29,9 @@ babylon_kubeconfigs:
   partner1: "{{ lookup('env', 'HOME') }}/secrets/babylon-readonly/partner1.kubeconfig"
   integration: "{{ lookup('env', 'HOME') }}/secrets/babylon-readonly/integration.kubeconfig"
   babydev: "{{ lookup('env', 'HOME') }}/secrets/babylon-readonly/babydev.kubeconfig"
+
+# Reporting MCP (cross-namespace, demo-reporting)
+reporting_mcp_url: ""
 
 # OCPV clusters (labagator-reader SA kubeconfigs)
 ocpv_kubeconfigs:
