@@ -19,9 +19,6 @@ data:
       max_tokens: 4096
       max_tool_rounds: 10
     provision_db:
-      min_pool_size: 2
-      max_pool_size: 10
-      statement_timeout_ms: 30000
       max_rows: 500
     aws:
       region: "{{ aws_region }}"
@@ -171,28 +168,6 @@ spec:
               value: "{{ vertex_region }}"
             - name: PARSEC_ANTHROPIC__VERTEX_CREDENTIALS_PATH
               value: "/app/gcp/service-account.json"
-            - name: PARSEC_PROVISION_DB__HOST
-              valueFrom:
-                secretKeyRef:
-                  name: parsec-secrets
-                  key: db-host
-            - name: PARSEC_PROVISION_DB__PORT
-              value: "{{ provision_db_port }}"
-            - name: PARSEC_PROVISION_DB__DATABASE
-              valueFrom:
-                secretKeyRef:
-                  name: parsec-secrets
-                  key: db-name
-            - name: PARSEC_PROVISION_DB__USER
-              valueFrom:
-                secretKeyRef:
-                  name: parsec-secrets
-                  key: db-user
-            - name: PARSEC_PROVISION_DB__PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: parsec-secrets
-                  key: db-password
             - name: PARSEC_AWS__REGION
               value: "{{ aws_region }}"
             - name: PARSEC_GCP__CREDENTIALS_PATH
@@ -233,6 +208,8 @@ spec:
 {% endfor %}
             - name: PARSEC_ICINGA__MCP_URL
               value: "http://localhost:3000/sse"
+            - name: PARSEC_REPORTING_MCP__MCP_URL
+              value: "{{ reporting_mcp_url | default('') }}"
           envFrom:
             - secretRef:
                 name: parsec-cloud-credentials

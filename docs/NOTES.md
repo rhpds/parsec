@@ -26,7 +26,7 @@ Session findings, architectural decisions, and context for future work.
 
 | Backend | Type | Init | Error Recovery |
 |---------|------|------|----------------|
-| PostgreSQL | asyncpg pool (2-10) | Lazy — retries on first query | Pool re-init |
+| Provision DB | Reporting MCP (Streamable HTTP) | Startup (instructions fetch) | Returns error dict |
 | AWS Cost Explorer | boto3 singleton | Startup | Returns error dict |
 | Azure Blob | ContainerClient singleton | Startup (optional) | Returns None |
 | GCP BigQuery | Client singleton | Startup (optional) | Returns None |

@@ -19,7 +19,7 @@ src/
     learnings.py             # Post-conversation AI analysis and learning
     log_trimmer.py           # Token-aware history trimming
   tools/
-    provision_db.py          # Raw SQL against provision DB (read-only)
+    provision_db.py          # SQL queries via Reporting MCP (read-only)
     aws_costs.py             # AWS Cost Explorer queries
     aws_pricing.py           # EC2 pricing lookup (static cache, no AWS creds)
     aws_capacity_manager.py  # ODCR metrics from EC2 Capacity Manager
@@ -36,7 +36,7 @@ src/
     splunk.py                # Splunk log queries (Babylon pods, AAP2 logs)
     github_files.py          # GitHub file/directory fetching via remote MCP server
   connections/
-    postgres.py              # asyncpg pool
+    reporting_mcp.py         # Reporting MCP client (Streamable HTTP)
     aws.py                   # boto3 session
     azure.py                 # Azure blob client
     gcp.py                   # BigQuery client
@@ -80,17 +80,27 @@ playbooks/
 ## Running Locally
 
 ```bash
-cp config/config.local.yaml.template config/config.local.yaml
-# Fill in DB creds, ANTHROPIC_API_KEY, cloud credentials, allowed_users
+cp config/config.yaml config/config.local.yaml
+# Fill in cloud credentials, allowed_users, reporting_mcp.mcp_url
 
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn src.app:app --host 0.0.0.0 --port 8000
+scripts/local-server.sh start
 ```
 
 **Important:** Always activate the venv first (`source .venv/bin/activate`).
 If you skip activation, run directly with `.venv/bin/python -m uvicorn src.app:app --host 0.0.0.0 --port 8000`.
+
+### Local Dependencies
+
+- **Reporting MCP**: Port-forward the reporting-mcp service for provision DB access:
+  `oc port-forward svc/reporting-mcp 8081:8080 -n demo-reporting --kubeconfig=$HOME/secrets/ocpv-infra01.dal12.infra.demo.redhat.com.kubeconfig`
+  Then set `reporting_mcp.mcp_url: "http://localhost:8081/mcp"` in `config.local.yaml`.
+- **Icinga MCP sidecar**: Requires podman/docker. Credentials in `.env` file (gitignored).
+  The sidecar starts automatically with `scripts/local-server.sh start`.
+- **Cost-monitor API**: Port-forward if needed:
+  `oc port-forward svc/cost-data-service 8001:8000 -n cost-monitor`
 
 ## Configuration
 
@@ -98,7 +108,7 @@ Dynaconf with `PARSEC_` env var prefix. Nesting uses `__`:
 
 ```bash
 PARSEC_ANTHROPIC__API_KEY=sk-ant-...
-PARSEC_PROVISION_DB__HOST=db.example.com
+PARSEC_REPORTING_MCP__MCP_URL=http://localhost:8081/mcp
 PARSEC_AUTH__ALLOWED_USERS=user1@redhat.com,user2@redhat.com
 ```
 
@@ -168,7 +178,7 @@ with the same message — do NOT amend the previous commit (the failed commit ne
 - **Dockerfile**: Do NOT use `ENTRYPOINT []` — CRI-O on OpenShift requires the S2I base image's `container-entrypoint`. Do NOT hardcode PATH — use `$PATH` to inherit base image paths.
 - **Claude backend**: Supports direct API, Vertex AI, and AWS Bedrock. Production uses Vertex AI (`claude-sonnet-4@20250514`).
 - **Sub-agent architecture**: Orchestrator classifies queries and dispatches to domain sub-agents (cost, aap2, babylon, security, ocpv). Fast-path classifier skips LLM call for obvious single-domain queries. Per-agent prompts in `config/prompts/`.
-- **Lazy DB init**: The provision DB pool retries on first query if startup initialization failed. Health readiness probe does NOT trigger DB init.
+- **Reporting MCP**: Provision DB access goes through a Reporting MCP server via Streamable HTTP (`src/connections/reporting_mcp.py`). Tool schemas are dynamically discovered at startup and prefixed with `db_`. The `reporting_mcp.mcp_url` config is required. Health readiness probe checks cached init state — does NOT make live MCP calls.
 - **GitHub auth**: Push access to `rhpds/parsec` requires a GitHub account with write permissions. Use `gh auth status` to check the current profile.
 - **AWS IAM**: All AWS tools use the `cost-monitor` IAM user with `CostMonitorPolicy`. Cross-account access uses STS AssumeRole with inline session policy for read-only enforcement. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full policy details.
 

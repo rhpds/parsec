@@ -60,10 +60,37 @@ REPORTS_DIR = os.path.join(
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
 
+def _is_reporting_mcp_tool(name: str) -> bool:
+    """Check if a tool was dynamically discovered from the Reporting MCP."""
+    from src.connections.reporting_mcp import is_mcp_tool
+
+    return is_mcp_tool(name)
+
+
 async def _execute_tool(tool_name: str, tool_input: dict) -> dict:  # noqa: C901
     """Dispatch a tool call to the appropriate handler."""
     if tool_name == "query_provisions_db":
         return await execute_query(tool_input["sql"])
+
+    elif tool_name == "db_read_knowledge":
+        from src.connections import reporting_mcp
+
+        domain = tool_input["domain"]
+        return await reporting_mcp.read_resource(f"database://knowledge/{domain}")
+
+    elif tool_name == "db_get_prompt":
+        from src.connections import reporting_mcp
+
+        return await reporting_mcp.get_prompt(
+            tool_input["prompt_name"],
+            tool_input.get("arguments", {}),
+        )
+
+    elif _is_reporting_mcp_tool(tool_name):
+        from src.connections import reporting_mcp
+
+        original_name = reporting_mcp.get_mcp_tool_original(tool_name)
+        return await reporting_mcp.call_tool(original_name, tool_input)
 
     elif tool_name == "query_aws_costs":
         return await query_aws_costs(
@@ -400,6 +427,15 @@ def _trim_history(history: list, max_tokens: int = 150000) -> list:
                                 ):
                                     result_data["results"] = result_data["results"][:5]
                                     result_data["_truncated_for_context"] = True
+                                if (
+                                    "result" in result_data
+                                    and isinstance(result_data["result"], str)
+                                    and len(result_data["result"]) > 2000
+                                ):
+                                    result_data["result"] = (
+                                        result_data["result"][:2000] + "\n... [truncated]"
+                                    )
+                                    result_data["_truncated_for_context"] = True
                                 block["content"] = json.dumps(result_data)
                         except (json.JSONDecodeError, TypeError):
                             block["content"] = result_str[:2000] + "... [truncated]"
@@ -605,38 +641,44 @@ async def _handle_delegation(
         result.get("duration_seconds", 0),
     )
 
-    yield sse_tool_result(
-        tool_block.name,
-        {
-            "agent": result.get("agent"),
-            "status": result.get("status"),
-            "summary": result.get("summary", "")[:2000],
-            "tool_calls": result.get("tool_calls", 0),
-            "duration_seconds": result.get("duration_seconds", 0),
-        },
-    ), None
-    yield sse_agent_done(agent_type), None
-
-    yield None, {
-        "type": "tool_result",
-        "tool_use_id": tool_block.id,
-        "content": json.dumps(
+    yield (
+        sse_tool_result(
+            tool_block.name,
             {
                 "agent": result.get("agent"),
                 "status": result.get("status"),
-                "summary": result.get("summary", ""),
-                "findings": result.get("findings", []),
+                "summary": result.get("summary", "")[:2000],
                 "tool_calls": result.get("tool_calls", 0),
                 "duration_seconds": result.get("duration_seconds", 0),
-                "note": (
-                    "The detailed analysis above was already streamed "
-                    "to the user. Do NOT repeat or re-summarize it. "
-                    "Only add brief follow-up suggestions or source "
-                    "citations if useful."
-                ),
-            }
+            },
         ),
-    }
+        None,
+    )
+    yield sse_agent_done(agent_type), None
+
+    yield (
+        None,
+        {
+            "type": "tool_result",
+            "tool_use_id": tool_block.id,
+            "content": json.dumps(
+                {
+                    "agent": result.get("agent"),
+                    "status": result.get("status"),
+                    "summary": result.get("summary", ""),
+                    "findings": result.get("findings", []),
+                    "tool_calls": result.get("tool_calls", 0),
+                    "duration_seconds": result.get("duration_seconds", 0),
+                    "note": (
+                        "The detailed analysis above was already streamed "
+                        "to the user. Do NOT repeat or re-summarize it. "
+                        "Only add brief follow-up suggestions or source "
+                        "citations if useful."
+                    ),
+                }
+            ),
+        },
+    )
 
 
 async def _handle_direct_tool(
@@ -664,11 +706,14 @@ async def _handle_direct_tool(
     elif tool_name == "render_chart" and "error" not in result:
         yield sse_event("chart", result), None
 
-    yield None, {
-        "type": "tool_result",
-        "tool_use_id": tool_block.id,
-        "content": json.dumps(result),
-    }
+    yield (
+        None,
+        {
+            "type": "tool_result",
+            "tool_use_id": tool_block.id,
+            "content": json.dumps(result),
+        },
+    )
 
 
 async def run_agent(
@@ -686,7 +731,9 @@ async def run_agent(
     """
     from src.agent.agents import AGENTS, classify_fast, run_sub_agent_streaming
     from src.agent.system_prompt import get_agent_prompt
-    from src.agent.tool_definitions import ORCHESTRATOR_TOOLS
+    from src.agent.tool_definitions import get_orchestrator_tools
+
+    orchestrator_tools = get_orchestrator_tools()
 
     logger.info("run_agent: question=%s", question[:120])
 
@@ -735,7 +782,7 @@ async def run_agent(
             f"orchestrator_round_{_round}",
             system,
             messages,
-            ORCHESTRATOR_TOOLS,
+            orchestrator_tools,
             model,
         )
 
@@ -746,7 +793,7 @@ async def run_agent(
                     model=model,
                     max_tokens=max_tokens,
                     system=system,
-                    tools=ORCHESTRATOR_TOOLS,  # type: ignore[arg-type]
+                    tools=orchestrator_tools,  # type: ignore[arg-type]
                     messages=messages,
                 )
 
@@ -857,12 +904,12 @@ async def run_alert_investigation(
     today = datetime.now(UTC).strftime("%Y-%m-%d")
 
     from src.agent.system_prompt import get_agent_prompt
-    from src.agent.tool_definitions import SECURITY_TOOLS
+    from src.agent.tool_definitions import get_security_tools
 
     system = (
         f"{get_agent_prompt('security')}\n\nToday's date is {today}.\n{ALERT_INVESTIGATION_PROMPT}"
     )
-    alert_tools = list(SECURITY_TOOLS)
+    alert_tools = list(get_security_tools())
     alert_tools.append(SUBMIT_ALERT_VERDICT_TOOL)
 
     # Construct the user message from alert context

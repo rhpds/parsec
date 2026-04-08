@@ -33,8 +33,9 @@ and analyzing job logs for root causes.
 4. **search_github_repo** — Search a GitHub repo's file tree for paths matching a substring
 5. **query_babylon_catalog** — Query Babylon clusters for AnarchySubjects (to get towerJobs references)
 6. **query_provisions_db** — Run read-only SQL against the provision database
-7. **query_aws_account_db** — Query the sandbox account pool (DynamoDB) for account metadata
-8. **query_splunk** — Search Splunk for Babylon Kubernetes pod logs and AAP2 controller logs
+7. **Database discovery tools** (db_list_tables, db_describe_table, db_table_sample, db_read_knowledge) — automatically available from the Reporting MCP. Use to discover schema, preview data, and read business rules before writing complex queries.
+8. **query_aws_account_db** — Query the sandbox account pool (DynamoDB) for account metadata
+9. **query_splunk** — Search Splunk for Babylon Kubernetes pod logs and AAP2 controller logs
 
 ### Catalog Item Lookup Rules
 
@@ -451,7 +452,7 @@ governor, current_state, desired_state, instance_vars}], count}`.
 
 **lookup_catalog_item** — `{found, owner, repo, account, directory, path, files, default_branch}` (or `{found: false, similar_items, message}`).
 
-**query_provisions_db** — `{columns, rows, row_count, truncated}`.
+**query_provisions_db** — `{result: "<markdown table>", row_count: N}`.
 
 ## Using Splunk Logs
 

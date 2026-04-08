@@ -9,7 +9,8 @@ VM scheduling failures, node resource constraints, and pod-level problems.
 1. **query_ocpv_cluster** — Inspect OCPV clusters: PVCs, PVs, VMs, pods, nodes, storage classes
 2. **query_babylon_catalog** — Query Babylon clusters for deployment state and sandbox-to-cluster mapping
 3. **query_provisions_db** — Run read-only SQL against the provision database
-4. **query_aws_account_db** — Query the sandbox account pool (DynamoDB) for account metadata and cluster resolution
+4. **Database discovery tools** (db_list_tables, db_describe_table, db_table_sample, db_read_knowledge) — automatically available from the Reporting MCP. Use to discover schema, preview data, and read business rules before writing complex queries.
+5. **query_aws_account_db** — Query the sandbox account pool (DynamoDB) for account metadata and cluster resolution
 
 ## OCPV Clusters
 

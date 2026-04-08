@@ -31,12 +31,12 @@ from src.agent.streaming import (
 )
 from src.agent.system_prompt import get_agent_prompt
 from src.agent.tool_definitions import (
-    AAP2_TOOLS,
-    BABYLON_TOOLS,
-    COST_TOOLS,
-    ICINGA_TOOLS,
-    OCPV_TOOLS,
-    SECURITY_TOOLS,
+    get_aap2_tools,
+    get_babylon_tools,
+    get_cost_tools,
+    get_icinga_tools,
+    get_ocpv_tools,
+    get_security_tools,
 )
 from src.config import get_config
 
@@ -52,24 +52,31 @@ class AgentConfig:
 
     name: str
     agent_type: str
-    tools: list[dict]
+    tools_fn: Callable[[], list[dict]]
     prompt_file: str
     shared_prompt: str = "config/prompts/shared_context.md"
     max_rounds: int = 8
     description: str = ""
     slow_tool_labels: dict[str, str] = field(default_factory=dict)
 
+    @property
+    def tools(self) -> list[dict]:
+        """Return tools, evaluating the function each time.
+
+        This ensures dynamically discovered MCP tools are always current.
+        """
+        return self.tools_fn()
+
 
 AGENTS: dict[str, AgentConfig] = {
     "cost": AgentConfig(
         name="Cost Investigation",
         agent_type="cost",
-        tools=COST_TOOLS,
+        tools_fn=get_cost_tools,
         prompt_file="config/prompts/cost_agent.md",
         max_rounds=8,
         description=(
-            "Investigates cloud spending across AWS/Azure/GCP, "
-            "GPU abuse, ODCR waste, and pricing."
+            "Investigates cloud spending across AWS/Azure/GCP, GPU abuse, ODCR waste, and pricing."
         ),
         slow_tool_labels={
             "query_azure_costs": "Querying Azure billing",
@@ -78,11 +85,11 @@ AGENTS: dict[str, AgentConfig] = {
     "aap2": AgentConfig(
         name="AAP2 Investigation",
         agent_type="aap2",
-        tools=AAP2_TOOLS,
+        tools_fn=get_aap2_tools,
         prompt_file="config/prompts/aap2_agent.md",
         max_rounds=20,
         description=(
-            "Investigates AAP2 job failures and traces configs " "through agnosticv/agnosticd."
+            "Investigates AAP2 job failures and traces configs through agnosticv/agnosticd."
         ),
         slow_tool_labels={
             "query_babylon_catalog": "Querying Babylon cluster",
@@ -92,11 +99,11 @@ AGENTS: dict[str, AgentConfig] = {
     "babylon": AgentConfig(
         name="Babylon Investigation",
         agent_type="babylon",
-        tools=BABYLON_TOOLS,
+        tools_fn=get_babylon_tools,
         prompt_file="config/prompts/babylon_agent.md",
         max_rounds=8,
         description=(
-            "Investigates Babylon catalog items, deployments, " "lifecycle state, and workshops."
+            "Investigates Babylon catalog items, deployments, lifecycle state, and workshops."
         ),
         slow_tool_labels={
             "query_babylon_catalog": "Querying Babylon cluster",
@@ -105,7 +112,7 @@ AGENTS: dict[str, AgentConfig] = {
     "security": AgentConfig(
         name="Security Investigation",
         agent_type="security",
-        tools=SECURITY_TOOLS,
+        tools_fn=get_security_tools,
         prompt_file="config/prompts/security_agent.md",
         max_rounds=8,
         description=(
@@ -120,7 +127,7 @@ AGENTS: dict[str, AgentConfig] = {
     "ocpv": AgentConfig(
         name="OCPV Infrastructure",
         agent_type="ocpv",
-        tools=OCPV_TOOLS,
+        tools_fn=get_ocpv_tools,
         prompt_file="config/prompts/ocpv_agent.md",
         max_rounds=8,
         description=(
@@ -135,7 +142,7 @@ AGENTS: dict[str, AgentConfig] = {
     "icinga": AgentConfig(
         name="Icinga Monitoring",
         agent_type="icinga",
-        tools=ICINGA_TOOLS,
+        tools_fn=get_icinga_tools,
         prompt_file="config/prompts/icinga_agent.md",
         max_rounds=15,
         description=(

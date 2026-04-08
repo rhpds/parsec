@@ -21,9 +21,8 @@ anthropic:
   # bedrock_region: ""  # falls back to aws.region
 
 provision_db:
-  min_pool_size: 2
-  max_pool_size: 10
-  statement_timeout_ms: 30000
+  # Direct DB access removed — all queries go through the Reporting MCP.
+  # max_rows is still used to limit query results sent to the MCP.
   max_rows: 500
 
 aws:
@@ -85,6 +84,13 @@ github:
   # Uses GitHub's hosted MCP server — no sidecar needed.
   # Auth via PAT in Authorization header (uses github.token above).
   mcp_url: "https://api.githubcopilot.com/mcp/"
+
+reporting_mcp:
+  # Reporting MCP server URL (streamable HTTP transport).
+  # Runs in the demo-reporting namespace on the same OpenShift cluster.
+  # Cross-namespace access via OpenShift Service DNS.
+  # Set in config.local.yaml or PARSEC_REPORTING_MCP__MCP_URL.
+  mcp_url: ""
 
 icinga:
   # Icinga MCP server URL (SSE transport).

@@ -34,7 +34,6 @@
           - env is defined
           - target_namespace is defined
           - kubeconfig is defined
-          - provision_db_host is defined
         fail_msg: >
           Missing required variables. Create playbooks/vars/{{ env | default('dev') }}.yml
           from the corresponding .example file.

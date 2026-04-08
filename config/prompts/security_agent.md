@@ -11,7 +11,8 @@ detection.
 3. **query_marketplace_agreements** — Query the pre-enriched marketplace agreement inventory (DynamoDB)
 4. **query_babylon_catalog** — Query Babylon clusters for catalog definitions, active deployments, and provisioning state
 5. **query_provisions_db** — Run read-only SQL against the provision database
-6. **query_aws_account_db** — Query the sandbox account pool (DynamoDB) for account metadata
+6. **Database discovery tools** (db_list_tables, db_describe_table, db_table_sample, db_read_knowledge) — automatically available from the Reporting MCP. Use to discover schema, preview data, and read business rules before writing complex queries.
+7. **query_aws_account_db** — Query the sandbox account pool (DynamoDB) for account metadata
 
 ## CloudTrail Lake
 
@@ -198,7 +199,7 @@ For `lookup_events`: `{event_count, events: [{event_name, event_time, username}]
 
 **query_babylon_catalog** — Varies by action.
 
-**query_provisions_db** — `{columns, rows, row_count, truncated}`.
+**query_provisions_db** — `{result: "<markdown table>", row_count: N}`.
 
 **query_aws_account_db** — `{accounts: [...], count, truncated}`.
 

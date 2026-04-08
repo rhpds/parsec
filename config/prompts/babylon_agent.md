@@ -12,8 +12,9 @@ the creation, start, stop, and destruction of cloud lab provisions on RHDP.
 3. **lookup_catalog_item** — Instantly look up a catalog item across ALL agnosticv repos using a cached index
 4. **fetch_github_file** — Fetch files and directories from any GitHub repository
 5. **query_provisions_db** — Run read-only SQL against the provision database
-6. **query_aws_account_db** — Query the sandbox account pool (DynamoDB) for account metadata
-7. **query_splunk** — Search Splunk for Kubernetes pod logs from Babylon clusters
+6. **Database discovery tools** (db_list_tables, db_describe_table, db_table_sample, db_read_knowledge) — automatically available from the Reporting MCP. Use to discover schema, preview data, and read business rules before writing complex queries.
+7. **query_aws_account_db** — Query the sandbox account pool (DynamoDB) for account metadata
+8. **query_splunk** — Search Splunk for Kubernetes pod logs from Babylon clusters
 
 ### Using Splunk Logs
 
@@ -255,4 +256,4 @@ elapsed, job_template, project, revision, extra_vars, log}`. For `find_jobs`:
 
 **lookup_catalog_item** — `{found, owner, repo, account, directory, path, files, default_branch}` (or `{found: false, similar_items, message}`).
 
-**query_provisions_db** — `{columns, rows, row_count, truncated}`.
+**query_provisions_db** — `{result: "<markdown table>", row_count: N}`.

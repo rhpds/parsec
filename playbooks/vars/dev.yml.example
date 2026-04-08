@@ -17,11 +17,8 @@ vertex_credentials_path: ~/path/to/vertex-sa.json
 # GCP billing service account key (separate from Vertex)
 gcp_billing_credentials_path: ~/path/to/gcp-billing-sa.json
 
-# Provision DB (read-only user)
-provision_db_host: your-db-host.example.com
-provision_db_name: your_database
-provision_db_user: your_readonly_user
-provision_db_password: your_password
+# Reporting MCP (cross-namespace, demo-reporting)
+# reporting_mcp_url: "http://reporting-mcp.demo-reporting.svc:8080/mcp"
 
 # AWS (cost-monitor IAM user)
 aws_access_key_id: AKIA...

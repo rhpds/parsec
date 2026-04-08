@@ -1,8 +1,12 @@
 """Health check endpoints."""
 
+import logging
+
 from fastapi import APIRouter
 
-import src.connections.postgres as pg
+import src.connections.reporting_mcp as reporting_mcp
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["health"])
 
@@ -15,12 +19,11 @@ async def health():
 
 @router.get("/health/ready")
 async def readiness():
-    """Readiness probe — checks DB if pool exists, doesn't trigger init."""
-    if pg._pool is None:
-        return {"status": "ready", "db": "not_connected_yet"}
-    try:
-        async with pg._pool.acquire() as conn:
-            await conn.fetchval("SELECT 1")
-        return {"status": "ready", "db": "connected"}
-    except Exception as e:
-        return {"status": "not_ready", "db": str(e)}
+    """Readiness probe — checks MCP init succeeded, doesn't trigger init."""
+    if not reporting_mcp.get_mcp_url():
+        return {"status": "ready", "db": "reporting_mcp_not_configured"}
+
+    if reporting_mcp.get_server_instructions() or reporting_mcp.get_mcp_tools():
+        return {"status": "ready", "db": "via_reporting_mcp"}
+
+    return {"status": "not_ready", "db": "reporting_mcp_not_initialized"}

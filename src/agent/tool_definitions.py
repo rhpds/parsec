@@ -1,9 +1,10 @@
 """Claude API tool schemas for Parsec.
 
 Tool definitions are organized in two ways:
-1. TOOLS — the flat list of all tools (used by the monolithic agent and as a reference)
-2. Per-agent groupings — COST_TOOLS, AAP2_TOOLS, BABYLON_TOOLS, SECURITY_TOOLS,
-   ORCHESTRATOR_TOOLS (used by the sub-agent architecture)
+1. TOOLS — static tool schemas (non-MCP tools)
+2. Per-agent getter functions — get_cost_tools(), get_security_tools(), etc.
+   These merge static tools with dynamically discovered Reporting MCP tools
+   (db_list_tables, db_describe_table, db_read_knowledge, etc.).
 """
 
 import logging
@@ -60,7 +61,9 @@ TOOLS = [
         "description": (
             "Execute a read-only SQL query against the RHDP provision database. "
             "Use this to look up users, provisions, catalog items, and cloud account mappings. "
-            "Only SELECT queries are allowed. Results are limited to 500 rows."
+            "Only SELECT queries are allowed. Results are limited to 500 rows. "
+            "If unsure about column names, call db_describe_table first. "
+            "For complex business logic, call db_read_knowledge first."
         ),
         "input_schema": {
             "type": "object",
@@ -631,7 +634,7 @@ TOOLS = [
                 "guid": {
                     "type": "string",
                     "description": (
-                        "Filter deployments or AnarchySubjects by provision GUID " "(e.g. 'qglkb')."
+                        "Filter deployments or AnarchySubjects by provision GUID (e.g. 'qglkb')."
                     ),
                 },
                 "max_results": {
@@ -1136,8 +1139,7 @@ TOOLS = [
                 "comment_name": {
                     "type": "string",
                     "description": (
-                        "Full comment name for remove_comment "
-                        "(get this from get_comments results)."
+                        "Full comment name for remove_comment (get this from get_comments results)."
                     ),
                 },
                 "start_time": {
@@ -1206,8 +1208,7 @@ TOOLS = [
                 "changed_only": {
                     "type": "boolean",
                     "description": (
-                        "For get_job_events: only return events that made changes. "
-                        "Default: false."
+                        "For get_job_events: only return events that made changes. Default: false."
                     ),
                 },
                 "status": {
@@ -1220,15 +1221,13 @@ TOOLS = [
                 "created_after": {
                     "type": "string",
                     "description": (
-                        "For find_jobs: ISO timestamp or YYYY-MM-DD. "
-                        "Only jobs created after this."
+                        "For find_jobs: ISO timestamp or YYYY-MM-DD. Only jobs created after this."
                     ),
                 },
                 "created_before": {
                     "type": "string",
                     "description": (
-                        "For find_jobs: ISO timestamp or YYYY-MM-DD. "
-                        "Only jobs created before this."
+                        "For find_jobs: ISO timestamp or YYYY-MM-DD. Only jobs created before this."
                     ),
                 },
                 "template_name": {
@@ -1286,11 +1285,28 @@ _CONDITIONAL_TOOLS: dict[str, bool] = {
 }
 
 
-def _tools_by_name(*names: str) -> list[dict]:
+def _get_reporting_mcp_tools() -> list[dict]:
+    """Return dynamically discovered Reporting MCP tool schemas.
+
+    These are cached at startup by reporting_mcp.fetch_server_instructions().
+    Returns an empty list if the MCP is not configured or discovery failed.
+    """
+    try:
+        from src.connections.reporting_mcp import get_mcp_tools
+
+        return get_mcp_tools()
+    except Exception:
+        return []
+
+
+def _tools_by_name(*names: str, include_mcp: bool = False) -> list[dict]:
     """Return tool definitions from TOOLS matching the given names.
 
     Skips tools that require unconfigured backends (e.g. query_splunk
     when Splunk is not configured) so the agent never sees them.
+
+    When include_mcp=True, appends all dynamically discovered Reporting
+    MCP tools (db_list_tables, db_describe_table, db_read_knowledge, etc.).
     """
     by_name = {t["name"]: t for t in TOOLS}
     result = []
@@ -1301,84 +1317,112 @@ def _tools_by_name(*names: str) -> list[dict]:
             result.append(by_name[n])
         else:
             logger.warning("Unknown tool name in agent grouping: %s", n)
+    if include_mcp:
+        result.extend(_get_reporting_mcp_tools())
     return result
 
 
-COST_TOOLS = _tools_by_name(
-    "query_aws_costs",
-    "query_azure_costs",
-    "query_gcp_costs",
-    "query_aws_pricing",
-    "query_cost_monitor",
-    "query_aws_capacity_manager",
-    "query_provisions_db",
-    "query_aws_account_db",
-    "render_chart",
-    "generate_report",
-)
+def get_cost_tools() -> list[dict]:
+    """Cost agent tools (called at request time for dynamic MCP tools)."""
+    return _tools_by_name(
+        "query_aws_costs",
+        "query_azure_costs",
+        "query_gcp_costs",
+        "query_aws_pricing",
+        "query_cost_monitor",
+        "query_aws_capacity_manager",
+        "query_provisions_db",
+        "query_aws_account_db",
+        "render_chart",
+        "generate_report",
+        include_mcp=True,
+    )
 
-AAP2_TOOLS = _tools_by_name(
-    "query_aap2",
-    "query_splunk",
-    "fetch_github_file",
-    "lookup_catalog_item",
-    "search_github_repo",
-    "search_agnosticv_prs",
-    "query_babylon_catalog",
-    "query_provisions_db",
-    "query_aws_account_db",
-    "render_chart",
-    "generate_report",
-)
 
-BABYLON_TOOLS = _tools_by_name(
-    "query_babylon_catalog",
-    "query_splunk",
-    "query_aap2",
-    "fetch_github_file",
-    "search_github_repo",
-    "search_agnosticv_prs",
-    "lookup_catalog_item",
-    "query_provisions_db",
-    "query_aws_account_db",
-    "render_chart",
-    "generate_report",
-)
+def get_aap2_tools() -> list[dict]:
+    """AAP2 agent tools (called at request time for dynamic MCP tools)."""
+    return _tools_by_name(
+        "query_aap2",
+        "query_splunk",
+        "fetch_github_file",
+        "lookup_catalog_item",
+        "search_github_repo",
+        "search_agnosticv_prs",
+        "query_babylon_catalog",
+        "query_provisions_db",
+        "query_aws_account_db",
+        "render_chart",
+        "generate_report",
+        include_mcp=True,
+    )
 
-SECURITY_TOOLS = _tools_by_name(
-    "query_cloudtrail",
-    "query_aws_account",
-    "query_marketplace_agreements",
-    "query_babylon_catalog",
-    "query_provisions_db",
-    "query_aws_account_db",
-    "render_chart",
-    "generate_report",
-)
 
-OCPV_TOOLS = _tools_by_name(
-    "query_ocpv_cluster",
-    "query_babylon_catalog",
-    "query_provisions_db",
-    "query_aws_account_db",
-    "render_chart",
-    "generate_report",
-)
+def get_babylon_tools() -> list[dict]:
+    """Babylon agent tools (called at request time for dynamic MCP tools)."""
+    return _tools_by_name(
+        "query_babylon_catalog",
+        "query_splunk",
+        "query_aap2",
+        "fetch_github_file",
+        "search_github_repo",
+        "search_agnosticv_prs",
+        "lookup_catalog_item",
+        "query_provisions_db",
+        "query_aws_account_db",
+        "render_chart",
+        "generate_report",
+        include_mcp=True,
+    )
 
-ICINGA_TOOLS = _tools_by_name(
-    "query_icinga",
-    "fetch_github_file",
-    "search_github_repo",
-    "render_chart",
-    "generate_report",
-)
 
-ORCHESTRATOR_DIRECT_TOOLS = _tools_by_name(
-    "query_provisions_db",
-    "query_aws_account_db",
-    "render_chart",
-    "generate_report",
-)
+def get_security_tools() -> list[dict]:
+    """Security agent tools (called at request time for dynamic MCP tools)."""
+    return _tools_by_name(
+        "query_cloudtrail",
+        "query_aws_account",
+        "query_marketplace_agreements",
+        "query_babylon_catalog",
+        "query_provisions_db",
+        "query_aws_account_db",
+        "render_chart",
+        "generate_report",
+        include_mcp=True,
+    )
+
+
+def get_ocpv_tools() -> list[dict]:
+    """OCPV agent tools (called at request time for dynamic MCP tools)."""
+    return _tools_by_name(
+        "query_ocpv_cluster",
+        "query_babylon_catalog",
+        "query_provisions_db",
+        "query_aws_account_db",
+        "render_chart",
+        "generate_report",
+        include_mcp=True,
+    )
+
+
+def get_icinga_tools() -> list[dict]:
+    """Icinga agent tools (no MCP tools needed)."""
+    return _tools_by_name(
+        "query_icinga",
+        "fetch_github_file",
+        "search_github_repo",
+        "render_chart",
+        "generate_report",
+    )
+
+
+def get_orchestrator_direct_tools() -> list[dict]:
+    """Orchestrator direct tools (called at request time for dynamic MCP tools)."""
+    return _tools_by_name(
+        "query_provisions_db",
+        "query_aws_account_db",
+        "render_chart",
+        "generate_report",
+        include_mcp=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1595,4 +1639,7 @@ DELEGATION_TOOLS = [
     INVESTIGATE_ICINGA_TOOL,
 ]
 
-ORCHESTRATOR_TOOLS = ORCHESTRATOR_DIRECT_TOOLS + DELEGATION_TOOLS
+
+def get_orchestrator_tools() -> list[dict]:
+    """Return the full orchestrator tool set (direct + delegation)."""
+    return get_orchestrator_direct_tools() + DELEGATION_TOOLS
