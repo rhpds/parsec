@@ -23,7 +23,7 @@ async def readiness():
     if not reporting_mcp.get_mcp_url():
         return {"status": "ready", "db": "reporting_mcp_not_configured"}
 
-    if reporting_mcp.get_server_instructions():
+    if reporting_mcp.get_server_instructions() or reporting_mcp.get_mcp_tools():
         return {"status": "ready", "db": "via_reporting_mcp"}
 
     return {"status": "not_ready", "db": "reporting_mcp_not_initialized"}
