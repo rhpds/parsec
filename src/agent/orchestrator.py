@@ -472,13 +472,34 @@ def _trim_history(history: list, max_tokens: int = 150000) -> list:
     return messages
 
 
-def _clean_content_block(block: dict) -> dict:
-    """Strip SDK-only fields that the API rejects on input."""
-    # The SDK adds fields like 'caller' to tool_use blocks that aren't
-    # valid when sending messages back to the API.
-    if block.get("type") == "tool_use":
-        return {k: v for k, v in block.items() if k in ("type", "id", "name", "input")}
-    return block
+def _clean_content_block(block) -> dict:
+    """Serialize a content block, keeping only fields the API accepts.
+
+    The Anthropic SDK preserves unknown fields (e.g. ``caller: null``) from
+    API responses via Pydantic's ``extra='allow'``.  Sending those back in
+    subsequent requests causes 400 errors.  Handles both SDK model objects
+    and plain dicts (from cached frontend history).
+    """
+    if hasattr(block, "model_dump"):
+        d = block.model_dump()
+    elif isinstance(block, dict):
+        d = block
+    else:
+        return {"type": "text", "text": str(block)}
+
+    btype = d.get("type")
+    if btype == "tool_use":
+        return {"type": "tool_use", "id": d["id"], "name": d["name"], "input": d["input"]}
+    if btype == "text":
+        return {"type": "text", "text": d["text"]}
+    if btype == "tool_result":
+        cleaned: dict = {"type": "tool_result", "tool_use_id": d["tool_use_id"]}
+        if "content" in d:
+            cleaned["content"] = d["content"]
+        if d.get("is_error"):
+            cleaned["is_error"] = d["is_error"]
+        return cleaned
+    return d
 
 
 def _serialize_messages(messages: list) -> list:
@@ -769,7 +790,7 @@ async def run_agent(
     system = f"{get_agent_prompt('orchestrator')}\n\nToday's date is {today}."
 
     incoming_history = conversation_history or []
-    messages = _trim_history(incoming_history)
+    messages = _serialize_messages(_trim_history(incoming_history))
     logger.info(
         "Orchestrator loop: %d history messages received, %d after trim",
         len(incoming_history),
@@ -823,7 +844,9 @@ async def run_agent(
             elif block.type == "tool_use":
                 tool_use_blocks.append(block)
 
-        messages.append({"role": "assistant", "content": assistant_content})
+        messages.append(
+            {"role": "assistant", "content": [_clean_content_block(b) for b in assistant_content]}
+        )
 
         if not tool_use_blocks:
             yield sse_event("history", {"messages": _serialize_messages(messages)})
@@ -976,7 +999,9 @@ async def run_alert_investigation(
             elif block.type == "tool_use":
                 tool_use_blocks.append(block)
 
-        messages.append({"role": "assistant", "content": assistant_content})
+        messages.append(
+            {"role": "assistant", "content": [_clean_content_block(b) for b in assistant_content]}
+        )
 
         if not tool_use_blocks:
             # Claude stopped without calling any tools — done

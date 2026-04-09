@@ -229,7 +229,7 @@ _ICINGA_PATTERNS = re.compile(
     \bicinga\b | \bmonitoring\s+(alert|status|check|state|problem)
     | host\s+(down|unreachable|state|check)
     | service\s+(critical|warning|unknown|check|state)
-    | \bdowntime\b.*(?:schedul|activ|remov)
+    | \bdowntime\b.*(?:schedul|active|remov)
     | \backnowledg
     | monitoring\s+health | infra.*health\s+check
     """,
@@ -461,7 +461,11 @@ async def run_sub_agent(  # noqa: C901
             elif block.type == "tool_use":
                 tool_use_blocks.append(block)
 
-        messages.append({"role": "assistant", "content": assistant_content})
+        from src.agent.orchestrator import _clean_content_block
+
+        messages.append(
+            {"role": "assistant", "content": [_clean_content_block(b) for b in assistant_content]}
+        )
 
         if not tool_use_blocks:
             break
@@ -608,13 +612,14 @@ async def run_sub_agent_streaming(  # noqa: C901
     system = f"{get_agent_prompt(agent_type)}\n\nToday's date is {today}."
 
     incoming_history = conversation_history or []
-    messages = _trim_history(incoming_history)
-    messages.append({"role": "user", "content": task})
 
     def _serialize_messages(msgs: list) -> list:
         from src.agent.orchestrator import _serialize_messages
 
         return _serialize_messages(msgs)
+
+    messages = _serialize_messages(_trim_history(incoming_history))
+    messages.append({"role": "user", "content": task})
 
     logger.info(
         "Streaming sub-agent %s started (fast-path): %d history messages, task=%s",
@@ -682,7 +687,11 @@ async def run_sub_agent_streaming(  # noqa: C901
             elif block.type == "tool_use":
                 tool_use_blocks.append(block)
 
-        messages.append({"role": "assistant", "content": assistant_content})
+        from src.agent.orchestrator import _clean_content_block
+
+        messages.append(
+            {"role": "assistant", "content": [_clean_content_block(b) for b in assistant_content]}
+        )
 
         if not tool_use_blocks:
             logger.info(
