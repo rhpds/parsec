@@ -454,6 +454,14 @@ form.addEventListener("submit", async (e) => {
     }
     sendBtn.addEventListener("click", onCancel);
 
+    // Disable Share buttons on previous messages while streaming
+    document.querySelectorAll(".response-export-btn").forEach(function(btn) {
+        if (btn.textContent === "Share") {
+            btn.disabled = true;
+            btn.title = "Share is disabled while a query is running";
+        }
+    });
+
     // Collapse any active choice buttons from previous messages
     collapseActiveChoices("Skipped");
 
@@ -872,6 +880,14 @@ form.addEventListener("submit", async (e) => {
 
     // History is updated via the "history" SSE event from the server,
     // which includes the full message array with tool calls and results.
+
+    // Re-enable Share buttons now that streaming is done
+    document.querySelectorAll(".response-export-btn").forEach(function(btn) {
+        if (btn.textContent === "Share") {
+            btn.disabled = false;
+            btn.title = "";
+        }
+    });
 
     // Restore Send button
     sendBtn.removeEventListener("click", onCancel);
