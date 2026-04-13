@@ -3,6 +3,30 @@
 Provides common workshop analytics patterns and quarterly/monthly reports
 without requiring users to write complex SQL. Wraps the provision_db tool
 with workshop-specific business logic.
+
+Example usage:
+    # Monthly summary
+    result = await get_workshop_analytics(
+        action="monthly_summary",
+        start_date="2026-01-01",
+        end_date="2026-03-31"
+    )
+
+    # Quarterly comparison
+    result = await get_workshop_analytics(
+        action="quarterly_comparison",
+        start_date="2026-01-01",
+        end_date="2026-03-31",
+        baseline_start_date="2025-01-01",
+        baseline_end_date="2025-03-31"
+    )
+
+Database requirements:
+    - workshop table (id, created_at, user_seats, assigned_users,
+      experience_rating, white_glove, stage_name, failed_provisions, catalog_id)
+    - catalog_items table (id, name, category)
+    - provision_sales table (workshop_id, opportunity_id, opportunity_created_date)
+    - sales_opportunity table (opportunity_id, amount, stage_name)
 """
 
 import logging
