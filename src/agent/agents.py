@@ -114,7 +114,7 @@ AGENTS: dict[str, AgentConfig] = {
         agent_type="security",
         tools_fn=get_security_tools,
         prompt_file="config/prompts/security_agent.md",
-        max_rounds=8,
+        max_rounds=20,
         description=(
             "Investigates CloudTrail events, account security, "
             "marketplace subscriptions, and abuse."
