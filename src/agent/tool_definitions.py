@@ -81,6 +81,61 @@ TOOLS = [
         },
     },
     {
+        "name": "query_workshop_analytics",
+        "description": (
+            "Execute pre-built workshop analytics queries for common reporting patterns. "
+            "Use this for monthly summaries, quarterly comparisons, sales influence reports, "
+            "white glove breakdowns, and seat utilization analysis. Outputs markdown-formatted "
+            "results ready for presentation generation."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "monthly_summary",
+                        "quarterly_comparison",
+                        "sales_influence",
+                        "white_glove_breakdown",
+                        "seat_utilization",
+                    ],
+                    "description": (
+                        "Type of workshop analytics report: "
+                        "monthly_summary = comprehensive single month report. "
+                        "quarterly_comparison = YoY quarterly comparison with growth %. "
+                        "sales_influence = pipeline/closed/win rate metrics. "
+                        "white_glove_breakdown = by stage and category analysis. "
+                        "seat_utilization = efficiency and waste analysis."
+                    ),
+                },
+                "start_date": {
+                    "type": "string",
+                    "description": "Start date in YYYY-MM-DD format (e.g., 2026-01-01)",
+                },
+                "end_date": {
+                    "type": "string",
+                    "description": "End date in YYYY-MM-DD format (e.g., 2026-03-31)",
+                },
+                "baseline_start_date": {
+                    "type": "string",
+                    "description": (
+                        "Baseline period start date (YYYY-MM-DD). "
+                        "Required for quarterly_comparison action only."
+                    ),
+                },
+                "baseline_end_date": {
+                    "type": "string",
+                    "description": (
+                        "Baseline period end date (YYYY-MM-DD). "
+                        "Required for quarterly_comparison action only."
+                    ),
+                },
+            },
+            "required": ["action", "start_date", "end_date"],
+        },
+    },
+    {
         "name": "query_aws_costs",
         "description": (
             "Query AWS Cost Explorer for cost data across specified AWS accounts. "

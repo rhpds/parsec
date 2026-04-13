@@ -49,6 +49,7 @@ from src.tools.icinga import query_icinga
 from src.tools.marketplace_agreements import query_marketplace_agreements
 from src.tools.ocpv import query_ocpv_cluster
 from src.tools.provision_db import execute_query
+from src.tools.workshops import get_workshop_analytics
 from src.tools.splunk import query_splunk
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,15 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:  # noqa: C901
     """Dispatch a tool call to the appropriate handler."""
     if tool_name == "query_provisions_db":
         return await execute_query(tool_input["sql"])
+
+    elif tool_name == "query_workshop_analytics":
+        return await get_workshop_analytics(
+            action=tool_input["action"],
+            start_date=tool_input["start_date"],
+            end_date=tool_input["end_date"],
+            baseline_start_date=tool_input.get("baseline_start_date"),
+            baseline_end_date=tool_input.get("baseline_end_date"),
+        )
 
     elif tool_name == "db_read_knowledge":
         from src.connections import reporting_mcp
