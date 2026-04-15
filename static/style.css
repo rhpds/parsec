@@ -1051,6 +1051,8 @@ footer {
 
 .confidence-callout li {
     margin-bottom: 2px;
+    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 #query-form #new-chat-btn {
