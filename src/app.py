@@ -21,6 +21,7 @@ from src.connections.splunk import init_splunk
 from src.routes.alert import router as alert_router
 from src.routes.conversations import ensure_conversations_dir
 from src.routes.conversations import router as conversations_router
+from src.routes.debug import router as debug_router
 from src.routes.health import router as health_router
 from src.routes.learnings import router as learnings_router
 from src.routes.query import router as query_router
@@ -97,6 +98,7 @@ app.include_router(query_router)
 app.include_router(share_router)
 app.include_router(conversations_router)
 app.include_router(learnings_router)
+app.include_router(debug_router)
 
 # Serve static frontend files
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

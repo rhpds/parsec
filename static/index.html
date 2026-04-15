@@ -61,6 +61,7 @@
         <div class="sidebar-tabs">
             <button id="sidebar-tab-history" class="sidebar-tab" style="display: none;">History &raquo;</button>
             <button id="sidebar-tab-examples" class="sidebar-tab">Examples &raquo;</button>
+            <button id="sidebar-tab-debug" class="sidebar-tab">Debug Automation &raquo;</button>
         </div>
         <header>
             <img src="/logo.png" alt="Parsec" class="header-logo" height="44">
@@ -99,6 +100,33 @@
                 <button type="button" id="new-chat-btn" class="header-btn" title="Clear conversation and start fresh">New Chat</button>
             </form>
         </footer>
+        <div id="debug-view" class="debug-view" style="display: none;">
+            <div class="debug-header">
+                <h1>Debug Automation</h1>
+                <p>Paste an AAP2 job URL to diagnose failures. Traces failures to source code and recommends fixes.</p>
+            </div>
+            <div class="debug-input-row">
+                <input type="text" id="debug-url" placeholder="https://aap2-prod.example.com/#/jobs/playbook/12345/output" autocomplete="off">
+                <button id="debug-diagnose-btn">Diagnose</button>
+            </div>
+            <div id="debug-error" class="debug-error" style="display: none;"></div>
+            <div id="debug-loading" class="debug-loading" style="display: none;">
+                <div class="debug-spinner"></div>
+                <span>Diagnosing...</span>
+            </div>
+            <div id="debug-result" style="display: none;">
+                <div id="debug-summary" class="debug-summary"></div>
+                <div class="debug-tabs">
+                    <button class="debug-tab active" data-tab="triage">Triage</button>
+                    <button class="debug-tab" data-tab="failing-task">Failing Task</button>
+                    <button class="debug-tab" data-tab="fix">Recommended Fix</button>
+                    <button class="debug-tab" data-tab="correlation">Correlation</button>
+                    <button class="debug-tab" data-tab="ee-info">EE Info</button>
+                </div>
+                <div id="debug-tab-content" class="debug-tab-content"></div>
+                <div id="debug-fix-preview" class="debug-fix-preview" style="display: none;"></div>
+            </div>
+        </div>
     </div>
     <div id="share-modal" class="modal-overlay" style="display: none;">
         <div class="modal-content">
