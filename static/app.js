@@ -118,8 +118,14 @@ function closeSidebar() {
 }
 
 document.getElementById("sidebar-close-btn").addEventListener("click", closeSidebar);
-tabHistory.addEventListener("click", function() { openSidebar("history"); });
-tabExamples.addEventListener("click", function() { openSidebar("examples"); });
+tabHistory.addEventListener("click", function() { showChatView(); openSidebar("history"); });
+tabExamples.addEventListener("click", function() { showChatView(); openSidebar("examples"); });
+
+var tabDebug = document.getElementById("sidebar-tab-debug");
+tabDebug.addEventListener("click", function() {
+    closeSidebar();
+    showDebugView();
+});
 
 // Example items click-to-fill
 document.querySelectorAll(".sidebar-examples-list li").forEach(function(li) {
@@ -491,6 +497,9 @@ form.addEventListener("submit", async (e) => {
     let textChunks = [];     // Array of text segments between tool calls
     let currentChunk = "";   // Current text being accumulated
     let chartCanvases = [];  // Track chart canvases for export
+    let toolResults = [];    // Captured tool results for CSV/JSON export
+    let currentToolName = null;
+    let currentToolInput = null;
     let liveWrapper = null;  // Live tool-calls-summary wrapper
     let liveInner = null;    // Inner container for tool calls
     let liveSummary = null;  // Summary element (updated with count)
@@ -566,6 +575,8 @@ form.addEventListener("submit", async (e) => {
                     : liveToolCount + " queries running...";
 
                 currentToolEl = createToolCall(data.tool, data.input);
+                currentToolName = data.tool;
+                currentToolInput = data.input;
                 toolElements[data.tool + "_" + Object.keys(toolElements).length] = currentToolEl;
                 liveInner.appendChild(currentToolEl);
                 scrollToBottom();
@@ -575,6 +586,9 @@ form.addEventListener("submit", async (e) => {
             case "tool_result": {
                 if (currentToolEl) {
                     finalizeToolCall(currentToolEl, data.tool, data.result);
+                    toolResults.push({ tool: currentToolName || data.tool, input: currentToolInput || {}, result: data.result });
+                    currentToolName = null;
+                    currentToolInput = null;
                     currentToolEl = null;
                 }
                 scrollToBottom();
@@ -793,7 +807,8 @@ form.addEventListener("submit", async (e) => {
                 // Store export data and add export buttons
                 assistantEl._exportMarkdown = currentChunk || fullText;
                 assistantEl._exportCharts = chartCanvases;
-                if (fullText.trim() || currentChunk.trim() || chartCanvases.length > 0) {
+                assistantEl._exportToolResults = toolResults;
+                if (fullText.trim() || currentChunk.trim() || chartCanvases.length > 0 || toolResults.length > 0) {
                     contentEl.appendChild(createResponseExportBar(assistantEl));
                 }
 
@@ -1136,6 +1151,22 @@ function createResponseExportBar(messageEl) {
     var bar = document.createElement("div");
     bar.className = "response-export-bar";
 
+    var toolResults = messageEl._exportToolResults || [];
+
+    if (toolResults.length > 0) {
+        var csvBtn = document.createElement("button");
+        csvBtn.className = "response-export-btn";
+        csvBtn.textContent = "Export CSV";
+        csvBtn.addEventListener("click", function() { exportResponseAsCSV(messageEl); });
+        bar.appendChild(csvBtn);
+
+        var jsonBtn = document.createElement("button");
+        jsonBtn.className = "response-export-btn";
+        jsonBtn.textContent = "Export JSON";
+        jsonBtn.addEventListener("click", function() { exportResponseAsJSON(messageEl); });
+        bar.appendChild(jsonBtn);
+    }
+
     var mdBtn = document.createElement("button");
     mdBtn.className = "response-export-btn";
     mdBtn.textContent = "Export MD";
@@ -1293,6 +1324,109 @@ function exportResponseAsPDF(messageEl) {
     });
 }
 
+function exportResponseAsJSON(messageEl) {
+    var toolResults = messageEl._exportToolResults || [];
+    if (toolResults.length === 0) return;
+
+    var json = JSON.stringify(toolResults, null, 2);
+    var blob = new Blob([json], { type: "application/json;charset=utf-8" });
+    var link = document.createElement("a");
+    var timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+    link.download = "parsec-" + timestamp + ".json";
+    link.href = URL.createObjectURL(blob);
+    link.click();
+}
+
+function csvEscapeField(value) {
+    if (value === null || value === undefined) return "";
+    var str = String(value);
+    if (str.indexOf(",") >= 0 || str.indexOf('"') >= 0 || str.indexOf("\n") >= 0) {
+        return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+}
+
+function findTabularData(result) {
+    // Look for arrays of objects in the result
+    if (Array.isArray(result) && result.length > 0 && typeof result[0] === "object") {
+        return result;
+    }
+    if (typeof result !== "object" || result === null) return null;
+    // Search top-level fields for the first array of objects
+    var keys = Object.keys(result);
+    for (var i = 0; i < keys.length; i++) {
+        var val = result[keys[i]];
+        if (Array.isArray(val) && val.length > 0 && typeof val[0] === "object" && val[0] !== null) {
+            return val;
+        }
+    }
+    return null;
+}
+
+function exportResponseAsCSV(messageEl) {
+    var toolResults = messageEl._exportToolResults || [];
+    if (toolResults.length === 0) return;
+
+    var csvSections = [];
+
+    toolResults.forEach(function(tr) {
+        var rows = findTabularData(tr.result);
+        if (!rows) return;
+
+        // Collect all unique column headers across all rows
+        var headers = [];
+        var headerSet = {};
+        rows.forEach(function(row) {
+            Object.keys(row).forEach(function(key) {
+                if (!headerSet[key]) {
+                    headerSet[key] = true;
+                    headers.push(key);
+                }
+            });
+        });
+
+        var lines = [];
+        // Section header comment
+        lines.push("# " + (tr.tool || "results"));
+        // Column headers
+        lines.push(headers.map(csvEscapeField).join(","));
+        // Data rows
+        rows.forEach(function(row) {
+            var vals = headers.map(function(h) {
+                var val = row[h];
+                if (typeof val === "object" && val !== null) val = JSON.stringify(val);
+                return csvEscapeField(val);
+            });
+            lines.push(vals.join(","));
+        });
+
+        csvSections.push(lines.join("\n"));
+    });
+
+    // Fallback: if no tabular data found, export as key-value pairs
+    if (csvSections.length === 0) {
+        toolResults.forEach(function(tr) {
+            var lines = [];
+            lines.push("# " + (tr.tool || "results"));
+            lines.push("key,value");
+            Object.keys(tr.result || {}).forEach(function(key) {
+                var val = tr.result[key];
+                if (typeof val === "object" && val !== null) val = JSON.stringify(val);
+                lines.push(csvEscapeField(key) + "," + csvEscapeField(val));
+            });
+            csvSections.push(lines.join("\n"));
+        });
+    }
+
+    var csv = csvSections.join("\n\n");
+    var blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    var link = document.createElement("a");
+    var timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+    link.download = "parsec-" + timestamp + ".csv";
+    link.href = URL.createObjectURL(blob);
+    link.click();
+}
+
 function renderSharedMessages(messages, interactive) {
     // Build tool_use_id → tool_result map for reconstructing reports/charts
     var toolResultMap = {};
@@ -1326,6 +1460,7 @@ function renderSharedMessages(messages, interactive) {
             var content = msg.content;
             var restoredText = "";
             var restoredCharts = [];
+            var restoredToolResults = [];
 
             if (typeof content === "string") {
                 restoredText = content;
@@ -1362,6 +1497,10 @@ function renderSharedMessages(messages, interactive) {
                             delegations.push({ tc: tc, result: result });
                         } else {
                             totalQueries++;
+                        }
+                        // Capture for CSV/JSON export (skip delegations — their sub-results aren't directly exportable)
+                        if (tc.name !== "delegate_to_agent" && result && typeof result === "object" && !result.error) {
+                            restoredToolResults.push({ tool: tc.name, input: tc.input || {}, result: result });
                         }
                     });
 
@@ -1500,9 +1639,10 @@ function renderSharedMessages(messages, interactive) {
             }
 
             // Add export bar to restored assistant messages
-            if (restoredText.trim()) {
+            if (restoredText.trim() || restoredToolResults.length > 0) {
                 el._exportMarkdown = restoredText;
                 el._exportCharts = restoredCharts;
+                el._exportToolResults = restoredToolResults;
                 contentEl.appendChild(createResponseExportBar(el));
             }
         }
@@ -1513,6 +1653,387 @@ function renderSharedMessages(messages, interactive) {
 function scrollToBottom() {
     const chat = document.getElementById("chat");
     chat.scrollTop = chat.scrollHeight;
+}
+
+// ─── Debug Automation ───
+
+var debugViewEl = document.getElementById("debug-view");
+var chatEl = document.getElementById("chat");
+var footerEl = document.querySelector("footer");
+
+function showDebugView() {
+    chatEl.style.display = "none";
+    footerEl.style.display = "none";
+    debugViewEl.style.display = "flex";
+    debugViewEl.style.flexDirection = "column";
+}
+
+function showChatView() {
+    debugViewEl.style.display = "none";
+    chatEl.style.display = "";
+    footerEl.style.display = "";
+}
+
+// Debug state
+var debugResult = null;
+var debugCorrelation = null;
+var debugEEInfo = null;
+var debugActiveTab = "triage";
+var debugUrl = "";
+
+var debugUrlInput = document.getElementById("debug-url");
+var debugDiagnoseBtn = document.getElementById("debug-diagnose-btn");
+var debugErrorEl = document.getElementById("debug-error");
+var debugLoadingEl = document.getElementById("debug-loading");
+var debugResultEl = document.getElementById("debug-result");
+var debugSummaryEl = document.getElementById("debug-summary");
+var debugTabContentEl = document.getElementById("debug-tab-content");
+var debugFixPreviewEl = document.getElementById("debug-fix-preview");
+
+debugDiagnoseBtn.addEventListener("click", runDiagnosis);
+debugUrlInput.addEventListener("keydown", function(e) {
+    if (e.key === "Enter") runDiagnosis();
+});
+
+function runDiagnosis() {
+    var url = debugUrlInput.value.trim();
+    if (!url) return;
+
+    debugUrl = url;
+    debugResult = null;
+    debugCorrelation = null;
+    debugEEInfo = null;
+    debugActiveTab = "triage";
+
+    debugErrorEl.style.display = "none";
+    debugResultEl.style.display = "none";
+    debugLoadingEl.style.display = "flex";
+    debugDiagnoseBtn.disabled = true;
+
+    fetch("/api/debug/diagnose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: url }),
+    })
+    .then(function(resp) {
+        if (!resp.ok) return resp.json().then(function(d) { throw new Error(d.detail || resp.statusText); });
+        return resp.json();
+    })
+    .then(function(data) {
+        debugResult = data;
+        renderDebugResult();
+    })
+    .catch(function(err) {
+        debugErrorEl.textContent = err.message;
+        debugErrorEl.style.display = "block";
+    })
+    .finally(function() {
+        debugLoadingEl.style.display = "none";
+        debugDiagnoseBtn.disabled = false;
+    });
+}
+
+function formatElapsed(seconds) {
+    if (!seconds) return "\u2014";
+    if (seconds < 60) return Math.round(seconds) + "s";
+    if (seconds < 3600) {
+        var mins = Math.floor(seconds / 60);
+        var secs = Math.round(seconds % 60);
+        return secs > 0 ? mins + "m " + secs + "s" : mins + "m";
+    }
+    var hours = Math.floor(seconds / 3600);
+    var mins2 = Math.floor((seconds % 3600) / 60);
+    return mins2 > 0 ? hours + "h " + mins2 + "m" : hours + "h";
+}
+
+function statusColor(status) {
+    return (status === "failed" || status === "error") ? "red" : "blue";
+}
+
+function escHtml(s) {
+    if (!s) return "";
+    var d = document.createElement("div");
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+function renderDebugResult() {
+    if (!debugResult) return;
+    var m = debugResult.metadata;
+
+    debugSummaryEl.innerHTML =
+        '<span class="debug-status-label ' + statusColor(m.status) + '">' + escHtml(m.status) + '</span>' +
+        '<strong>Job ' + m.id + '</strong>' +
+        '<span>' + escHtml(m.action) + '</span>' +
+        '<span>' + formatElapsed(m.elapsed) + '</span>';
+
+    debugResultEl.style.display = "block";
+    var tabs = debugResultEl.querySelectorAll(".debug-tab");
+    tabs.forEach(function(tab) {
+        tab.onclick = function() {
+            debugActiveTab = tab.getAttribute("data-tab");
+            tabs.forEach(function(t) { t.classList.remove("active"); });
+            tab.classList.add("active");
+            renderDebugTab();
+        };
+        if (tab.getAttribute("data-tab") === debugActiveTab) {
+            tab.classList.add("active");
+        } else {
+            tab.classList.remove("active");
+        }
+    });
+
+    renderDebugTab();
+    renderFixPreview();
+}
+
+function renderDebugTab() {
+    if (debugActiveTab === "triage") renderTriageTab();
+    else if (debugActiveTab === "failing-task") renderFailingTaskTab();
+    else if (debugActiveTab === "fix") renderFixTab();
+    else if (debugActiveTab === "correlation") renderCorrelationTab();
+    else if (debugActiveTab === "ee-info") renderEEInfoTab();
+    renderFixPreview();
+}
+
+function renderTriageTab() {
+    var m = debugResult.metadata;
+    var html = '<dl class="debug-dl">';
+    html += '<dt>Status</dt><dd>' + escHtml(m.status) + '</dd>';
+    html += '<dt>Action</dt><dd>' + escHtml(m.action) + '</dd>';
+    html += '<dt>Started</dt><dd>' + (m.started ? new Date(m.started).toLocaleString() : "\u2014") + '</dd>';
+    html += '<dt>Elapsed</dt><dd>' + formatElapsed(m.elapsed) + '</dd>';
+    if (m.jobExplanation) {
+        html += '<dt>Job Explanation</dt><dd>' + escHtml(m.jobExplanation) + '</dd>';
+    }
+    if (m.resultTraceback) {
+        html += '<dt>Result Traceback</dt><dd><div class="debug-code">' + escHtml(m.resultTraceback) + '</div></dd>';
+    }
+    html += '</dl>';
+    debugTabContentEl.innerHTML = html;
+}
+
+function renderFailingTaskTab() {
+    var ft = debugResult.failingTask;
+    if (!ft) {
+        debugTabContentEl.innerHTML = '<p class="debug-empty">No failing task information available.</p>';
+        return;
+    }
+    var html = '<dl class="debug-dl">';
+    html += '<dt>Task</dt><dd>' + escHtml(ft.taskName) + '</dd>';
+    if (ft.roleFqcn) html += '<dt>Role</dt><dd>' + escHtml(ft.roleFqcn) + '</dd>';
+    if (ft.hostPattern) html += '<dt>Host</dt><dd>' + escHtml(ft.hostPattern) + '</dd>';
+    if (ft.filePath) html += '<dt>File</dt><dd><code>' + escHtml(ft.filePath) + '</code></dd>';
+
+    var pi = debugResult.projectInfo;
+    if (pi) {
+        var ref = pi.scmBranch || pi.scmRevision || "\u2014";
+        var link = "";
+        if (pi.scmUrl) {
+            var repoMatch = pi.scmUrl.match(/github\.com[:/]([^/]+\/[^/.]+)/);
+            if (repoMatch) {
+                var ghRef = pi.scmBranch || pi.scmRevision || "main";
+                link = ' <a href="https://github.com/' + repoMatch[1] + '/tree/' + ghRef + '" target="_blank" rel="noopener" class="debug-link">View in GitHub</a>';
+            }
+        }
+        html += '<dt>SCM Ref</dt><dd><code>' + escHtml(ref) + '</code>' + link + '</dd>';
+    }
+    html += '</dl>';
+    var errorText = ft.errorMessage;
+    try {
+        var parsed = JSON.parse(errorText);
+        errorText = JSON.stringify(parsed, null, 2);
+    } catch (e) {}
+    html += '<div class="debug-code">' + escHtml(errorText) + '</div>';
+    debugTabContentEl.innerHTML = html;
+}
+
+function renderFixTab() {
+    var fix = debugResult.fix;
+    if (!fix) {
+        debugTabContentEl.innerHTML = '<p class="debug-empty">No fix recommendation available.</p>';
+        return;
+    }
+    var labelColor = fix.source === "pattern" ? "green" : "blue";
+    var labelText = fix.source === "pattern" ? "Pattern Match" : "AI Generated";
+
+    var html = '<div style="margin-bottom:16px"><span class="debug-status-label ' + labelColor + '">' + labelText + '</span></div>';
+    html += '<dl class="debug-dl">';
+    html += '<dt>Repository</dt><dd>' + escHtml(fix.repo) + '</dd>';
+    html += '<dt>File</dt><dd>' + escHtml(fix.file) + '</dd>';
+    if (fix.line != null) html += '<dt>Line</dt><dd>' + fix.line + '</dd>';
+    if (fix.lintWarning) {
+        html += '<dt>Lint Warning</dt><dd style="color:var(--warning)">' + escHtml(fix.lintWarning) + '</dd>';
+    }
+    html += '</dl>';
+
+    // Format explanation as paragraphs — split on double newlines, or sentences
+    var rawExpl = fix.explanation || "";
+    var paragraphs = rawExpl.indexOf("\n\n") >= 0
+        ? rawExpl.split(/\n\n+/)
+        : rawExpl.split(/(?<=\.)\s+(?=[A-Z])/);
+    html += '<div class="debug-section-title">Explanation</div>';
+    html += '<div class="debug-explanation">';
+    paragraphs.forEach(function(p) {
+        var trimmed = p.trim();
+        if (trimmed) html += '<p>' + escHtml(trimmed) + '</p>';
+    });
+    html += '</div>';
+
+    if (fix.before) {
+        html += '<div class="debug-section-title">Before' + (fix.line != null ? ' (line ' + fix.line + ')' : '') + '</div>';
+        html += '<div class="debug-code">' + escHtml(fix.before) + '</div>';
+    }
+    if (fix.after) {
+        html += '<div class="debug-section-title">After</div>';
+        html += '<div class="debug-code">' + escHtml(fix.after) + '</div>';
+    }
+    if (fix.githubUrl) {
+        html += '<div style="margin-top:16px"><a href="' + escHtml(fix.githubUrl) + '" target="_blank" rel="noopener" class="debug-link">View on GitHub</a></div>';
+    }
+    debugTabContentEl.innerHTML = html;
+}
+
+function renderCorrelationTab() {
+    if (debugCorrelation) {
+        renderCorrelationData();
+        return;
+    }
+    debugTabContentEl.innerHTML = '<div class="debug-loading" style="display:flex"><div class="debug-spinner"></div><span>Loading correlation data...</span></div>';
+
+    fetch("/api/debug/correlation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: debugUrl, job_id: debugResult.metadata.id, job_template: debugResult.metadata.jobTemplate }),
+    })
+    .then(function(resp) {
+        if (!resp.ok) return resp.json().then(function(d) { throw new Error(d.detail || resp.statusText); });
+        return resp.json();
+    })
+    .then(function(data) {
+        debugCorrelation = data;
+        renderCorrelationData();
+    })
+    .catch(function(err) {
+        debugTabContentEl.innerHTML = '<p class="debug-empty">Failed to load correlation data: ' + escHtml(err.message) + '</p>';
+    });
+}
+
+function renderCorrelationData() {
+    var c = debugCorrelation;
+    var html = '<div class="debug-section-title">' + c.totalFailures + ' other failures of this job template</div>';
+
+    if (c.byError && c.byError.length > 0) {
+        html += '<div class="debug-section-title">By Error</div>';
+        c.byError.slice(0, 5).forEach(function(entry) {
+            html += '<div class="debug-card"><div class="debug-card-header"><span class="debug-card-mono">' + escHtml(entry.error || "(empty explanation)") + '</span><span class="debug-card-count">' + entry.count + ' jobs</span></div>';
+            html += '<div class="debug-card-jobids">Job IDs: ' + entry.jobIds.slice(0, 10).join(", ") + (entry.jobIds.length > 10 ? " (+" + (entry.jobIds.length - 10) + " more)" : "") + '</div></div>';
+        });
+    }
+
+    if (c.byEE && c.byEE.length > 0) {
+        html += '<div class="debug-section-title">By Execution Environment</div>';
+        c.byEE.slice(0, 5).forEach(function(entry) {
+            html += '<div class="debug-card"><div class="debug-card-header"><span>EE #' + escHtml(entry.image) + '</span><span class="debug-card-count">' + entry.count + ' failures</span></div></div>';
+        });
+    }
+
+    if (c.byInstanceGroup && c.byInstanceGroup.length > 0) {
+        html += '<div class="debug-section-title">By Instance Group</div>';
+        c.byInstanceGroup.forEach(function(entry) {
+            html += '<div class="debug-card"><div class="debug-card-header"><span>Group #' + escHtml(entry.group) + '</span><span class="debug-card-count">' + entry.count + ' failures</span></div></div>';
+        });
+    }
+
+    debugTabContentEl.innerHTML = html;
+}
+
+function renderEEInfoTab() {
+    if (debugResult.eeInfo) {
+        debugEEInfo = debugResult.eeInfo;
+    }
+
+    if (debugEEInfo) {
+        renderEEInfoData();
+        return;
+    }
+
+    if (!debugResult.metadata.executionEnvironment) {
+        debugTabContentEl.innerHTML = '<p class="debug-empty">No execution environment available for this job.</p>';
+        return;
+    }
+
+    debugTabContentEl.innerHTML = '<div class="debug-loading" style="display:flex"><div class="debug-spinner"></div><span>Loading EE info...</span></div>';
+
+    fetch("/api/debug/ee", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: debugUrl, job_id: debugResult.metadata.id, ee_id: debugResult.metadata.executionEnvironment }),
+    })
+    .then(function(resp) {
+        if (!resp.ok) return resp.json().then(function(d) { throw new Error(d.detail || resp.statusText); });
+        return resp.json();
+    })
+    .then(function(data) {
+        debugEEInfo = data;
+        renderEEInfoData();
+    })
+    .catch(function(err) {
+        debugTabContentEl.innerHTML = '<p class="debug-empty">Failed to load EE info: ' + escHtml(err.message) + '</p>';
+    });
+}
+
+function renderEEInfoData() {
+    var ee = debugEEInfo;
+    var html = '<dl class="debug-dl">';
+    html += '<dt>Image</dt><dd><code>' + escHtml(ee.image) + '</code></dd>';
+    if (ee.sourceRepo) {
+        var srcLink = 'https://github.com/' + ee.sourceRepo + '/tree/main/' + (ee.sourceDir || '');
+        html += '<dt>Source</dt><dd><a href="' + srcLink + '" target="_blank" rel="noopener" class="debug-link">' + escHtml(ee.sourceRepo + '/' + (ee.sourceDir || '')) + '</a></dd>';
+    }
+    html += '</dl>';
+
+    if (ee.sourceFiles && ee.sourceFiles.length > 0) {
+        html += '<div class="debug-section-title">EE Definition Files</div>';
+        ee.sourceFiles.forEach(function(file) {
+            var fileId = "ee-file-" + file.name.replace(/\W/g, "-");
+            html += '<div class="debug-card">';
+            html += '<button class="debug-ee-file-btn" onclick="toggleEEFile(\'' + fileId + '\', this)">\u25b6 ' + escHtml(file.name) + '</button>';
+            html += '<div id="' + fileId + '" style="display:none;margin-top:8px"><div class="debug-code">' + escHtml(file.content) + '</div></div>';
+            html += '</div>';
+        });
+    }
+
+    debugTabContentEl.innerHTML = html;
+}
+
+window.toggleEEFile = function(id, btn) {
+    var el = document.getElementById(id);
+    if (el.style.display === "none") {
+        el.style.display = "block";
+        btn.innerHTML = "\u25bc " + btn.textContent.trim().slice(2);
+    } else {
+        el.style.display = "none";
+        btn.innerHTML = "\u25b6 " + btn.textContent.trim().slice(2);
+    }
+};
+
+function renderFixPreview() {
+    if (!debugResult || !debugResult.fix || debugActiveTab === "fix") {
+        debugFixPreviewEl.style.display = "none";
+        return;
+    }
+    var fix = debugResult.fix;
+    var labelColor = fix.source === "pattern" ? "green" : "blue";
+    var labelText = fix.source === "pattern" ? "Pattern Match" : "AI Generated";
+
+    debugFixPreviewEl.innerHTML =
+        '<div style="flex:1">' +
+            '<h4>Fix Recommendation Available</h4>' +
+            '<span class="debug-status-label ' + labelColor + '">' + labelText + '</span>' +
+        '</div>' +
+        '<button onclick="document.querySelector(\'[data-tab=fix]\').click()">View Fix</button>';
+    debugFixPreviewEl.style.display = "flex";
 }
 
 // ─── Choice buttons ───
