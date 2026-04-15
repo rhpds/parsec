@@ -1346,6 +1346,25 @@ function csvEscapeField(value) {
     return str;
 }
 
+function parseMarkdownTable(str) {
+    // Parse a markdown table string into an array of objects
+    var lines = str.split("\n").filter(function(l) { return l.trim().indexOf("|") === 0; });
+    if (lines.length < 3) return null; // need header + separator + at least one row
+    // Check that the second line is a separator (| --- | --- |)
+    if (!/^\|[\s\-:|]+\|$/.test(lines[1].trim())) return null;
+    var headers = lines[0].split("|").slice(1, -1).map(function(h) { return h.trim(); });
+    if (headers.length === 0) return null;
+    var rows = [];
+    for (var i = 2; i < lines.length; i++) {
+        var cells = lines[i].split("|").slice(1, -1).map(function(c) { return c.trim(); });
+        if (cells.length !== headers.length) continue;
+        var obj = {};
+        headers.forEach(function(h, idx) { obj[h] = cells[idx]; });
+        rows.push(obj);
+    }
+    return rows.length > 0 ? rows : null;
+}
+
 function findTabularData(result) {
     // Look for arrays of objects in the result
     if (Array.isArray(result) && result.length > 0 && typeof result[0] === "object") {
@@ -1358,6 +1377,14 @@ function findTabularData(result) {
         var val = result[keys[i]];
         if (Array.isArray(val) && val.length > 0 && typeof val[0] === "object" && val[0] !== null) {
             return val;
+        }
+    }
+    // Fallback: try to parse markdown tables from string fields
+    for (var j = 0; j < keys.length; j++) {
+        var sval = result[keys[j]];
+        if (typeof sval === "string" && sval.indexOf("|") >= 0) {
+            var parsed = parseMarkdownTable(sval);
+            if (parsed) return parsed;
         }
     }
     return null;
