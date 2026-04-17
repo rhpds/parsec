@@ -1365,6 +1365,59 @@ function parseMarkdownTable(str) {
     return rows.length > 0 ? rows : null;
 }
 
+function parseAllMarkdownTables(str) {
+    // Parse ALL markdown tables from a string and return them with context
+    // Returns an array of {title: string, rows: array} objects
+    if (typeof str !== "string") return [];
+
+    var allLines = str.split("\n");
+    var tables = [];
+    var i = 0;
+
+    while (i < allLines.length) {
+        var line = allLines[i].trim();
+
+        // Look for table start (line with |)
+        if (line.indexOf("|") === 0) {
+            // Try to find preceding header (lines starting with ##)
+            var title = null;
+            for (var j = i - 1; j >= Math.max(0, i - 5); j--) {
+                var prevLine = allLines[j].trim();
+                if (prevLine.match(/^#{1,6}\s+(.+)$/)) {
+                    title = prevLine.replace(/^#{1,6}\s+/, "");
+                    break;
+                }
+                if (prevLine.length > 0 && prevLine.indexOf("|") < 0) {
+                    // Use first non-empty, non-table line as title
+                    if (!title) title = prevLine;
+                    break;
+                }
+            }
+
+            // Collect all consecutive table lines
+            var tableLines = [];
+            while (i < allLines.length && allLines[i].trim().indexOf("|") === 0) {
+                tableLines.push(allLines[i]);
+                i++;
+            }
+
+            // Parse this table
+            var tableStr = tableLines.join("\n");
+            var parsed = parseMarkdownTable(tableStr);
+            if (parsed && parsed.length > 0) {
+                tables.push({
+                    title: title || "Table " + (tables.length + 1),
+                    rows: parsed
+                });
+            }
+        } else {
+            i++;
+        }
+    }
+
+    return tables;
+}
+
 function findTabularData(result) {
     // Look for arrays of objects in the result
     if (Array.isArray(result) && result.length > 0 && typeof result[0] === "object") {
@@ -1397,37 +1450,75 @@ function exportResponseAsCSV(messageEl) {
     var csvSections = [];
 
     toolResults.forEach(function(tr) {
+        // First try to find tabular data in the result
         var rows = findTabularData(tr.result);
-        if (!rows) return;
 
-        // Collect all unique column headers across all rows
-        var headers = [];
-        var headerSet = {};
-        rows.forEach(function(row) {
-            Object.keys(row).forEach(function(key) {
-                if (!headerSet[key]) {
-                    headerSet[key] = true;
-                    headers.push(key);
-                }
+        // For report generation tools, also check input.content for markdown tables
+        if (!rows && tr.tool === "generate_report" && tr.input && tr.input.content) {
+            var tables = parseAllMarkdownTables(tr.input.content);
+            if (tables.length > 0) {
+                // Export each table as a separate CSV section
+                tables.forEach(function(table) {
+                    var headers = [];
+                    var headerSet = {};
+                    table.rows.forEach(function(row) {
+                        Object.keys(row).forEach(function(key) {
+                            if (!headerSet[key]) {
+                                headerSet[key] = true;
+                                headers.push(key);
+                            }
+                        });
+                    });
+
+                    var lines = [];
+                    lines.push("# " + table.title);
+                    lines.push(headers.map(csvEscapeField).join(","));
+                    table.rows.forEach(function(row) {
+                        var vals = headers.map(function(h) {
+                            var val = row[h];
+                            if (typeof val === "object" && val !== null) val = JSON.stringify(val);
+                            return csvEscapeField(val);
+                        });
+                        lines.push(vals.join(","));
+                    });
+
+                    csvSections.push(lines.join("\n"));
+                });
+                return; // Skip the rest of the processing for this tool result
+            }
+        }
+
+        // If we found rows in the result, export them
+        if (rows) {
+            // Collect all unique column headers across all rows
+            var headers = [];
+            var headerSet = {};
+            rows.forEach(function(row) {
+                Object.keys(row).forEach(function(key) {
+                    if (!headerSet[key]) {
+                        headerSet[key] = true;
+                        headers.push(key);
+                    }
+                });
             });
-        });
 
-        var lines = [];
-        // Section header comment
-        lines.push("# " + (tr.tool || "results"));
-        // Column headers
-        lines.push(headers.map(csvEscapeField).join(","));
-        // Data rows
-        rows.forEach(function(row) {
-            var vals = headers.map(function(h) {
-                var val = row[h];
-                if (typeof val === "object" && val !== null) val = JSON.stringify(val);
-                return csvEscapeField(val);
+            var lines = [];
+            // Section header comment
+            lines.push("# " + (tr.tool || "results"));
+            // Column headers
+            lines.push(headers.map(csvEscapeField).join(","));
+            // Data rows
+            rows.forEach(function(row) {
+                var vals = headers.map(function(h) {
+                    var val = row[h];
+                    if (typeof val === "object" && val !== null) val = JSON.stringify(val);
+                    return csvEscapeField(val);
+                });
+                lines.push(vals.join(","));
             });
-            lines.push(vals.join(","));
-        });
 
-        csvSections.push(lines.join("\n"));
+            csvSections.push(lines.join("\n"));
+        }
     });
 
     // Fallback: if no tabular data found, export as key-value pairs
