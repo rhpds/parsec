@@ -16,6 +16,11 @@ let pendingAttachment = null; // { name, content }
 let conversationHistory = [];
 let currentConversationId = null;
 
+// Prompt history (up-arrow recall within session)
+let promptHistory = [];
+let promptHistoryIndex = -1;
+let promptHistoryDraft = "";
+
 // Auto-resize textarea to fit content (up to a max height)
 function autoResizeInput() {
     input.style.height = "auto";
@@ -23,11 +28,33 @@ function autoResizeInput() {
 }
 input.addEventListener("input", autoResizeInput);
 
-// Enter submits, Shift+Enter inserts newline
+// Enter submits, Shift+Enter inserts newline; ArrowUp/Down for prompt history
 input.addEventListener("keydown", function(e) {
     if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         form.requestSubmit();
+    }
+    if (e.key === "ArrowUp" && input.selectionStart === 0 && promptHistory.length > 0) {
+        e.preventDefault();
+        if (promptHistoryIndex === -1) {
+            promptHistoryDraft = input.value;
+            promptHistoryIndex = promptHistory.length - 1;
+        } else if (promptHistoryIndex > 0) {
+            promptHistoryIndex--;
+        }
+        input.value = promptHistory[promptHistoryIndex];
+        autoResizeInput();
+    }
+    if (e.key === "ArrowDown" && promptHistoryIndex !== -1) {
+        e.preventDefault();
+        if (promptHistoryIndex < promptHistory.length - 1) {
+            promptHistoryIndex++;
+            input.value = promptHistory[promptHistoryIndex];
+        } else {
+            promptHistoryIndex = -1;
+            input.value = promptHistoryDraft;
+        }
+        autoResizeInput();
     }
 });
 
@@ -445,6 +472,10 @@ form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const question = input.value.trim();
     if (!question) return;
+
+    promptHistory.push(question);
+    promptHistoryIndex = -1;
+    promptHistoryDraft = "";
 
     input.value = "";
     input.style.height = "auto";
