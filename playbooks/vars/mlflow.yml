@@ -6,7 +6,7 @@ mlflow_cluster_domain: "apps.ocpv-infra01.dal12.infra.demo.redhat.com"
 mlflow_operator_image: "quay.io/aicoe/mlflow-tracking-operator:v0.1.0"
 
 # Tracking server
-mlflow_server_image: "quay.io/aicoe/mlflow-server:2.12.2"
+mlflow_server_image: "ghcr.io/mlflow/mlflow:v2.12.2"
 mlflow_server_replicas: 1
 mlflow_server_memory_request: "256Mi"
 mlflow_server_memory_limit: "512Mi"

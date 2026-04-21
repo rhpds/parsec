@@ -196,8 +196,6 @@ spec:
               name: http
               protocol: TCP
           env:
-            - name: MLFLOW_BACKEND_STORE_URI
-              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@mlflow-postgres:5432/$(POSTGRES_DB)"
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
@@ -213,13 +211,15 @@ spec:
                 secretKeyRef:
                   name: mlflow-postgres
                   key: database-name
-            - name: MLFLOW_DEFAULT_ARTIFACT_ROOT
-              value: "s3://$(BUCKET_NAME)/"
+            - name: MLFLOW_BACKEND_STORE_URI
+              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@mlflow-postgres:5432/$(POSTGRES_DB)"
             - name: BUCKET_NAME
               valueFrom:
                 configMapKeyRef:
                   name: {{ mlflow_s3_bucket_name }}
                   key: BUCKET_NAME
+            - name: MLFLOW_DEFAULT_ARTIFACT_ROOT
+              value: "s3://$(BUCKET_NAME)/"
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
@@ -230,24 +230,23 @@ spec:
                 secretKeyRef:
                   name: {{ mlflow_s3_bucket_name }}
                   key: AWS_SECRET_ACCESS_KEY
-            - name: MLFLOW_S3_ENDPOINT_URL
-              value: "http://$(BUCKET_HOST)"
             - name: BUCKET_HOST
               valueFrom:
                 configMapKeyRef:
                   name: {{ mlflow_s3_bucket_name }}
                   key: BUCKET_HOST
-          command:
-            - mlflow
-            - server
-            - --backend-store-uri
-            - $(MLFLOW_BACKEND_STORE_URI)
-            - --default-artifact-root
-            - $(MLFLOW_DEFAULT_ARTIFACT_ROOT)
-            - --host
-            - 0.0.0.0
-            - --port
-            - "5000"
+            - name: MLFLOW_S3_ENDPOINT_URL
+              value: "http://$(BUCKET_HOST)"
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              pip install --quiet --no-cache-dir --target /tmp/pip-deps psycopg2-binary boto3 &&
+              export PYTHONPATH=/tmp/pip-deps:$PYTHONPATH &&
+              mlflow server \
+                --backend-store-uri "$(MLFLOW_BACKEND_STORE_URI)" \
+                --default-artifact-root "$(MLFLOW_DEFAULT_ARTIFACT_ROOT)" \
+                --host 0.0.0.0 \
+                --port 5000
           readinessProbe:
             httpGet:
               path: /health

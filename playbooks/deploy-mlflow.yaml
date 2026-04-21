@@ -25,7 +25,7 @@
     - vars/mlflow.yml
 
   vars:
-    mlflow_postgres_password: "{{ lookup('env', 'MLFLOW_POSTGRES_PASSWORD') | default(lookup('password', '/dev/null length=32 chars=ascii_letters,digits'), true) }}"
+    mlflow_postgres_password: "{{ lookup('env', 'MLFLOW_POSTGRES_PASSWORD') | default(lookup('password', '~/.secrets/mlflow_postgres_password length=32 chars=ascii_letters,digits'), true) }}"
 
   pre_tasks:
     - name: Verify kubeconfig exists
@@ -52,6 +52,17 @@
           URL:         https://mlflow.{{ mlflow_cluster_domain }}
 
   tasks:
+    - name: Ensure mlflow namespace exists
+      kubernetes.core.k8s:
+        kubeconfig: "{{ mlflow_kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ mlflow_namespace }}"
+      tags: [apply]
+
     - name: Create OAuth resources
       ansible.builtin.include_tasks:
         file: tasks/mlflow-oauth.yml
