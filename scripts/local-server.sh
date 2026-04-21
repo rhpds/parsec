@@ -13,6 +13,9 @@ PORT="8000"
 MCP_CONTAINER="parsec-icinga-mcp"
 MCP_IMAGE="quay.io/rhpds/monitoring-mcp:v0.3.1"
 MCP_PORT="3000"
+REPORTING_MCP_PORT="8881"
+REPORTING_MCP_PIDFILE="$PROJECT_DIR/.reporting-mcp.pid"
+REPORTING_MCP_KUBECONFIG="$HOME/secrets/ocpv-infra01.dal12.infra.demo.redhat.com.kubeconfig"
 
 cd "$PROJECT_DIR"
 mkdir -p logs
@@ -79,6 +82,46 @@ _mcp_stop() {
     fi
 }
 
+_reporting_mcp_start() {
+    if ! command -v oc >/dev/null 2>&1; then
+        echo "Warning: oc not found, skipping Reporting MCP port-forward"
+        return 0
+    fi
+    if [ ! -f "$REPORTING_MCP_KUBECONFIG" ]; then
+        echo "Warning: kubeconfig not found at $REPORTING_MCP_KUBECONFIG, skipping Reporting MCP"
+        return 0
+    fi
+    # Kill any existing port-forward on the same port
+    _reporting_mcp_stop
+    echo "Starting Reporting MCP port-forward on port $REPORTING_MCP_PORT..."
+    oc port-forward svc/reporting-mcp "$REPORTING_MCP_PORT:8080" \
+        -n demo-reporting \
+        --kubeconfig="$REPORTING_MCP_KUBECONFIG" \
+        >> "$PROJECT_DIR/logs/reporting-mcp.log" 2>&1 &
+    echo "$!" > "$REPORTING_MCP_PIDFILE"
+    # Wait briefly for port to be ready
+    for i in $(seq 1 5); do
+        sleep 1
+        if curl -sf "http://localhost:$REPORTING_MCP_PORT" >/dev/null 2>&1; then
+            echo "Reporting MCP forwarding on port $REPORTING_MCP_PORT"
+            return 0
+        fi
+    done
+    echo "Reporting MCP port-forward started (may take a moment to connect)"
+}
+
+_reporting_mcp_stop() {
+    if [ -f "$REPORTING_MCP_PIDFILE" ]; then
+        local pid
+        pid=$(cat "$REPORTING_MCP_PIDFILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null
+            echo "Reporting MCP port-forward stopped"
+        fi
+        rm -f "$REPORTING_MCP_PIDFILE"
+    fi
+}
+
 _is_running() {
     if [ -f "$PIDFILE" ]; then
         local pid
@@ -110,6 +153,7 @@ start() {
     echo "$pid" > "$PIDFILE"
 
     _mcp_start
+    _reporting_mcp_start
 
     # Wait for startup
     for i in $(seq 1 10); do
@@ -139,6 +183,7 @@ stop() {
         if ! kill -0 "$pid" 2>/dev/null; then
             rm -f "$PIDFILE"
             _mcp_stop
+            _reporting_mcp_stop
             echo "Stopped"
             return 0
         fi
@@ -147,6 +192,7 @@ stop() {
     rm -f "$PIDFILE"
     echo "Killed"
     _mcp_stop
+    _reporting_mcp_stop
 }
 
 restart() {
