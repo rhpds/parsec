@@ -15,6 +15,7 @@ from src.connections.babylon import init_babylon
 from src.connections.gcp import init_gcp
 from src.connections.github_mcp import init_github_mcp
 from src.connections.icinga_mcp import init_icinga_mcp
+from src.connections.mlflow_tracking import init_mlflow
 from src.connections.ocpv import init_ocpv
 from src.connections.reporting_mcp import fetch_server_instructions, init_reporting_mcp
 from src.connections.splunk import init_splunk
@@ -52,6 +53,7 @@ async def lifespan(app: FastAPI):
         ("Icinga MCP", init_icinga_mcp),
         ("Reporting MCP", init_reporting_mcp),
         ("Splunk", init_splunk),
+        ("MLflow", init_mlflow),
     ]:
         try:
             init_fn()
