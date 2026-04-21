@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from collections.abc import AsyncGenerator
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -58,6 +59,24 @@ REPORTS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "reports"
 )
 os.makedirs(REPORTS_DIR, exist_ok=True)
+
+# ---------------------------------------------------------------------------
+# Tool result cache — per-request, keyed by (tool_name, canonical_input)
+# ---------------------------------------------------------------------------
+
+_tool_cache: ContextVar[dict[str, dict] | None] = ContextVar("_tool_cache", default=None)
+
+_UNCACHEABLE_TOOLS = frozenset(
+    {
+        "render_chart",
+        "generate_report",
+        "query_icinga",
+    }
+)
+
+
+def _cache_key(tool_name: str, tool_input: dict) -> str:
+    return tool_name + ":" + json.dumps(tool_input, sort_keys=True, default=str)
 
 
 def _is_reporting_mcp_tool(name: str) -> bool:
@@ -710,14 +729,33 @@ async def _handle_direct_tool(
     tool_name = tool_block.name
     yield sse_tool_start(tool_name, tool_input), None
 
-    task = asyncio.create_task(_execute_tool(tool_name, tool_input))
-    elapsed = 0
-    while not task.done():
-        done, _ = await asyncio.wait({task}, timeout=10)
-        if not done:
-            elapsed += 10
-            yield sse_status(f"Processing {tool_name}... ({elapsed}s)"), None
-    result = task.result()
+    cache = _tool_cache.get(None)
+    if cache is not None and tool_name not in _UNCACHEABLE_TOOLS:
+        key = _cache_key(tool_name, tool_input)
+        if key in cache:
+            logger.info("Cache hit for %s (direct tool)", tool_name)
+            result = cache[key]
+            yield sse_event("cache_hit", {"tool": tool_name}), None
+        else:
+            task = asyncio.create_task(_execute_tool(tool_name, tool_input))
+            elapsed = 0
+            while not task.done():
+                done, _ = await asyncio.wait({task}, timeout=10)
+                if not done:
+                    elapsed += 10
+                    yield sse_status(f"Processing {tool_name}... ({elapsed}s)"), None
+            result = task.result()
+            if "error" not in result:
+                cache[key] = result
+    else:
+        task = asyncio.create_task(_execute_tool(tool_name, tool_input))
+        elapsed = 0
+        while not task.done():
+            done, _ = await asyncio.wait({task}, timeout=10)
+            if not done:
+                elapsed += 10
+                yield sse_status(f"Processing {tool_name}... ({elapsed}s)"), None
+        result = task.result()
 
     yield sse_tool_result(tool_name, result), None
 
@@ -757,6 +795,8 @@ async def run_agent(
     orchestrator_tools = get_orchestrator_tools()
 
     logger.info("run_agent: question=%s", question[:120])
+
+    _tool_cache.set({})
 
     cfg = get_config()
 

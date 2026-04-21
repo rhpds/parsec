@@ -614,6 +614,17 @@ form.addEventListener("submit", async (e) => {
                 break;
             }
 
+            case "cache_hit": {
+                if (currentToolEl) {
+                    var cacheStatus = currentToolEl.querySelector(".tool-status");
+                    if (cacheStatus) {
+                        cacheStatus.className = "tool-status cached";
+                        cacheStatus.textContent = "cached";
+                    }
+                }
+                break;
+            }
+
             case "tool_result": {
                 if (currentToolEl) {
                     finalizeToolCall(currentToolEl, data.tool, data.result);
@@ -1032,30 +1043,32 @@ function addExpandCollapseToggle(summaryEl, wrapper) {
 
 function finalizeToolCall(toolEl, toolName, result) {
     const statusSpan = toolEl.querySelector(".tool-status");
+    var wasCached = statusSpan.classList.contains("cached");
     if (result.error) {
         statusSpan.className = "tool-status error";
         statusSpan.textContent = "error";
     } else {
-        statusSpan.className = "tool-status done";
+        statusSpan.className = wasCached ? "tool-status cached" : "tool-status done";
+        var prefix = wasCached ? "cached: " : "";
         if (result.bytes_scanned !== undefined && result.row_count !== undefined) {
             var mb = (result.bytes_scanned / 1024 / 1024).toFixed(0);
-            statusSpan.textContent = result.row_count + " rows (" + mb + " MB scanned)";
+            statusSpan.textContent = prefix + result.row_count + " rows (" + mb + " MB scanned)";
         } else if (result.row_count !== undefined) {
-            statusSpan.textContent = result.row_count + " rows";
+            statusSpan.textContent = prefix + result.row_count + " rows";
         } else if (result.instance_count !== undefined) {
-            statusSpan.textContent = result.instance_count + " instances";
+            statusSpan.textContent = prefix + result.instance_count + " instances";
         } else if (result.user_count !== undefined) {
-            statusSpan.textContent = result.user_count + " users";
+            statusSpan.textContent = prefix + result.user_count + " users";
         } else if (result.agreement_count !== undefined) {
-            statusSpan.textContent = result.agreement_count + " agreements";
+            statusSpan.textContent = prefix + result.agreement_count + " agreements";
         } else if (result.event_count !== undefined) {
-            statusSpan.textContent = result.event_count + " events";
+            statusSpan.textContent = prefix + result.event_count + " events";
         } else if (result.total_cost !== undefined) {
-            statusSpan.textContent = "$" + result.total_cost.toLocaleString();
+            statusSpan.textContent = prefix + "$" + result.total_cost.toLocaleString();
         } else if (result.filename) {
-            statusSpan.textContent = result.filename;
+            statusSpan.textContent = prefix + result.filename;
         } else {
-            statusSpan.textContent = "done";
+            statusSpan.textContent = wasCached ? "cached" : "done";
         }
     }
 
@@ -1592,15 +1605,64 @@ function renderSharedMessages(messages, interactive) {
         });
     });
 
-    messages.forEach(function(msg, msgIdx) {
+    // Pre-process: collapse fast-path sub-agent intermediate messages.
+    // Pattern: assistant(tool_use) → user(tool_result only) → assistant(tool_use) → ...
+    // Collapse into one combined message, keeping only the final assistant text.
+    var collapsed = [];
+    var i = 0;
+    while (i < messages.length) {
+        var msg = messages[i];
+        if (msg.role === "assistant" && Array.isArray(msg.content)) {
+            var hasToolUse = msg.content.some(function(b) { return b.type === "tool_use"; });
+            if (hasToolUse) {
+                // Look ahead: is the next message a tool_result-only user message?
+                var groupToolCalls = [];
+                var groupToolUseIds = [];
+                var finalText = [];
+                var j = i;
+                while (j < messages.length) {
+                    var cur = messages[j];
+                    if (cur.role === "assistant" && Array.isArray(cur.content)) {
+                        var curTools = cur.content.filter(function(b) { return b.type === "tool_use"; });
+                        var curText = cur.content.filter(function(b) { return b.type === "text" && b.text; });
+                        curTools.forEach(function(t) { groupToolCalls.push(t); groupToolUseIds.push(t.id); });
+                        if (curText.length > 0) finalText = curText;
+                        // Check if next is tool_result-only user message
+                        var next = messages[j + 1];
+                        if (next && next.role === "user" && Array.isArray(next.content)) {
+                            var hasRealText = next.content.some(function(b) {
+                                return b.type !== "tool_result" && b.text && b.text.trim();
+                            });
+                            if (!hasRealText) {
+                                j += 2; // skip tool_result user msg + continue to next assistant
+                                continue;
+                            }
+                        }
+                    }
+                    break;
+                }
+                if (j > i) {
+                    // We collapsed multiple messages — create a combined one
+                    var combinedContent = [];
+                    groupToolCalls.forEach(function(t) { combinedContent.push(t); });
+                    finalText.forEach(function(t) { combinedContent.push(t); });
+                    collapsed.push({ role: "assistant", content: combinedContent, _collapsedToolIds: groupToolUseIds });
+                    i = j;
+                    continue;
+                }
+            }
+        }
+        collapsed.push(messages[i]);
+        i++;
+    }
+
+    collapsed.forEach(function(msg, msgIdx) {
         if (msg.role === "user") {
             var text = msg.content;
             if (Array.isArray(text)) {
-                // Filter out tool_result blocks — they're internal
                 var userParts = text.filter(function(b) { return b.type !== "tool_result"; });
                 text = userParts.map(function(b) { return b.text || ""; }).join("");
             }
-            // Skip empty user messages (tool_result-only messages)
             if (!text.trim()) return;
             addMessage("user", text);
         } else if (msg.role === "assistant") {
@@ -1620,6 +1682,7 @@ function renderSharedMessages(messages, interactive) {
             } else if (Array.isArray(content)) {
                 var toolCalls = [];
                 var textParts = [];
+                var delegations = [];
 
                 content.forEach(function(block) {
                     if (block.type === "text" && block.text) {
@@ -1637,18 +1700,23 @@ function renderSharedMessages(messages, interactive) {
                         babylon: "Babylon Investigation", security: "Security Investigation",
                         ocpv: "OCPV Investigation", icinga: "Icinga Investigation"
                     };
+                    var delegationTools = {
+                        investigate_costs: "cost", investigate_aap2_job: "aap2",
+                        investigate_babylon: "babylon", investigate_security: "security",
+                        investigate_ocpv: "ocpv", investigate_icinga: "icinga"
+                    };
                     var totalQueries = 0;
                     var delegations = [];
                     toolCalls.forEach(function(tc) {
                         var result = toolResultMap[tc.id];
-                        if (tc.name === "delegate_to_agent" && result && result.tool_calls) {
+                        var isDelegation = tc.name in delegationTools;
+                        if (isDelegation && result && result.tool_calls) {
                             totalQueries += result.tool_calls;
-                            delegations.push({ tc: tc, result: result });
+                            delegations.push({ tc: tc, result: result, agentType: delegationTools[tc.name] });
                         } else {
                             totalQueries++;
                         }
-                        // Capture for CSV/JSON export (skip delegations — their sub-results aren't directly exportable)
-                        if (tc.name !== "delegate_to_agent" && result && typeof result === "object" && !result.error) {
+                        if (!isDelegation && result && typeof result === "object" && !result.error) {
                             restoredToolResults.push({ tool: tc.name, input: tc.input || {}, result: result });
                         }
                     });
@@ -1666,8 +1734,7 @@ function renderSharedMessages(messages, interactive) {
                     var inner = document.createElement("div");
                     inner.className = "tool-calls-inner";
                     toolCalls.forEach(function(tc) {
-                        // Skip delegations — rendered as agent banners below
-                        if (tc.name === "delegate_to_agent") return;
+                        if (tc.name in delegationTools) return;
                         var tcEl = document.createElement("details");
                         tcEl.className = "tool-call";
                         var tcSummary = document.createElement("summary");
@@ -1698,7 +1765,7 @@ function renderSharedMessages(messages, interactive) {
 
                     // Render sub-agent banners and findings for delegations
                     delegations.forEach(function(d) {
-                        var agentType = d.result.agent || (d.tc.input && d.tc.input.agent) || "unknown";
+                        var agentType = d.agentType || d.result.agent || "unknown";
                         var agentLabel = agentNames[agentType] || agentType;
 
                         var agentBanner = document.createElement("div");
@@ -1720,20 +1787,20 @@ function renderSharedMessages(messages, interactive) {
                         agentBanner.appendChild(statusSpan2);
                         contentEl.appendChild(agentBanner);
 
-                        // Render findings as markdown (filter out raw tool result lines)
-                        var findings = d.result.findings || [];
-                        if (findings.length > 0) {
-                            var findingsText = findings.filter(function(f) {
+                        // Render sub-agent summary as markdown (server-generated, not user input)
+                        var summaryText = d.result.summary || "";
+                        if (!summaryText.trim()) {
+                            var findings = d.result.findings || [];
+                            summaryText = findings.filter(function(f) {
                                 return typeof f === "string" && !f.startsWith("[Tool:");
                             }).join("\n\n");
-                            if (findingsText.trim()) {
-                                var findingsDiv = document.createElement("div");
-                                findingsDiv.className = "md-text";
-                                findingsDiv.innerHTML = marked.parse(findingsText);  // safe: server-generated markdown
-                                contentEl.appendChild(findingsDiv);
-                                // Use findings as the exportable text instead of summary
-                                textParts.push(findingsText);
-                            }
+                        }
+                        if (summaryText.trim()) {
+                            var findingsDiv = document.createElement("div");
+                            findingsDiv.className = "md-text";
+                            findingsDiv.innerHTML = marked.parse(summaryText); // safe: server-generated markdown
+                            contentEl.appendChild(findingsDiv);
+                            textParts.push(summaryText);
                         }
                     });
 
@@ -1764,9 +1831,9 @@ function renderSharedMessages(messages, interactive) {
                     });
                 }
 
-                // Render text content
+                // Render text content (skip if delegations already rendered summaries)
                 restoredText = textParts.join("");
-                if (restoredText.trim()) {
+                if (restoredText.trim() && delegations.length === 0) {
                     var sharedChoices = extractChoices(restoredText);
                     var renderText = sharedChoices ? sharedChoices.cleanedText : restoredText;
                     var textDiv2 = document.createElement("div");
