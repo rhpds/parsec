@@ -23,9 +23,7 @@
 
   vars_files:
     - vars/mlflow.yml
-
-  vars:
-    mlflow_postgres_password: "{{ lookup('env', 'MLFLOW_POSTGRES_PASSWORD') | default(lookup('password', '~/.secrets/mlflow_postgres_password length=32 chars=ascii_letters,digits'), true) }}"
+    - vars/dev.yml
 
   pre_tasks:
     - name: Verify kubeconfig exists
