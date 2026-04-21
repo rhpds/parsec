@@ -1,0 +1,123 @@
+---
+# MLflow OpenShift Deployment Playbook
+#
+# Automates the full MLflow tracking server deployment.
+# All tasks are idempotent — running the playbook twice produces the same result.
+#
+# Usage:
+#   ansible-playbook playbooks/deploy-mlflow.yaml              # Full deploy
+#   ansible-playbook playbooks/deploy-mlflow.yaml --tags apply # Just apply manifests
+#   ansible-playbook playbooks/deploy-mlflow.yaml --tags oauth # Just OAuth setup
+#
+# Prerequisites:
+#   pip install kubernetes
+#   ansible-galaxy collection install kubernetes.core
+#   Create playbooks/vars/mlflow.yml
+
+- name: Deploy MLflow Tracking Server
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  collections:
+    - kubernetes.core
+
+  vars_files:
+    - vars/mlflow.yml
+
+  vars:
+    mlflow_postgres_password: "{{ lookup('env', 'MLFLOW_POSTGRES_PASSWORD') | default(lookup('password', '/dev/null length=32 chars=ascii_letters,digits'), true) }}"
+
+  pre_tasks:
+    - name: Verify kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ mlflow_kubeconfig }}"
+      register: _kubeconfig_file
+
+    - name: Fail if kubeconfig not found
+      ansible.builtin.fail:
+        msg: "Kubeconfig not found at {{ mlflow_kubeconfig }}"
+      when: not _kubeconfig_file.stat.exists
+
+    - name: Verify cluster connectivity
+      kubernetes.core.k8s_cluster_info:
+        kubeconfig: "{{ mlflow_kubeconfig }}"
+      register: _cluster_info
+
+    - name: Display deployment info
+      ansible.builtin.debug:
+        msg: |
+          Deploying MLflow Tracking Server
+          Namespace:   {{ mlflow_namespace }}
+          Cluster:     {{ mlflow_cluster_domain }}
+          URL:         https://mlflow.{{ mlflow_cluster_domain }}
+
+  tasks:
+    - name: Create OAuth resources
+      ansible.builtin.include_tasks:
+        file: tasks/mlflow-oauth.yml
+        apply:
+          tags: [oauth, apply]
+      tags: [oauth, apply]
+
+    - name: Apply manifests
+      kubernetes.core.k8s:
+        kubeconfig: "{{ mlflow_kubeconfig }}"
+        state: present
+        template: templates/mlflow-manifests.yaml.j2
+      tags: [apply]
+
+  post_tasks:
+    - name: Wait for PostgreSQL pod ready
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ mlflow_kubeconfig }}"
+        kind: Pod
+        namespace: "{{ mlflow_namespace }}"
+        label_selectors:
+          - app=mlflow
+          - component=postgres
+        wait: true
+        wait_condition:
+          type: Ready
+          status: "True"
+        wait_timeout: 120
+      tags: [always]
+
+    - name: Wait for MLflow tracking server pod ready
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ mlflow_kubeconfig }}"
+        kind: Pod
+        namespace: "{{ mlflow_namespace }}"
+        label_selectors:
+          - app=mlflow
+          - component=tracking
+        wait: true
+        wait_condition:
+          type: Ready
+          status: "True"
+        wait_timeout: 120
+      tags: [always]
+
+    - name: Get all MLflow pods
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ mlflow_kubeconfig }}"
+        kind: Pod
+        namespace: "{{ mlflow_namespace }}"
+        label_selectors:
+          - app=mlflow
+      register: _mlflow_pods
+      tags: [always]
+
+    - name: Deployment summary
+      ansible.builtin.debug:
+        msg: |
+          === MLflow deployment complete ===
+
+          Namespace:    {{ mlflow_namespace }}
+          UI URL:       https://mlflow.{{ mlflow_cluster_domain }}
+          Internal URL: http://mlflow-tracking.{{ mlflow_namespace }}.svc.cluster.local:5000
+
+          Pods:
+          {% for pod in _mlflow_pods.resources | sort(attribute='metadata.name') %}
+            {{ pod.metadata.name }}  {{ pod.status.phase }}
+          {% endfor %}
+      tags: [always]
