@@ -33,6 +33,9 @@ babylon_kubeconfigs:
 # Reporting MCP (cross-namespace, demo-reporting)
 reporting_mcp_url: "http://reporting-mcp.demo-reporting.svc:8080/mcp"
 
+# MLflow tracking (cross-namespace, mlflow namespace)
+mlflow_tracking_url: "http://mlflow-tracking.mlflow.svc:5000"
+
 # OCPV clusters (labagator-reader SA kubeconfigs)
 ocpv_kubeconfigs:
   ocpv05: "{{ lookup('env', 'HOME') }}/secrets/ocpv-readonly/ocpv05.kubeconfig"

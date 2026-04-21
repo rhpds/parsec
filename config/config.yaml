@@ -113,6 +113,13 @@ splunk:
   # password: ""
   verify_ssl: false  # self-signed cert on internal endpoint
 
+# MLflow tracking server for agent performance metrics.
+# Set tracking_url to enable metrics collection.
+# Leave empty to disable (metrics silently skipped).
+mlflow:
+  tracking_url: ""
+  experiment_name: "parsec-agent-metrics"
+
 alert_api_key: ""
 
 learnings:
