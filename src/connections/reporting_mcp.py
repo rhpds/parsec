@@ -10,9 +10,8 @@ Provides dynamic MCP protocol capabilities discovered at startup:
 import logging
 from typing import Any
 
-import httpx
-
 from src.config import get_config
+from src.connections.mcp_common import mcp_session
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +45,11 @@ def init_reporting_mcp() -> None:
     logger.info("Reporting MCP configured (url=%s)", _mcp_url)
 
 
-def _build_http_client() -> httpx.AsyncClient:
-    """Build an httpx client with auth headers and timeout."""
-    headers: dict[str, str] = {}
+def _auth_headers() -> dict[str, str]:
+    """Build Authorization headers if a token is configured."""
     if _token:
-        headers["Authorization"] = f"Bearer {_token}"
-    return httpx.AsyncClient(headers=headers, timeout=_MCP_TIMEOUT_SECONDS)
+        return {"Authorization": f"Bearer {_token}"}
+    return {}
 
 
 def get_mcp_url() -> str:
@@ -166,21 +164,7 @@ async def fetch_server_instructions() -> str:
         return ""
 
     try:
-        from mcp import ClientSession
-        from mcp.client.streamable_http import streamable_http_client
-
-        async with (
-            streamable_http_client(
-                url=_mcp_url,
-                http_client=_build_http_client(),
-            ) as (
-                read_stream,
-                write_stream,
-                _,
-            ),
-            ClientSession(read_stream, write_stream) as session,
-        ):
-            init_result = await session.initialize()
+        async with mcp_session(_mcp_url, _auth_headers(), _MCP_TIMEOUT_SECONDS) as (session, init_result):
 
             # 1. Cache instructions
             instructions = init_result.instructions or ""
@@ -266,25 +250,11 @@ async def fetch_server_instructions() -> str:
 
 async def call_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Call a tool on the Reporting MCP server via streamable HTTP."""
-    from mcp import ClientSession
-    from mcp.client.streamable_http import streamable_http_client
-
     if not _mcp_url:
         return {"error": "Reporting MCP not configured (set reporting_mcp.mcp_url)"}
 
     try:
-        async with (
-            streamable_http_client(
-                url=_mcp_url,
-                http_client=_build_http_client(),
-            ) as (
-                read_stream,
-                write_stream,
-                _,
-            ),
-            ClientSession(read_stream, write_stream) as session,
-        ):
-            await session.initialize()
+        async with mcp_session(_mcp_url, _auth_headers(), _MCP_TIMEOUT_SECONDS) as (session, _):
             result = await session.call_tool(tool_name, arguments)
 
             if result.isError:
@@ -307,25 +277,11 @@ async def call_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]
 
 async def read_resource(uri: str) -> dict[str, Any]:
     """Read a resource from the Reporting MCP server."""
-    from mcp import ClientSession
-    from mcp.client.streamable_http import streamable_http_client
-
     if not _mcp_url:
         return {"error": "Reporting MCP not configured"}
 
     try:
-        async with (
-            streamable_http_client(
-                url=_mcp_url,
-                http_client=_build_http_client(),
-            ) as (
-                read_stream,
-                write_stream,
-                _,
-            ),
-            ClientSession(read_stream, write_stream) as session,
-        ):
-            await session.initialize()
+        async with mcp_session(_mcp_url, _auth_headers(), _MCP_TIMEOUT_SECONDS) as (session, _):
             from pydantic import AnyUrl
 
             result = await session.read_resource(AnyUrl(uri))
@@ -344,27 +300,13 @@ async def read_resource(uri: str) -> dict[str, Any]:
 
 async def get_prompt(name: str, arguments: dict[str, str] | None = None) -> dict[str, Any]:
     """Fetch a prompt template from the Reporting MCP server."""
-    from mcp import ClientSession
-    from mcp.client.streamable_http import streamable_http_client
-
     if not _mcp_url:
         return {"error": "Reporting MCP not configured"}
 
     prompt_args = arguments or {}
 
     try:
-        async with (
-            streamable_http_client(
-                url=_mcp_url,
-                http_client=_build_http_client(),
-            ) as (
-                read_stream,
-                write_stream,
-                _,
-            ),
-            ClientSession(read_stream, write_stream) as session,
-        ):
-            await session.initialize()
+        async with mcp_session(_mcp_url, _auth_headers(), _MCP_TIMEOUT_SECONDS) as (session, _):
             result = await session.get_prompt(name, prompt_args)
 
             parts: list[str] = []
