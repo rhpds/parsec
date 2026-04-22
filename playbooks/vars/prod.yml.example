@@ -14,6 +14,10 @@ oauth_enabled: true
 # See dev.yml.example for all available variables.
 # Production values follow the same structure.
 
+# Reporting MCP token (Bearer auth for reporting-mcp server)
+# Create via: POST /api/v1/mcp/tokens {"user_email": "parsec@demo.redhat.com", "name": "parsec-prod"}
+reporting_mcp_token: ""
+
 # GitHub PAT (repo scope, for rhpds private repos)
 # Used by the fetch_github_file tool (GitHub remote MCP server)
 github_token: "ghp_..."
