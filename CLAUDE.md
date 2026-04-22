@@ -45,6 +45,7 @@ src/
     ocpv.py                  # OCPV cluster K8s API clients (httpx-based)
     splunk.py                # Splunk REST API client
     github_mcp.py            # GitHub remote MCP server client (streamable HTTP)
+    mlflow_tracking.py       # MLflow tracking server client (conditional, no-op if disabled)
   routes/
     query.py                 # GET /api/auth/check, POST /api/query (SSE), GET /api/reports/{filename}
     alert.py                 # POST /api/alert/investigate (alert investigation API)
@@ -52,6 +53,8 @@ src/
     share.py                 # Conversation sharing (public read-only links)
     learnings.py             # Admin API for agent learnings (view/clear)
     health.py                # GET /api/health, /api/health/ready
+  metrics/
+    collector.py             # MetricsCollector — async agent performance logging to MLflow
 static/                      # Chat UI (plain HTML/CSS/JS, no build step)
 config/
   config.yaml                # Base config (no secrets)
@@ -70,11 +73,13 @@ scripts/
   refresh_azure_billing.py   # Refreshes azure_billing.db from Azure Blob Storage
   local-server.sh            # Local dev server management (start/stop/restart/status)
 playbooks/
-  deploy.yaml                # Ansible deployment playbook
+  deploy.yaml                # Ansible deployment playbook (Parsec)
+  deploy-mlflow.yaml         # Ansible deployment playbook (MLflow tracking server)
   templates/
     manifests.yaml.j2         # All OpenShift manifests (Jinja2 template)
-  tasks/                     # mgmt-rbac, secrets, oauth, apply-manifests, wait-for-builds
-  vars/                      # common.yml (committed), dev.yml/prod.yml (gitignored)
+    mlflow-manifests.yaml.j2  # MLflow K8s manifests (namespace, postgres, S3, OAuth, NetworkPolicy)
+  tasks/                     # mgmt-rbac, secrets, oauth, mlflow-oauth, apply-manifests, wait-for-builds
+  vars/                      # common.yml, mlflow.yml (committed), dev.yml/prod.yml (gitignored)
 ```
 
 ## Running Locally
@@ -101,6 +106,10 @@ If you skip activation, run directly with `.venv/bin/python -m uvicorn src.app:a
   The sidecar starts automatically with `scripts/local-server.sh start`.
 - **Cost-monitor API**: Port-forward if needed:
   `oc port-forward svc/cost-data-service 8001:8000 -n cost-monitor`
+- **MLflow tracking**: Port-forward for local metrics logging:
+  `oc port-forward svc/mlflow-tracking 5005:5000 -n mlflow --kubeconfig=$HOME/secrets/ocpv-infra01.dal12.infra.demo.redhat.com.kubeconfig`
+  Then set `mlflow.tracking_url: "http://localhost:5005"` in `config.local.yaml`.
+  Leave `tracking_url` empty to disable metrics (silently skipped).
 
 ## Configuration
 
@@ -181,5 +190,6 @@ with the same message — do NOT amend the previous commit (the failed commit ne
 - **Reporting MCP**: Provision DB access goes through a Reporting MCP server via Streamable HTTP (`src/connections/reporting_mcp.py`). Tool schemas are dynamically discovered at startup and prefixed with `db_`. The `reporting_mcp.mcp_url` config is required. Health readiness probe checks cached init state — does NOT make live MCP calls.
 - **GitHub auth**: Push access to `rhpds/parsec` requires a GitHub account with write permissions. Use `gh auth status` to check the current profile.
 - **AWS IAM**: All AWS tools use the `cost-monitor` IAM user with `CostMonitorPolicy`. Cross-account access uses STS AssumeRole with inline session policy for read-only enforcement. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full policy details.
+- **MLflow metrics**: Agent performance metrics (latency, tokens, tool calls, errors, confidence) are logged to an MLflow tracking server in the `mlflow` namespace via async fire-and-forget background tasks. Conditional on `mlflow.tracking_url` config — disabled when empty. MLflow UI at `https://mlflow.apps.ocpv-infra01.dal12.infra.demo.redhat.com` (OAuth: `rhpds-admins`, `ace-octo-team`). Deployment: `ansible-playbook playbooks/deploy-mlflow.yaml`.
 
 See `docs/TODO.md` for the full project backlog.
