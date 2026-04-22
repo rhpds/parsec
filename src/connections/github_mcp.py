@@ -3,6 +3,8 @@
 import logging
 from typing import Any
 
+import httpx
+
 from src.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -47,7 +49,7 @@ async def call_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]
     Opens a fresh HTTP connection per call to avoid managing persistent sessions.
     """
     from mcp import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import streamable_http_client
 
     if not _mcp_url:
         return {"error": "GitHub MCP not configured (set github.mcp_url)"}
@@ -56,9 +58,14 @@ async def call_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]
         headers: dict[str, str] = {}
         if _token:
             headers["Authorization"] = f"Bearer {_token}"
+        client = httpx.AsyncClient(headers=headers)
 
         async with (
-            streamablehttp_client(url=_mcp_url, headers=headers) as (read_stream, write_stream, _),
+            streamable_http_client(url=_mcp_url, http_client=client) as (
+                read_stream,
+                write_stream,
+                _,
+            ),
             ClientSession(read_stream, write_stream) as session,
         ):
             await session.initialize()

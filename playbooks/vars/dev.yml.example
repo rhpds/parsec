@@ -61,6 +61,10 @@ aap2_partner0_url: https://aap2-partner0-prod-us-east-2.aap.infra.partner.demo.r
 aap2_partner0_username: monitor
 aap2_partner0_password: ""
 
+# Reporting MCP token (Bearer auth for reporting-mcp server)
+# Create via: POST /api/v1/mcp/tokens {"user_email": "parsec@demo.redhat.com", "name": "parsec-dev"}
+reporting_mcp_token: ""
+
 # GitHub PAT (repo scope, for rhpds private repos)
 # Used by the fetch_github_file tool (GitHub remote MCP server)
 github_token: "ghp_..."

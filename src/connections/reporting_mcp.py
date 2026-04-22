@@ -10,11 +10,14 @@ Provides dynamic MCP protocol capabilities discovered at startup:
 import logging
 from typing import Any
 
+import httpx
+
 from src.config import get_config
 
 logger = logging.getLogger(__name__)
 
 _mcp_url: str = ""
+_token: str = ""
 _server_instructions: str = ""
 
 _MCP_TIMEOUT_SECONDS = 60
@@ -28,7 +31,7 @@ _mcp_tool_names: set[str] = set()
 
 
 def init_reporting_mcp() -> None:
-    """Read the Reporting MCP URL from config."""
+    """Read the Reporting MCP URL and token from config."""
     cfg = get_config()
     reporting_cfg = cfg.get("reporting_mcp", {})
     url = reporting_cfg.get("mcp_url", "")
@@ -37,9 +40,18 @@ def init_reporting_mcp() -> None:
         logger.info("No Reporting MCP URL configured — Reporting MCP disabled")
         return
 
-    global _mcp_url  # noqa: PLW0603
+    global _mcp_url, _token  # noqa: PLW0603
     _mcp_url = url
+    _token = reporting_cfg.get("token", "")
     logger.info("Reporting MCP configured (url=%s)", _mcp_url)
+
+
+def _build_http_client() -> httpx.AsyncClient:
+    """Build an httpx client with auth headers and timeout."""
+    headers: dict[str, str] = {}
+    if _token:
+        headers["Authorization"] = f"Bearer {_token}"
+    return httpx.AsyncClient(headers=headers, timeout=_MCP_TIMEOUT_SECONDS)
 
 
 def get_mcp_url() -> str:
@@ -155,10 +167,13 @@ async def fetch_server_instructions() -> str:
 
     try:
         from mcp import ClientSession
-        from mcp.client.streamable_http import streamablehttp_client
+        from mcp.client.streamable_http import streamable_http_client
 
         async with (
-            streamablehttp_client(url=_mcp_url, timeout=_MCP_TIMEOUT_SECONDS) as (
+            streamable_http_client(
+                url=_mcp_url,
+                http_client=_build_http_client(),
+            ) as (
                 read_stream,
                 write_stream,
                 _,
@@ -252,14 +267,17 @@ async def fetch_server_instructions() -> str:
 async def call_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Call a tool on the Reporting MCP server via streamable HTTP."""
     from mcp import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import streamable_http_client
 
     if not _mcp_url:
         return {"error": "Reporting MCP not configured (set reporting_mcp.mcp_url)"}
 
     try:
         async with (
-            streamablehttp_client(url=_mcp_url, timeout=_MCP_TIMEOUT_SECONDS) as (
+            streamable_http_client(
+                url=_mcp_url,
+                http_client=_build_http_client(),
+            ) as (
                 read_stream,
                 write_stream,
                 _,
@@ -290,14 +308,17 @@ async def call_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]
 async def read_resource(uri: str) -> dict[str, Any]:
     """Read a resource from the Reporting MCP server."""
     from mcp import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import streamable_http_client
 
     if not _mcp_url:
         return {"error": "Reporting MCP not configured"}
 
     try:
         async with (
-            streamablehttp_client(url=_mcp_url, timeout=_MCP_TIMEOUT_SECONDS) as (
+            streamable_http_client(
+                url=_mcp_url,
+                http_client=_build_http_client(),
+            ) as (
                 read_stream,
                 write_stream,
                 _,
@@ -324,7 +345,7 @@ async def read_resource(uri: str) -> dict[str, Any]:
 async def get_prompt(name: str, arguments: dict[str, str] | None = None) -> dict[str, Any]:
     """Fetch a prompt template from the Reporting MCP server."""
     from mcp import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import streamable_http_client
 
     if not _mcp_url:
         return {"error": "Reporting MCP not configured"}
@@ -333,7 +354,10 @@ async def get_prompt(name: str, arguments: dict[str, str] | None = None) -> dict
 
     try:
         async with (
-            streamablehttp_client(url=_mcp_url, timeout=_MCP_TIMEOUT_SECONDS) as (
+            streamable_http_client(
+                url=_mcp_url,
+                http_client=_build_http_client(),
+            ) as (
                 read_stream,
                 write_stream,
                 _,
