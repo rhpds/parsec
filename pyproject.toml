@@ -73,6 +73,8 @@ module = [
     "fastapi.*",
     "mcp",
     "mcp.*",
+    "mlflow",
+    "mlflow.*",
     "yaml",
     "yaml.*",
 ]

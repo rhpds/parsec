@@ -791,6 +791,7 @@ async def run_agent(
     from src.agent.agents import AGENTS, classify_fast, run_sub_agent_streaming
     from src.agent.system_prompt import get_agent_prompt
     from src.agent.tool_definitions import get_orchestrator_tools
+    from src.metrics.collector import MetricsCollector
 
     orchestrator_tools = get_orchestrator_tools()
 
@@ -798,18 +799,25 @@ async def run_agent(
 
     _tool_cache.set({})
 
+    collector = MetricsCollector(conversation_id="pending")
+    collector.start_timer()
+
     cfg = get_config()
 
     # Fast-path: skip orchestrator for obvious single-domain queries
     fast_agent = classify_fast(question)
     if fast_agent and fast_agent in AGENTS:
         logger.info("Fast-path routing to %s agent", fast_agent)
+        collector.record_agent_dispatch(fast_agent, routing_method="fast-path")
         async for event in run_sub_agent_streaming(
             agent_type=fast_agent,
             task=question,
             conversation_history=conversation_history,
+            metrics=collector,
         ):
             yield event
+        collector.stop_timer()
+        asyncio.create_task(collector.flush_to_mlflow())
         return
 
     # Full orchestrator mode
@@ -823,6 +831,8 @@ async def run_agent(
         client = _build_client(cfg)
     except ValueError as e:
         yield sse_error(str(e))
+        collector.stop_timer()
+        asyncio.create_task(collector.flush_to_mlflow())
         yield sse_done()
         return
 
@@ -869,9 +879,19 @@ async def run_agent(
                     elapsed += 10
                     yield sse_status(f"Orchestrator analyzing... ({elapsed}s)")
             response = api_task.result()
+            if hasattr(response, "usage"):
+                collector.record_tokens(
+                    input_tokens=response.usage.input_tokens,
+                    output_tokens=response.usage.output_tokens,
+                )
+                if not collector.model:
+                    collector.record_model(response.model)
+                    collector.record_agent_dispatch("orchestrator", routing_method="llm")
         except anthropic.APIError as e:
             logger.exception("Claude API error in orchestrator")
             yield sse_error(f"Claude API error: {e}")
+            collector.stop_timer()
+            asyncio.create_task(collector.flush_to_mlflow())
             yield sse_done()
             return
 
@@ -890,6 +910,8 @@ async def run_agent(
 
         if not tool_use_blocks:
             yield sse_event("history", {"messages": _serialize_messages(messages)})
+            collector.stop_timer()
+            asyncio.create_task(collector.flush_to_mlflow())
             yield sse_done()
             return
 
@@ -927,6 +949,8 @@ async def run_agent(
     yield sse_text(max_rounds_text)
     messages.append({"role": "assistant", "content": [{"type": "text", "text": max_rounds_text}]})
     yield sse_event("history", {"messages": _serialize_messages(messages)})
+    collector.stop_timer()
+    asyncio.create_task(collector.flush_to_mlflow())
     yield sse_done()
 
 

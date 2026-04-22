@@ -21,6 +21,8 @@ import anthropic
 if TYPE_CHECKING:
     from anthropic import AnthropicBedrock, AnthropicVertex
 
+    from src.metrics.collector import MetricsCollector
+
 from src.agent.streaming import (
     sse_event,
     sse_report,
@@ -594,6 +596,7 @@ async def run_sub_agent_streaming(  # noqa: C901
     context: dict | None = None,
     client: anthropic.Anthropic | AnthropicVertex | AnthropicBedrock | None = None,
     conversation_history: list | None = None,
+    metrics: MetricsCollector | None = None,
 ) -> AsyncGenerator[str, None]:
     """Run a sub-agent as the top-level agent, yielding SSE events directly.
 
@@ -704,6 +707,13 @@ async def run_sub_agent_streaming(  # noqa: C901
                     elapsed += 10
                     yield sse_status(f"{agent_cfg.name}: Analyzing... ({elapsed}s)")
             response = api_task.result()
+            if metrics and hasattr(response, "usage"):
+                metrics.record_tokens(
+                    input_tokens=response.usage.input_tokens,
+                    output_tokens=response.usage.output_tokens,
+                )
+                if not metrics.model:
+                    metrics.record_model(response.model)
         except anthropic.APIError as e:
             logger.exception("Claude API error in %s streaming sub-agent", agent_type)
             yield sse_error(f"Claude API error: {e}")
@@ -743,6 +753,18 @@ async def run_sub_agent_streaming(  # noqa: C901
             confidence_level, reasons = _compute_confidence(tool_outcomes)
             if confidence_level != "high":
                 yield sse_confidence(confidence_level, reasons)
+
+            if metrics:
+                metrics.record_sub_agent_result(
+                    agent_type=agent_type,
+                    duration_seconds=round(_time.monotonic() - start_time, 1),
+                    tool_calls=tool_call_count,
+                    tool_errors=sum(1 for t in tool_outcomes if t.get("status") == "error"),
+                    rounds_used=_round + 1,
+                    max_rounds=agent_cfg.max_rounds,
+                    status="success",
+                )
+                metrics.record_confidence(confidence_level)
 
             yield sse_event("agent_done", {"agent": agent_type})
             yield sse_event("history", {"messages": _serialize_messages(messages)})
@@ -835,6 +857,18 @@ async def run_sub_agent_streaming(  # noqa: C901
     confidence_level, reasons = _compute_confidence(tool_outcomes)
     if confidence_level != "high":
         yield sse_confidence(confidence_level, reasons)
+
+    if metrics:
+        metrics.record_sub_agent_result(
+            agent_type=agent_type,
+            duration_seconds=round(_time.monotonic() - start_time, 1),
+            tool_calls=tool_call_count,
+            tool_errors=sum(1 for t in tool_outcomes if t.get("status") == "error"),
+            rounds_used=agent_cfg.max_rounds,
+            max_rounds=agent_cfg.max_rounds,
+            status="success",
+        )
+        metrics.record_confidence(confidence_level)
 
     yield sse_event("agent_done", {"agent": agent_type})
     max_rounds_text = (
