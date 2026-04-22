@@ -10,3 +10,4 @@ azure-identity>=1.15.0
 azure-storage-blob>=12.19.0
 google-cloud-bigquery>=3.4.0
 mcp>=1.8.0
+mlflow>=2.10.0

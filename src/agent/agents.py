@@ -21,6 +21,8 @@ import anthropic
 if TYPE_CHECKING:
     from anthropic import AnthropicBedrock, AnthropicVertex
 
+    from src.metrics.collector import MetricsCollector
+
 from src.agent.streaming import (
     sse_event,
     sse_report,
@@ -367,7 +369,7 @@ async def run_sub_agent(  # noqa: C901
     Returns:
         Structured result dict with summary, findings, and metadata.
     """
-    from src.agent.orchestrator import _build_client, _execute_tool, _trim_history
+    from src.agent.orchestrator import _build_client, _trim_history
 
     start = _time.monotonic()
     agent_cfg = AGENTS.get(agent_type)
@@ -482,16 +484,42 @@ async def run_sub_agent(  # noqa: C901
                 f"[Tool: {tool_name}] input={json.dumps(tool_input, default=str)[:200]}"
             )
 
+            result: dict = {}
             try:
-                task_coro = asyncio.create_task(_execute_tool(tool_name, tool_input))
-                elapsed = 0
-                while not task_coro.done():
-                    done, _ = await asyncio.wait({task_coro}, timeout=10)
-                    if not done:
-                        elapsed += 10
-                        label = agent_cfg.slow_tool_labels.get(tool_name, f"Processing {tool_name}")
-                        await _emit(sse_status(f"{agent_cfg.name}: {label}... ({elapsed}s)"))
-                result = task_coro.result()
+                from src.agent.orchestrator import (
+                    _UNCACHEABLE_TOOLS,
+                    _cache_key,
+                    _execute_tool,
+                    _tool_cache,
+                )
+
+                cache = _tool_cache.get(None)
+                cached = False
+                if cache is not None and tool_name not in _UNCACHEABLE_TOOLS:
+                    key = _cache_key(tool_name, tool_input)
+                    if key in cache:
+                        result = cache[key]
+                        cached = True
+                        await _emit(sse_event("cache_hit", {"tool": tool_name}))
+
+                if not cached:
+                    task_coro = asyncio.create_task(_execute_tool(tool_name, tool_input))
+                    elapsed = 0
+                    while not task_coro.done():
+                        done, _ = await asyncio.wait({task_coro}, timeout=10)
+                        if not done:
+                            elapsed += 10
+                            label = agent_cfg.slow_tool_labels.get(
+                                tool_name, f"Processing {tool_name}"
+                            )
+                            await _emit(sse_status(f"{agent_cfg.name}: {label}... ({elapsed}s)"))
+                    result = task_coro.result()
+                    if (
+                        cache is not None
+                        and tool_name not in _UNCACHEABLE_TOOLS
+                        and "error" not in result
+                    ):
+                        cache[_cache_key(tool_name, tool_input)] = result
             except Exception as e:
                 logger.exception("Tool %s failed in %s sub-agent", tool_name, agent_type)
                 result = {"error": str(e)}
@@ -568,6 +596,7 @@ async def run_sub_agent_streaming(  # noqa: C901
     context: dict | None = None,
     client: anthropic.Anthropic | AnthropicVertex | AnthropicBedrock | None = None,
     conversation_history: list | None = None,
+    metrics: MetricsCollector | None = None,
 ) -> AsyncGenerator[str, None]:
     """Run a sub-agent as the top-level agent, yielding SSE events directly.
 
@@ -578,7 +607,14 @@ async def run_sub_agent_streaming(  # noqa: C901
         conversation_history: Prior messages for multi-turn context. Required
             for fast-path mode so follow-up questions retain context.
     """
-    from src.agent.orchestrator import _build_client, _execute_tool, _trim_history
+    from src.agent.orchestrator import (
+        _UNCACHEABLE_TOOLS,
+        _build_client,
+        _cache_key,
+        _execute_tool,
+        _tool_cache,
+        _trim_history,
+    )
     from src.agent.streaming import (
         sse_done,
         sse_error,
@@ -592,6 +628,10 @@ async def run_sub_agent_streaming(  # noqa: C901
         yield sse_error(f"Unknown agent type: {agent_type}")
         yield sse_done()
         return
+
+    # Initialize tool cache if not already set (fast-path enters here directly)
+    if _tool_cache.get(None) is None:
+        _tool_cache.set({})
 
     cfg = get_config()
     model = cfg.anthropic.get("model", "claude-sonnet-4-20250514")
@@ -667,6 +707,13 @@ async def run_sub_agent_streaming(  # noqa: C901
                     elapsed += 10
                     yield sse_status(f"{agent_cfg.name}: Analyzing... ({elapsed}s)")
             response = api_task.result()
+            if metrics and hasattr(response, "usage"):
+                metrics.record_tokens(
+                    input_tokens=response.usage.input_tokens,
+                    output_tokens=response.usage.output_tokens,
+                )
+                if not metrics.model:
+                    metrics.record_model(response.model)
         except anthropic.APIError as e:
             logger.exception("Claude API error in %s streaming sub-agent", agent_type)
             yield sse_error(f"Claude API error: {e}")
@@ -707,6 +754,18 @@ async def run_sub_agent_streaming(  # noqa: C901
             if confidence_level != "high":
                 yield sse_confidence(confidence_level, reasons)
 
+            if metrics:
+                metrics.record_sub_agent_result(
+                    agent_type=agent_type,
+                    duration_seconds=round(_time.monotonic() - start_time, 1),
+                    tool_calls=tool_call_count,
+                    tool_errors=sum(1 for t in tool_outcomes if t.get("status") == "error"),
+                    rounds_used=_round + 1,
+                    max_rounds=agent_cfg.max_rounds,
+                    status="success",
+                )
+                metrics.record_confidence(confidence_level)
+
             yield sse_event("agent_done", {"agent": agent_type})
             yield sse_event("history", {"messages": _serialize_messages(messages)})
             yield sse_done()
@@ -721,16 +780,35 @@ async def run_sub_agent_streaming(  # noqa: C901
 
             yield sse_tool_start(tool_name, tool_input)
 
+            result: dict = {}
             try:
-                tool_task = asyncio.create_task(_execute_tool(tool_name, tool_input))
-                elapsed = 0
-                while not tool_task.done():
-                    done, _ = await asyncio.wait({tool_task}, timeout=10)
-                    if not done:
-                        elapsed += 10
-                        label = agent_cfg.slow_tool_labels.get(tool_name, f"Processing {tool_name}")
-                        yield sse_status(f"{agent_cfg.name}: {label}... ({elapsed}s)")
-                result = tool_task.result()
+                cache = _tool_cache.get(None)
+                cached = False
+                if cache is not None and tool_name not in _UNCACHEABLE_TOOLS:
+                    key = _cache_key(tool_name, tool_input)
+                    if key in cache:
+                        result = cache[key]
+                        cached = True
+                        yield sse_event("cache_hit", {"tool": tool_name})
+
+                if not cached:
+                    tool_task = asyncio.create_task(_execute_tool(tool_name, tool_input))
+                    elapsed = 0
+                    while not tool_task.done():
+                        done, _ = await asyncio.wait({tool_task}, timeout=10)
+                        if not done:
+                            elapsed += 10
+                            label = agent_cfg.slow_tool_labels.get(
+                                tool_name, f"Processing {tool_name}"
+                            )
+                            yield sse_status(f"{agent_cfg.name}: {label}... ({elapsed}s)")
+                    result = tool_task.result()
+                    if (
+                        cache is not None
+                        and tool_name not in _UNCACHEABLE_TOOLS
+                        and "error" not in result
+                    ):
+                        cache[_cache_key(tool_name, tool_input)] = result
             except Exception as e:
                 logger.exception("Tool %s failed in %s streaming sub-agent", tool_name, agent_type)
                 result = {"error": str(e)}
@@ -779,6 +857,18 @@ async def run_sub_agent_streaming(  # noqa: C901
     confidence_level, reasons = _compute_confidence(tool_outcomes)
     if confidence_level != "high":
         yield sse_confidence(confidence_level, reasons)
+
+    if metrics:
+        metrics.record_sub_agent_result(
+            agent_type=agent_type,
+            duration_seconds=round(_time.monotonic() - start_time, 1),
+            tool_calls=tool_call_count,
+            tool_errors=sum(1 for t in tool_outcomes if t.get("status") == "error"),
+            rounds_used=agent_cfg.max_rounds,
+            max_rounds=agent_cfg.max_rounds,
+            status="success",
+        )
+        metrics.record_confidence(confidence_level)
 
     yield sse_event("agent_done", {"agent": agent_type})
     max_rounds_text = (

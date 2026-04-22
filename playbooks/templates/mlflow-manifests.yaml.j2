@@ -1,0 +1,531 @@
+{# MLflow OpenShift manifests - Jinja2 template for Ansible deployment #}
+{# Deploys MLflow tracking server with PostgreSQL backend, S3 artifact storage, and OAuth proxy #}
+---
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+---
+# PostgreSQL Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mlflow-postgres
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+    component: postgres
+stringData:
+  database-name: "{{ mlflow_postgres_db }}"
+  database-user: "{{ mlflow_postgres_user }}"
+  database-password: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=32') }}"
+---
+# PostgreSQL PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mlflow-postgres-data
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+    component: postgres
+spec:
+  storageClassName: {{ mlflow_postgres_storage_class }}
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ mlflow_postgres_storage }}
+---
+# PostgreSQL Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow-postgres
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+    component: postgres
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mlflow
+      component: postgres
+  template:
+    metadata:
+      labels:
+        app: mlflow
+        component: postgres
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgresql
+          image: {{ mlflow_postgres_image }}
+          ports:
+            - containerPort: 5432
+              name: postgresql
+              protocol: TCP
+          env:
+            - name: POSTGRESQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: mlflow-postgres
+                  key: database-name
+            - name: POSTGRESQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mlflow-postgres
+                  key: database-user
+            - name: POSTGRESQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mlflow-postgres
+                  key: database-password
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/pgsql/data
+          livenessProbe:
+            exec:
+              command:
+                - /usr/bin/pg_isready
+                - -U
+                - $(POSTGRESQL_USER)
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - /usr/bin/pg_isready
+                - -U
+                - $(POSTGRESQL_USER)
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 1
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: mlflow-postgres-data
+---
+# PostgreSQL Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow-postgres
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+    component: postgres
+spec:
+  type: ClusterIP
+  selector:
+    app: mlflow
+    component: postgres
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
+---
+# S3 ObjectBucketClaim
+apiVersion: objectbucket.io/v1alpha1
+kind: ObjectBucketClaim
+metadata:
+  name: {{ mlflow_s3_bucket_name }}
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+    component: storage
+spec:
+  generateBucketName: {{ mlflow_s3_bucket_name }}
+  storageClassName: {{ mlflow_s3_storage_class }}
+---
+# MLflow Tracking Server Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow-tracking
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+    component: tracking
+spec:
+  replicas: {{ mlflow_server_replicas }}
+  selector:
+    matchLabels:
+      app: mlflow
+      component: tracking
+  template:
+    metadata:
+      labels:
+        app: mlflow
+        component: tracking
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mlflow-server
+          image: {{ mlflow_server_image }}
+          ports:
+            - containerPort: 5000
+              name: http
+              protocol: TCP
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mlflow-postgres
+                  key: database-user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mlflow-postgres
+                  key: database-password
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: mlflow-postgres
+                  key: database-name
+            - name: MLFLOW_BACKEND_STORE_URI
+              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@mlflow-postgres:5432/$(POSTGRES_DB)"
+            - name: BUCKET_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ mlflow_s3_bucket_name }}
+                  key: BUCKET_NAME
+            - name: MLFLOW_DEFAULT_ARTIFACT_ROOT
+              value: "s3://$(BUCKET_NAME)/"
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ mlflow_s3_bucket_name }}
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ mlflow_s3_bucket_name }}
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: BUCKET_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ mlflow_s3_bucket_name }}
+                  key: BUCKET_HOST
+            - name: MLFLOW_S3_ENDPOINT_URL
+              value: "http://$(BUCKET_HOST)"
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              pip install --quiet --no-cache-dir --target /tmp/pip-deps psycopg2-binary boto3 &&
+              export PYTHONPATH=/tmp/pip-deps:$PYTHONPATH &&
+              mlflow server \
+                --backend-store-uri "$(MLFLOW_BACKEND_STORE_URI)" \
+                --default-artifact-root "$(MLFLOW_DEFAULT_ARTIFACT_ROOT)" \
+                --host 0.0.0.0 \
+                --port 5000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              memory: {{ mlflow_server_memory_request }}
+              cpu: "100m"
+            limits:
+              memory: {{ mlflow_server_memory_limit }}
+              cpu: "500m"
+---
+# MLflow Tracking Service (internal - for Parsec connection)
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow-tracking
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+    component: tracking
+spec:
+  type: ClusterIP
+  selector:
+    app: mlflow
+    component: tracking
+  ports:
+    - name: http
+      port: 5000
+      targetPort: 5000
+      protocol: TCP
+---
+# OAuth Proxy ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mlflow-oauth
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+    component: oauth
+  annotations:
+    serviceaccounts.openshift.io/oauth-redirectreference.primary: |
+      {
+        "kind": "OAuthRedirectReference",
+        "apiVersion": "v1",
+        "reference": {
+          "kind": "Route",
+          "name": "mlflow-route"
+        }
+      }
+---
+# OAuth Proxy Deployment
+# Note: mlflow-oauth-secret is created by playbooks/tasks/mlflow-oauth.yml (idempotent)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow-oauth-proxy
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+    component: oauth-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mlflow
+      component: oauth-proxy
+  template:
+    metadata:
+      labels:
+        app: mlflow
+        component: oauth-proxy
+    spec:
+      serviceAccountName: mlflow-oauth
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: oauth-proxy
+          image: {{ mlflow_oauth_proxy_image }}
+          ports:
+            - containerPort: 8443
+              name: https
+              protocol: TCP
+          env:
+            - name: OAUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: mlflow-oauth-secret
+                  key: client-id
+          args:
+            - -provider=openshift
+            - -https-address=:8443
+            - -http-address=
+            - -email-domain=*
+            - -upstream=http://mlflow-tracking:5000/
+            - -client-id=$(OAUTH_CLIENT_ID)
+            - -client-secret-file=/etc/proxy/secrets/client-secret
+            - -cookie-secret-file=/etc/proxy/secrets/session_secret
+            - -openshift-service-account=mlflow-oauth
+            - -openshift-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            - -tls-cert=/etc/tls/private/tls.crt
+            - -tls-key=/etc/tls/private/tls.key
+            - -pass-user-headers=true
+            - -openshift-sar={"namespace":"{{ mlflow_namespace }}","resource":"services","verb":"get"}
+          volumeMounts:
+            - name: oauth-secret
+              mountPath: /etc/proxy/secrets
+              readOnly: true
+            - name: oauth-serving-cert
+              mountPath: /etc/tls/private
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+          readinessProbe:
+            httpGet:
+              path: /oauth/healthz
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            timeoutSeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /oauth/healthz
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            timeoutSeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: oauth-secret
+          secret:
+            secretName: mlflow-oauth-secret
+        - name: oauth-serving-cert
+          secret:
+            secretName: mlflow-serving-cert
+---
+# OAuth Proxy Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow-oauth-proxy
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+    component: oauth-proxy
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: mlflow-serving-cert
+spec:
+  type: ClusterIP
+  selector:
+    app: mlflow
+    component: oauth-proxy
+  ports:
+    - name: https
+      port: 8443
+      targetPort: 8443
+      protocol: TCP
+---
+# Route
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: mlflow-route
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+    component: frontend
+spec:
+  host: mlflow.{{ mlflow_cluster_domain }}
+  to:
+    kind: Service
+    name: mlflow-oauth-proxy
+    weight: 100
+  port:
+    targetPort: https
+  tls:
+    termination: reencrypt
+---
+# NetworkPolicy: allow-parsec-ingress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-parsec-ingress
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+spec:
+  podSelector:
+    matchLabels:
+      app: mlflow
+      component: tracking
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: parsec-dev
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: parsec
+      ports:
+        - protocol: TCP
+          port: 5000
+---
+# NetworkPolicy: allow-oauth-to-tracking
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-oauth-to-tracking
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+spec:
+  podSelector:
+    matchLabels:
+      app: mlflow
+      component: tracking
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: mlflow
+              component: oauth-proxy
+      ports:
+        - protocol: TCP
+          port: 5000
+---
+# NetworkPolicy: allow-external-to-oauth
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-to-oauth
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+spec:
+  podSelector:
+    matchLabels:
+      app: mlflow
+      component: oauth-proxy
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8443

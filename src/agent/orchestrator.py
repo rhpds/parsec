@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from collections.abc import AsyncGenerator
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -58,6 +59,24 @@ REPORTS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "reports"
 )
 os.makedirs(REPORTS_DIR, exist_ok=True)
+
+# ---------------------------------------------------------------------------
+# Tool result cache — per-request, keyed by (tool_name, canonical_input)
+# ---------------------------------------------------------------------------
+
+_tool_cache: ContextVar[dict[str, dict] | None] = ContextVar("_tool_cache", default=None)
+
+_UNCACHEABLE_TOOLS = frozenset(
+    {
+        "render_chart",
+        "generate_report",
+        "query_icinga",
+    }
+)
+
+
+def _cache_key(tool_name: str, tool_input: dict) -> str:
+    return tool_name + ":" + json.dumps(tool_input, sort_keys=True, default=str)
 
 
 def _is_reporting_mcp_tool(name: str) -> bool:
@@ -710,14 +729,33 @@ async def _handle_direct_tool(
     tool_name = tool_block.name
     yield sse_tool_start(tool_name, tool_input), None
 
-    task = asyncio.create_task(_execute_tool(tool_name, tool_input))
-    elapsed = 0
-    while not task.done():
-        done, _ = await asyncio.wait({task}, timeout=10)
-        if not done:
-            elapsed += 10
-            yield sse_status(f"Processing {tool_name}... ({elapsed}s)"), None
-    result = task.result()
+    cache = _tool_cache.get(None)
+    if cache is not None and tool_name not in _UNCACHEABLE_TOOLS:
+        key = _cache_key(tool_name, tool_input)
+        if key in cache:
+            logger.info("Cache hit for %s (direct tool)", tool_name)
+            result = cache[key]
+            yield sse_event("cache_hit", {"tool": tool_name}), None
+        else:
+            task = asyncio.create_task(_execute_tool(tool_name, tool_input))
+            elapsed = 0
+            while not task.done():
+                done, _ = await asyncio.wait({task}, timeout=10)
+                if not done:
+                    elapsed += 10
+                    yield sse_status(f"Processing {tool_name}... ({elapsed}s)"), None
+            result = task.result()
+            if "error" not in result:
+                cache[key] = result
+    else:
+        task = asyncio.create_task(_execute_tool(tool_name, tool_input))
+        elapsed = 0
+        while not task.done():
+            done, _ = await asyncio.wait({task}, timeout=10)
+            if not done:
+                elapsed += 10
+                yield sse_status(f"Processing {tool_name}... ({elapsed}s)"), None
+        result = task.result()
 
     yield sse_tool_result(tool_name, result), None
 
@@ -753,10 +791,16 @@ async def run_agent(
     from src.agent.agents import AGENTS, classify_fast, run_sub_agent_streaming
     from src.agent.system_prompt import get_agent_prompt
     from src.agent.tool_definitions import get_orchestrator_tools
+    from src.metrics.collector import MetricsCollector
 
     orchestrator_tools = get_orchestrator_tools()
 
     logger.info("run_agent: question=%s", question[:120])
+
+    _tool_cache.set({})
+
+    collector = MetricsCollector(conversation_id="pending")
+    collector.start_timer()
 
     cfg = get_config()
 
@@ -764,12 +808,16 @@ async def run_agent(
     fast_agent = classify_fast(question)
     if fast_agent and fast_agent in AGENTS:
         logger.info("Fast-path routing to %s agent", fast_agent)
+        collector.record_agent_dispatch(fast_agent, routing_method="fast-path")
         async for event in run_sub_agent_streaming(
             agent_type=fast_agent,
             task=question,
             conversation_history=conversation_history,
+            metrics=collector,
         ):
             yield event
+        collector.stop_timer()
+        asyncio.create_task(collector.flush_to_mlflow())
         return
 
     # Full orchestrator mode
@@ -783,6 +831,8 @@ async def run_agent(
         client = _build_client(cfg)
     except ValueError as e:
         yield sse_error(str(e))
+        collector.stop_timer()
+        asyncio.create_task(collector.flush_to_mlflow())
         yield sse_done()
         return
 
@@ -829,9 +879,19 @@ async def run_agent(
                     elapsed += 10
                     yield sse_status(f"Orchestrator analyzing... ({elapsed}s)")
             response = api_task.result()
+            if hasattr(response, "usage"):
+                collector.record_tokens(
+                    input_tokens=response.usage.input_tokens,
+                    output_tokens=response.usage.output_tokens,
+                )
+                if not collector.model:
+                    collector.record_model(response.model)
+                    collector.record_agent_dispatch("orchestrator", routing_method="llm")
         except anthropic.APIError as e:
             logger.exception("Claude API error in orchestrator")
             yield sse_error(f"Claude API error: {e}")
+            collector.stop_timer()
+            asyncio.create_task(collector.flush_to_mlflow())
             yield sse_done()
             return
 
@@ -850,6 +910,8 @@ async def run_agent(
 
         if not tool_use_blocks:
             yield sse_event("history", {"messages": _serialize_messages(messages)})
+            collector.stop_timer()
+            asyncio.create_task(collector.flush_to_mlflow())
             yield sse_done()
             return
 
@@ -887,6 +949,8 @@ async def run_agent(
     yield sse_text(max_rounds_text)
     messages.append({"role": "assistant", "content": [{"type": "text", "text": max_rounds_text}]})
     yield sse_event("history", {"messages": _serialize_messages(messages)})
+    collector.stop_timer()
+    asyncio.create_task(collector.flush_to_mlflow())
     yield sse_done()
 
 
