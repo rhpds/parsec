@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from src.config import get_config
+from src.connections.mcp_common import mcp_session
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +43,7 @@ def get_token() -> str:
 
 
 async def call_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Call a tool on the GitHub remote MCP server via streamable HTTP.
-
-    Opens a fresh HTTP connection per call to avoid managing persistent sessions.
-    """
-    from mcp import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
-
+    """Call a tool on the GitHub remote MCP server via streamable HTTP."""
     if not _mcp_url:
         return {"error": "GitHub MCP not configured (set github.mcp_url)"}
 
@@ -57,11 +52,7 @@ async def call_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]
         if _token:
             headers["Authorization"] = f"Bearer {_token}"
 
-        async with (
-            streamablehttp_client(url=_mcp_url, headers=headers) as (read_stream, write_stream, _),
-            ClientSession(read_stream, write_stream) as session,
-        ):
-            await session.initialize()
+        async with mcp_session(_mcp_url, headers) as (session, _):
             result = await session.call_tool(tool_name, arguments)
 
             if result.isError:

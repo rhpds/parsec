@@ -213,6 +213,12 @@ spec:
               value: "http://localhost:3000/sse"
             - name: PARSEC_REPORTING_MCP__MCP_URL
               value: "{{ reporting_mcp_url | default('') }}"
+            - name: PARSEC_REPORTING_MCP__TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: parsec-secrets
+                  key: reporting-mcp-token
+                  optional: true
           envFrom:
             - secretRef:
                 name: parsec-cloud-credentials
