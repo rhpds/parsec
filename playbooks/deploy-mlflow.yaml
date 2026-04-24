@@ -68,6 +68,13 @@
           tags: [oauth, apply]
       tags: [oauth, apply]
 
+    - name: Create API basic auth resources
+      ansible.builtin.include_tasks:
+        file: tasks/mlflow-api-htpasswd.yml
+        apply:
+          tags: [api, apply]
+      tags: [api, apply]
+
     - name: Apply manifests
       kubernetes.core.k8s:
         kubeconfig: "{{ mlflow_kubeconfig }}"
@@ -123,6 +130,8 @@
 
           Namespace:    {{ mlflow_namespace }}
           UI URL:       https://mlflow.{{ mlflow_cluster_domain }}
+          API URL:      https://mlflow-api.{{ mlflow_cluster_domain }}
+          API User:     {{ mlflow_api_username }}
           Internal URL: http://mlflow-tracking.{{ mlflow_namespace }}.svc.cluster.local:5000
 
           Pods:
