@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+
 import mlflow
 from mlflow.tracking import MlflowClient
 
@@ -39,11 +40,9 @@ def init_mlflow() -> None:
 
     # Set credentials via environment variables (MLflow SDK standard)
     if tracking_username:
-
         os.environ["MLFLOW_TRACKING_USERNAME"] = tracking_username
         logger.info("MLflow basic auth enabled (username: %s)", tracking_username)
     if tracking_password:
-
         os.environ["MLFLOW_TRACKING_PASSWORD"] = tracking_password
 
     mlflow.set_tracking_uri(tracking_url)

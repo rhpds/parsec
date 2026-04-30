@@ -434,9 +434,7 @@ async def run_sub_agent(  # noqa: C901
             if tracer:
                 from src.agent.system_prompt import get_prompt_files
 
-                tracer.set_llm_context(
-                    get_prompt_files(agent_type), agent_cfg.tools, messages
-                )
+                tracer.set_llm_context(get_prompt_files(agent_type), agent_cfg.tools, messages)
 
             def _call_api() -> anthropic.types.Message:
                 return _client.messages.create(
@@ -733,9 +731,7 @@ async def run_sub_agent_streaming(  # noqa: C901
             if tracer:
                 from src.agent.system_prompt import get_prompt_files
 
-                tracer.set_llm_context(
-                    get_prompt_files(agent_type), agent_cfg.tools, messages
-                )
+                tracer.set_llm_context(get_prompt_files(agent_type), agent_cfg.tools, messages)
 
             def _call_api() -> anthropic.types.Message:
                 return _client.messages.create(

@@ -911,9 +911,7 @@ async def run_agent(
             # Capture LLM context for MLflow tracing
             from src.agent.system_prompt import get_prompt_files
 
-            tracer.set_llm_context(
-                get_prompt_files("orchestrator"), orchestrator_tools, messages
-            )
+            tracer.set_llm_context(get_prompt_files("orchestrator"), orchestrator_tools, messages)
 
             def _call_api() -> anthropic.types.Message:
                 return client.messages.create(
@@ -1000,7 +998,11 @@ async def run_agent(
 
             if agent_type:
                 handler = _handle_delegation(
-                    agent_type, tool_block, tool_input, client, incoming_history,
+                    agent_type,
+                    tool_block,
+                    tool_input,
+                    client,
+                    incoming_history,
                     collector=collector,
                     tracer=tracer,
                 )

@@ -17,7 +17,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.connections.mlflow_tracking import get_experiment_name, get_mlflow_client, is_tracing_enabled
+from src.connections.mlflow_tracking import (
+    get_experiment_name,
+    get_mlflow_client,
+    is_tracing_enabled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -314,23 +318,27 @@ class ConversationTracer:
         all_tool_calls = []
         for s in self._spans:
             if s.span_type == "TOOL":
-                all_tool_calls.append({
-                    "tool": s.name.removeprefix("tool:"),
-                    "input": s.inputs.get("tool_input"),
-                    "output": s.outputs.get("result"),
-                    "error": s.outputs.get("error") or None,
-                    "duration_ms": s.attributes.get("duration_ms", 0),
-                    "cached": s.attributes.get("cached", False),
-                })
+                all_tool_calls.append(
+                    {
+                        "tool": s.name.removeprefix("tool:"),
+                        "input": s.inputs.get("tool_input"),
+                        "output": s.outputs.get("result"),
+                        "error": s.outputs.get("error") or None,
+                        "duration_ms": s.attributes.get("duration_ms", 0),
+                        "cached": s.attributes.get("cached", False),
+                    }
+                )
             for tc in s.tool_calls:
-                all_tool_calls.append({
-                    "tool": tc.tool_name,
-                    "input": _safe_json(tc.tool_input),
-                    "output": _safe_json(tc.result) if tc.result else None,
-                    "error": tc.error,
-                    "duration_ms": round(tc.duration_ms, 1),
-                    "cached": tc.cached,
-                })
+                all_tool_calls.append(
+                    {
+                        "tool": tc.tool_name,
+                        "input": _safe_json(tc.tool_input),
+                        "output": _safe_json(tc.result) if tc.result else None,
+                        "error": tc.error,
+                        "duration_ms": round(tc.duration_ms, 1),
+                        "cached": tc.cached,
+                    }
+                )
 
         outputs: dict[str, Any] = {
             "response": _truncate(self._response_text, 8000),
@@ -350,9 +358,7 @@ class ConversationTracer:
             attributes={"status": "complete"},
         )
 
-    def _write_span(
-        self, client: Any, request_id: str, parent_id: str, record: SpanRecord
-    ) -> None:
+    def _write_span(self, client: Any, request_id: str, parent_id: str, record: SpanRecord) -> None:
         inputs = _safe_serializable(record.inputs)
         if record.tool_calls:
             inputs["tool_calls_summary"] = [
