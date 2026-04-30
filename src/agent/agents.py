@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from anthropic import AnthropicBedrock, AnthropicVertex
 
     from src.metrics.collector import MetricsCollector
+    from src.metrics.tracing import ConversationTracer
 
 from src.agent.streaming import (
     sse_event,
@@ -352,6 +353,7 @@ async def run_sub_agent(  # noqa: C901
     client: anthropic.Anthropic | AnthropicVertex | AnthropicBedrock | None = None,
     event_queue: asyncio.Queue[str] | None = None,
     conversation_history: list | None = None,
+    tracer: ConversationTracer | None = None,
 ) -> dict:
     """Run a sub-agent's Claude tool-use loop and return structured results.
 
@@ -428,6 +430,13 @@ async def run_sub_agent(  # noqa: C901
         )
 
         try:
+            # Capture LLM context for MLflow tracing
+            if tracer:
+                from src.agent.system_prompt import get_prompt_files
+
+                tracer.set_llm_context(
+                    get_prompt_files(agent_type), agent_cfg.tools, messages
+                )
 
             def _call_api() -> anthropic.types.Message:
                 return _client.messages.create(
@@ -454,14 +463,29 @@ async def run_sub_agent(  # noqa: C901
 
         assistant_content = response.content
         tool_use_blocks = []
+        response_text_parts = []
 
         for block in assistant_content:
             if block.type == "text" and block.text.strip():
                 text_parts.append(block.text)
+                response_text_parts.append(block.text)
                 investigation_log.append(block.text)
                 await _emit(sse_text(block.text))
+                if tracer:
+                    tracer.append_response(block.text)
             elif block.type == "tool_use":
                 tool_use_blocks.append(block)
+
+        if tracer:
+            tracer.record_llm_call(
+                round_num=_round,
+                label=f"sub_{agent_type}",
+                input_tokens=response.usage.input_tokens if hasattr(response, "usage") else 0,
+                output_tokens=response.usage.output_tokens if hasattr(response, "usage") else 0,
+                model=response.model if hasattr(response, "model") else model,
+                response_text="\n".join(response_text_parts),
+                tool_use_names=[b.name for b in tool_use_blocks],
+            )
 
         from src.agent.orchestrator import _clean_content_block
 
@@ -485,6 +509,8 @@ async def run_sub_agent(  # noqa: C901
             )
 
             result: dict = {}
+            tool_start_time = _time.monotonic()
+            cached = False
             try:
                 from src.agent.orchestrator import (
                     _UNCACHEABLE_TOOLS,
@@ -494,7 +520,6 @@ async def run_sub_agent(  # noqa: C901
                 )
 
                 cache = _tool_cache.get(None)
-                cached = False
                 if cache is not None and tool_name not in _UNCACHEABLE_TOOLS:
                     key = _cache_key(tool_name, tool_input)
                     if key in cache:
@@ -523,6 +548,18 @@ async def run_sub_agent(  # noqa: C901
             except Exception as e:
                 logger.exception("Tool %s failed in %s sub-agent", tool_name, agent_type)
                 result = {"error": str(e)}
+
+            tool_duration_ms = (_time.monotonic() - tool_start_time) * 1000
+
+            if tracer:
+                tracer.record_tool_call(
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                    result=result if "error" not in result else None,
+                    error=result.get("error") if "error" in result else None,
+                    duration_ms=tool_duration_ms,
+                    cached=cached,
+                )
 
             await _emit(sse_tool_result(tool_name, result))
 
@@ -586,6 +623,8 @@ async def run_sub_agent(  # noqa: C901
         "findings": investigation_log,
         "data": {},
         "tool_calls": tool_call_count,
+        "tool_errors": sum(1 for t in tool_outcomes if t.get("status") == "error"),
+        "rounds_used": _round + 1,
         "duration_seconds": elapsed_total,
     }
 
@@ -597,6 +636,7 @@ async def run_sub_agent_streaming(  # noqa: C901
     client: anthropic.Anthropic | AnthropicVertex | AnthropicBedrock | None = None,
     conversation_history: list | None = None,
     metrics: MetricsCollector | None = None,
+    tracer: ConversationTracer | None = None,
 ) -> AsyncGenerator[str, None]:
     """Run a sub-agent as the top-level agent, yielding SSE events directly.
 
@@ -672,6 +712,9 @@ async def run_sub_agent_streaming(  # noqa: C901
     start_time = _time.monotonic()
     _client = client
 
+    if tracer:
+        tracer.start_agent_span(agent_type, agent_cfg.name)
+
     yield sse_event("agent_start", {"agent": agent_type, "name": agent_cfg.name})
 
     for _round in range(agent_cfg.max_rounds):
@@ -686,6 +729,13 @@ async def run_sub_agent_streaming(  # noqa: C901
         )
 
         try:
+            # Capture LLM context for MLflow tracing
+            if tracer:
+                from src.agent.system_prompt import get_prompt_files
+
+                tracer.set_llm_context(
+                    get_prompt_files(agent_type), agent_cfg.tools, messages
+                )
 
             def _call_api() -> anthropic.types.Message:
                 return _client.messages.create(
@@ -727,12 +777,27 @@ async def run_sub_agent_streaming(  # noqa: C901
 
         assistant_content = response.content
         tool_use_blocks = []
+        response_text_parts: list[str] = []
 
         for block in assistant_content:
             if block.type == "text":
                 yield sse_text(block.text)
+                response_text_parts.append(block.text)
+                if tracer:
+                    tracer.append_response(block.text)
             elif block.type == "tool_use":
                 tool_use_blocks.append(block)
+
+        if tracer:
+            tracer.record_llm_call(
+                round_num=_round,
+                label=f"streaming_{agent_type}",
+                input_tokens=response.usage.input_tokens if hasattr(response, "usage") else 0,
+                output_tokens=response.usage.output_tokens if hasattr(response, "usage") else 0,
+                model=response.model if hasattr(response, "model") else model,
+                response_text="\n".join(response_text_parts),
+                tool_use_names=[b.name for b in tool_use_blocks],
+            )
 
         from src.agent.orchestrator import _clean_content_block
 
@@ -766,6 +831,13 @@ async def run_sub_agent_streaming(  # noqa: C901
                 )
                 metrics.record_confidence(confidence_level)
 
+            if tracer:
+                tracer.end_agent_span(
+                    status="success",
+                    tool_calls=tool_call_count,
+                    duration_seconds=round(_time.monotonic() - start_time, 1),
+                )
+
             yield sse_event("agent_done", {"agent": agent_type})
             yield sse_event("history", {"messages": _serialize_messages(messages)})
             yield sse_done()
@@ -781,9 +853,10 @@ async def run_sub_agent_streaming(  # noqa: C901
             yield sse_tool_start(tool_name, tool_input)
 
             result: dict = {}
+            tool_start_t = _time.monotonic()
+            cached = False
             try:
                 cache = _tool_cache.get(None)
-                cached = False
                 if cache is not None and tool_name not in _UNCACHEABLE_TOOLS:
                     key = _cache_key(tool_name, tool_input)
                     if key in cache:
@@ -812,6 +885,18 @@ async def run_sub_agent_streaming(  # noqa: C901
             except Exception as e:
                 logger.exception("Tool %s failed in %s streaming sub-agent", tool_name, agent_type)
                 result = {"error": str(e)}
+
+            tool_duration_ms = (_time.monotonic() - tool_start_t) * 1000
+
+            if tracer:
+                tracer.record_tool_call(
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                    result=result if "error" not in result else None,
+                    error=result.get("error") if "error" in result else None,
+                    duration_ms=tool_duration_ms,
+                    cached=cached,
+                )
 
             yield sse_tool_result(tool_name, result)
 
@@ -869,6 +954,13 @@ async def run_sub_agent_streaming(  # noqa: C901
             status="success",
         )
         metrics.record_confidence(confidence_level)
+
+    if tracer:
+        tracer.end_agent_span(
+            status="max_rounds",
+            tool_calls=tool_call_count,
+            duration_seconds=round(_time.monotonic() - start_time, 1),
+        )
 
     yield sse_event("agent_done", {"agent": agent_type})
     max_rounds_text = (

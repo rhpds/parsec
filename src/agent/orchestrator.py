@@ -6,12 +6,16 @@ import asyncio
 import json
 import logging
 import os
+import time as _time
 from collections.abc import AsyncGenerator
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import anthropic
+
+from src.metrics.collector import MetricsCollector
+from src.metrics.tracing import ConversationTracer
 
 if TYPE_CHECKING:
     from anthropic import AnthropicBedrock, AnthropicVertex
@@ -621,6 +625,8 @@ async def _handle_delegation(
     tool_input: dict,
     client: Any,
     incoming_history: list,
+    collector: MetricsCollector | None = None,
+    tracer: ConversationTracer | None = None,
 ) -> AsyncGenerator[tuple[str | None, dict | None], None]:
     """Run a sub-agent delegation, yielding (sse_event, None) or (None, tool_result) at the end."""
     from src.agent.agents import AGENTS, run_sub_agent
@@ -635,6 +641,9 @@ async def _handle_delegation(
         tool_input.get("task", "")[:120],
     )
 
+    if tracer:
+        tracer.start_agent_span(agent_type, agent_name)
+
     yield sse_agent_start(agent_type, agent_name), None
     yield sse_tool_start(tool_block.name, tool_input), None
 
@@ -648,6 +657,7 @@ async def _handle_delegation(
             client=client,
             event_queue=event_queue,
             conversation_history=incoming_history,
+            tracer=tracer,
         )
     )
 
@@ -672,6 +682,24 @@ async def _handle_delegation(
             "tool_calls": 0,
             "duration_seconds": 0,
         }
+
+    if collector:
+        collector.record_sub_agent_result(
+            agent_type=agent_type,
+            duration_seconds=result.get("duration_seconds", 0),
+            tool_calls=result.get("tool_calls", 0),
+            tool_errors=result.get("tool_errors", 0),
+            rounds_used=result.get("rounds_used", 0),
+            max_rounds=AGENTS[agent_type].max_rounds if agent_type in AGENTS else 0,
+            status=result.get("status", "error"),
+        )
+
+    if tracer:
+        tracer.end_agent_span(
+            status=result.get("status", "error"),
+            tool_calls=result.get("tool_calls", 0),
+            duration_seconds=result.get("duration_seconds", 0),
+        )
 
     logger.info(
         "Sub-agent %s delegation complete: status=%s tool_calls=%d duration=%.1fs",
@@ -724,17 +752,21 @@ async def _handle_delegation(
 async def _handle_direct_tool(
     tool_block: Any,
     tool_input: dict,
+    tracer: ConversationTracer | None = None,
 ) -> AsyncGenerator[tuple[str | None, dict | None], None]:
     """Execute a direct tool call, yielding (sse_event, None) or (None, tool_result)."""
     tool_name = tool_block.name
     yield sse_tool_start(tool_name, tool_input), None
 
+    tool_start = _time.monotonic()
+    cached = False
     cache = _tool_cache.get(None)
     if cache is not None and tool_name not in _UNCACHEABLE_TOOLS:
         key = _cache_key(tool_name, tool_input)
         if key in cache:
             logger.info("Cache hit for %s (direct tool)", tool_name)
             result = cache[key]
+            cached = True
             yield sse_event("cache_hit", {"tool": tool_name}), None
         else:
             task = asyncio.create_task(_execute_tool(tool_name, tool_input))
@@ -756,6 +788,18 @@ async def _handle_direct_tool(
                 elapsed += 10
                 yield sse_status(f"Processing {tool_name}... ({elapsed}s)"), None
         result = task.result()
+
+    tool_duration_ms = (_time.monotonic() - tool_start) * 1000
+
+    if tracer:
+        tracer.record_tool_call(
+            tool_name=tool_name,
+            tool_input=tool_input,
+            result=result if "error" not in result else None,
+            error=result.get("error") if "error" in result else None,
+            duration_ms=tool_duration_ms,
+            cached=cached,
+        )
 
     yield sse_tool_result(tool_name, result), None
 
@@ -802,6 +846,8 @@ async def run_agent(
     collector = MetricsCollector(conversation_id="pending")
     collector.start_timer()
 
+    tracer = ConversationTracer(question)
+
     cfg = get_config()
 
     # Fast-path: skip orchestrator for obvious single-domain queries
@@ -809,15 +855,18 @@ async def run_agent(
     if fast_agent and fast_agent in AGENTS:
         logger.info("Fast-path routing to %s agent", fast_agent)
         collector.record_agent_dispatch(fast_agent, routing_method="fast-path")
+        tracer.set_routing(fast_agent, "fast-path")
         async for event in run_sub_agent_streaming(
             agent_type=fast_agent,
             task=question,
             conversation_history=conversation_history,
             metrics=collector,
+            tracer=tracer,
         ):
             yield event
         collector.stop_timer()
         asyncio.create_task(collector.flush_to_mlflow())
+        asyncio.create_task(asyncio.to_thread(tracer.flush_sync))
         return
 
     # Full orchestrator mode
@@ -833,6 +882,7 @@ async def run_agent(
         yield sse_error(str(e))
         collector.stop_timer()
         asyncio.create_task(collector.flush_to_mlflow())
+        asyncio.create_task(asyncio.to_thread(tracer.flush_sync))
         yield sse_done()
         return
 
@@ -858,6 +908,12 @@ async def run_agent(
         )
 
         try:
+            # Capture LLM context for MLflow tracing
+            from src.agent.system_prompt import get_prompt_files
+
+            tracer.set_llm_context(
+                get_prompt_files("orchestrator"), orchestrator_tools, messages
+            )
 
             def _call_api() -> anthropic.types.Message:
                 return client.messages.create(
@@ -892,17 +948,31 @@ async def run_agent(
             yield sse_error(f"Claude API error: {e}")
             collector.stop_timer()
             asyncio.create_task(collector.flush_to_mlflow())
+            asyncio.create_task(asyncio.to_thread(tracer.flush_sync))
             yield sse_done()
             return
 
         assistant_content = response.content
         tool_use_blocks = []
+        response_text_parts = []
 
         for block in assistant_content:
             if block.type == "text":
                 yield sse_text(block.text)
+                response_text_parts.append(block.text)
+                tracer.append_response(block.text)
             elif block.type == "tool_use":
                 tool_use_blocks.append(block)
+
+        tracer.record_llm_call(
+            round_num=_round,
+            label="orchestrator",
+            input_tokens=response.usage.input_tokens if hasattr(response, "usage") else 0,
+            output_tokens=response.usage.output_tokens if hasattr(response, "usage") else 0,
+            model=response.model if hasattr(response, "model") else model,
+            response_text="\n".join(response_text_parts),
+            tool_use_names=[b.name for b in tool_use_blocks],
+        )
 
         messages.append(
             {"role": "assistant", "content": [_clean_content_block(b) for b in assistant_content]}
@@ -911,7 +981,13 @@ async def run_agent(
         if not tool_use_blocks:
             yield sse_event("history", {"messages": _serialize_messages(messages)})
             collector.stop_timer()
+            tracer.set_routing(
+                collector.agent_type or "orchestrator",
+                collector.routing_method or "llm",
+            )
+            tracer.set_model(collector.model)
             asyncio.create_task(collector.flush_to_mlflow())
+            asyncio.create_task(asyncio.to_thread(tracer.flush_sync))
             yield sse_done()
             return
 
@@ -924,10 +1000,12 @@ async def run_agent(
 
             if agent_type:
                 handler = _handle_delegation(
-                    agent_type, tool_block, tool_input, client, incoming_history
+                    agent_type, tool_block, tool_input, client, incoming_history,
+                    collector=collector,
+                    tracer=tracer,
                 )
             else:
-                handler = _handle_direct_tool(tool_block, tool_input)
+                handler = _handle_direct_tool(tool_block, tool_input, tracer=tracer)
 
             async for sse_evt, tool_result in handler:
                 if sse_evt is not None:
@@ -950,7 +1028,10 @@ async def run_agent(
     messages.append({"role": "assistant", "content": [{"type": "text", "text": max_rounds_text}]})
     yield sse_event("history", {"messages": _serialize_messages(messages)})
     collector.stop_timer()
+    tracer.set_routing(collector.agent_type or "orchestrator", collector.routing_method or "llm")
+    tracer.set_model(collector.model)
     asyncio.create_task(collector.flush_to_mlflow())
+    asyncio.create_task(asyncio.to_thread(tracer.flush_sync))
     yield sse_done()
 
 
@@ -969,8 +1050,6 @@ async def run_alert_investigation(
     Returns a structured verdict dict with should_alert, severity, summary,
     investigation_log, and duration_seconds.
     """
-    import time as _time
-
     start = _time.monotonic()
     cfg = get_config()
     model = cfg.anthropic.get("model", "claude-sonnet-4-20250514")
