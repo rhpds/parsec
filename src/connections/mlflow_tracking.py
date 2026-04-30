@@ -30,20 +30,20 @@ def init_mlflow() -> None:
     cfg = get_config()
     mlflow_cfg = cfg.get("mlflow", {})
     tracking_url = mlflow_cfg.get("tracking_url", "")
-    tracking_username = mlflow_cfg.get("tracking_username", "")
-    tracking_password = mlflow_cfg.get("tracking_password", "")
     _experiment_name = mlflow_cfg.get("experiment_name", "parsec-agent-metrics")
 
     if not tracking_url:
         logger.info("MLflow tracking disabled (no tracking_url configured)")
         return
 
-    # Set credentials via environment variables (MLflow SDK standard)
-    if tracking_username:
-        os.environ["MLFLOW_TRACKING_USERNAME"] = tracking_username
-        logger.info("MLflow basic auth enabled (username: %s)", tracking_username)
-    if tracking_password:
-        os.environ["MLFLOW_TRACKING_PASSWORD"] = tracking_password
+    username = os.environ.get("MLFLOW_TRACKING_USERNAME") or mlflow_cfg.get("tracking_username", "")
+    password = os.environ.get("MLFLOW_TRACKING_PASSWORD") or mlflow_cfg.get("tracking_password", "")
+
+    if username:
+        os.environ.setdefault("MLFLOW_TRACKING_USERNAME", username)
+        logger.info("MLflow basic auth enabled (username: %s)", username)
+    if password:
+        os.environ.setdefault("MLFLOW_TRACKING_PASSWORD", password)
 
     mlflow.set_tracking_uri(tracking_url)
     _client = mlflow.MlflowClient()
