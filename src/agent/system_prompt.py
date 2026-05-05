@@ -62,6 +62,29 @@ def _get_learnings() -> str:
     return ""
 
 
+def get_prompt_files(agent_type: str) -> list[str]:
+    """Return list of prompt files used for this agent type.
+
+    Useful for debugging/tracing to see which markdown files were loaded.
+    """
+    files = []
+
+    # Sub-agents get shared context
+    if agent_type != "orchestrator":
+        files.append("shared_context.md")
+
+    # Domain-specific prompt
+    domain_path = _AGENT_PROMPT_FILES.get(agent_type)
+    if domain_path:
+        files.append(os.path.basename(domain_path))
+
+    # Agent learnings if present
+    if _get_mtime(_LEARNINGS_PATH) > 0:
+        files.append("agent_learnings.md")
+
+    return files
+
+
 def get_agent_prompt(agent_type: str) -> str:
     """Load a per-agent prompt: shared_context + domain-specific instructions.
 

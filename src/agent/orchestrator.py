@@ -6,12 +6,23 @@ import asyncio
 import json
 import logging
 import os
+import sys
+import time as _time
 from collections.abc import AsyncGenerator
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import anthropic
+import mlflow
+
+from src.metrics.collector import MetricsCollector
+from src.metrics.tracing import (
+    SpanType,
+    set_llm_span_outputs,
+    set_root_span_outputs,
+    set_tool_span_outputs,
+)
 
 if TYPE_CHECKING:
     from anthropic import AnthropicBedrock, AnthropicVertex
@@ -621,6 +632,7 @@ async def _handle_delegation(
     tool_input: dict,
     client: Any,
     incoming_history: list,
+    collector: MetricsCollector | None = None,
 ) -> AsyncGenerator[tuple[str | None, dict | None], None]:
     """Run a sub-agent delegation, yielding (sse_event, None) or (None, tool_result) at the end."""
     from src.agent.agents import AGENTS, run_sub_agent
@@ -635,90 +647,121 @@ async def _handle_delegation(
         tool_input.get("task", "")[:120],
     )
 
-    yield sse_agent_start(agent_type, agent_name), None
-    yield sse_tool_start(tool_block.name, tool_input), None
-
-    event_queue: asyncio.Queue[str] = asyncio.Queue()
-
-    sub_task = asyncio.create_task(
-        run_sub_agent(
-            agent_type=agent_type,
-            task=tool_input.get("task", ""),
-            context=tool_input.get("context"),
-            client=client,
-            event_queue=event_queue,
-            conversation_history=incoming_history,
-        )
+    agent_span_ctx = mlflow.start_span(
+        name=f"agent:{agent_name}",
+        span_type=SpanType.AGENT,
     )
-
-    while not sub_task.done():
-        try:
-            event = await asyncio.wait_for(event_queue.get(), timeout=1.0)
-            yield event, None
-        except TimeoutError:
-            pass
-
-    while not event_queue.empty():
-        yield event_queue.get_nowait(), None
+    agent_span = agent_span_ctx.__enter__()
+    agent_span.set_inputs({"agent_type": agent_type, "task": tool_input.get("task", "")[:500]})
+    result: dict = {"status": "error", "tool_calls": 0, "duration_seconds": 0}
+    delegation_status = "error"
 
     try:
-        result = sub_task.result()
-    except Exception as e:
-        logger.exception("Sub-agent %s delegation failed", agent_type)
-        result = {
-            "agent": agent_type,
-            "status": "error",
-            "summary": f"Sub-agent failed: {e}",
-            "tool_calls": 0,
-            "duration_seconds": 0,
-        }
+        yield sse_agent_start(agent_type, agent_name), None
+        yield sse_tool_start(tool_block.name, tool_input), None
 
-    logger.info(
-        "Sub-agent %s delegation complete: status=%s tool_calls=%d duration=%.1fs",
-        agent_type,
-        result.get("status"),
-        result.get("tool_calls", 0),
-        result.get("duration_seconds", 0),
-    )
+        event_queue: asyncio.Queue[str] = asyncio.Queue()
 
-    yield (
-        sse_tool_result(
-            tool_block.name,
-            {
-                "agent": result.get("agent"),
-                "status": result.get("status"),
-                "summary": result.get("summary", "")[:2000],
-                "tool_calls": result.get("tool_calls", 0),
-                "duration_seconds": result.get("duration_seconds", 0),
-            },
-        ),
-        None,
-    )
-    yield sse_agent_done(agent_type), None
+        sub_task = asyncio.create_task(
+            run_sub_agent(
+                agent_type=agent_type,
+                task=tool_input.get("task", ""),
+                context=tool_input.get("context"),
+                client=client,
+                event_queue=event_queue,
+                conversation_history=incoming_history,
+            )
+        )
 
-    yield (
-        None,
-        {
-            "type": "tool_result",
-            "tool_use_id": tool_block.id,
-            "content": json.dumps(
+        while not sub_task.done():
+            try:
+                event = await asyncio.wait_for(event_queue.get(), timeout=1.0)
+                yield event, None
+            except TimeoutError:
+                pass
+
+        while not event_queue.empty():
+            yield event_queue.get_nowait(), None
+
+        try:
+            result = sub_task.result()
+            delegation_status = result.get("status", "error")
+        except Exception as e:
+            logger.exception("Sub-agent %s delegation failed", agent_type)
+            result = {
+                "agent": agent_type,
+                "status": "error",
+                "summary": f"Sub-agent failed: {e}",
+                "tool_calls": 0,
+                "duration_seconds": 0,
+            }
+
+        if collector:
+            collector.record_sub_agent_result(
+                agent_type=agent_type,
+                duration_seconds=result.get("duration_seconds", 0),
+                tool_calls=result.get("tool_calls", 0),
+                tool_errors=result.get("tool_errors", 0),
+                rounds_used=result.get("rounds_used", 0),
+                max_rounds=AGENTS[agent_type].max_rounds if agent_type in AGENTS else 0,
+                status=result.get("status", "error"),
+            )
+
+        logger.info(
+            "Sub-agent %s delegation complete: status=%s tool_calls=%d duration=%.1fs",
+            agent_type,
+            result.get("status"),
+            result.get("tool_calls", 0),
+            result.get("duration_seconds", 0),
+        )
+
+        yield (
+            sse_tool_result(
+                tool_block.name,
                 {
                     "agent": result.get("agent"),
                     "status": result.get("status"),
-                    "summary": result.get("summary", ""),
-                    "findings": result.get("findings", []),
+                    "summary": result.get("summary", "")[:2000],
                     "tool_calls": result.get("tool_calls", 0),
                     "duration_seconds": result.get("duration_seconds", 0),
-                    "note": (
-                        "The detailed analysis above was already streamed "
-                        "to the user. Do NOT repeat or re-summarize it. "
-                        "Only add brief follow-up suggestions or source "
-                        "citations if useful."
-                    ),
-                }
+                },
             ),
-        },
-    )
+            None,
+        )
+        yield sse_agent_done(agent_type), None
+
+        yield (
+            None,
+            {
+                "type": "tool_result",
+                "tool_use_id": tool_block.id,
+                "content": json.dumps(
+                    {
+                        "agent": result.get("agent"),
+                        "status": result.get("status"),
+                        "summary": result.get("summary", ""),
+                        "findings": result.get("findings", []),
+                        "tool_calls": result.get("tool_calls", 0),
+                        "duration_seconds": result.get("duration_seconds", 0),
+                        "note": (
+                            "The detailed analysis above was already streamed "
+                            "to the user. Do NOT repeat or re-summarize it. "
+                            "Only add brief follow-up suggestions or source "
+                            "citations if useful."
+                        ),
+                    }
+                ),
+            },
+        )
+    finally:
+        agent_span.set_outputs(
+            {
+                "status": delegation_status,
+                "tool_calls_count": result.get("tool_calls", 0),
+                "duration_seconds": result.get("duration_seconds", 0),
+            }
+        )
+        agent_span_ctx.__exit__(*sys.exc_info())
 
 
 async def _handle_direct_tool(
@@ -729,12 +772,15 @@ async def _handle_direct_tool(
     tool_name = tool_block.name
     yield sse_tool_start(tool_name, tool_input), None
 
+    tool_start = _time.monotonic()
+    cached = False
     cache = _tool_cache.get(None)
     if cache is not None and tool_name not in _UNCACHEABLE_TOOLS:
         key = _cache_key(tool_name, tool_input)
         if key in cache:
             logger.info("Cache hit for %s (direct tool)", tool_name)
             result = cache[key]
+            cached = True
             yield sse_event("cache_hit", {"tool": tool_name}), None
         else:
             task = asyncio.create_task(_execute_tool(tool_name, tool_input))
@@ -757,6 +803,24 @@ async def _handle_direct_tool(
                 yield sse_status(f"Processing {tool_name}... ({elapsed}s)"), None
         result = task.result()
 
+    tool_duration_ms = (_time.monotonic() - tool_start) * 1000
+
+    # Span records metadata only (tool already executed above with
+    # async progress polling); actual duration is in duration_ms attr.
+    with mlflow.start_span(
+        name=f"tool:{tool_name}",
+        span_type=SpanType.TOOL,
+    ) as tool_span:
+        set_tool_span_outputs(
+            tool_span,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            result=result if "error" not in result else None,
+            error=result.get("error") if "error" in result else None,
+            duration_ms=tool_duration_ms,
+            cached=cached,
+        )
+
     yield sse_tool_result(tool_name, result), None
 
     if tool_name == "generate_report" and "error" not in result:
@@ -775,7 +839,7 @@ async def _handle_direct_tool(
     )
 
 
-async def run_agent(
+async def run_agent(  # noqa: C901
     question: str,
     conversation_history: list | None = None,
 ) -> AsyncGenerator[str, None]:
@@ -789,7 +853,7 @@ async def run_agent(
        generate_report).
     """
     from src.agent.agents import AGENTS, classify_fast, run_sub_agent_streaming
-    from src.agent.system_prompt import get_agent_prompt
+    from src.agent.system_prompt import get_agent_prompt, get_prompt_files
     from src.agent.tool_definitions import get_orchestrator_tools
     from src.metrics.collector import MetricsCollector
 
@@ -803,155 +867,228 @@ async def run_agent(
     collector.start_timer()
 
     cfg = get_config()
+    response_parts: list[str] = []
 
-    # Fast-path: skip orchestrator for obvious single-domain queries
-    fast_agent = classify_fast(question)
-    if fast_agent and fast_agent in AGENTS:
-        logger.info("Fast-path routing to %s agent", fast_agent)
-        collector.record_agent_dispatch(fast_agent, routing_method="fast-path")
-        async for event in run_sub_agent_streaming(
-            agent_type=fast_agent,
-            task=question,
-            conversation_history=conversation_history,
-            metrics=collector,
-        ):
-            yield event
-        collector.stop_timer()
-        asyncio.create_task(collector.flush_to_mlflow())
-        return
-
-    # Full orchestrator mode
-    model = cfg.anthropic.get("orchestrator_model", "") or cfg.anthropic.get(
-        "model", "claude-sonnet-4-20250514"
-    )
-    max_tokens = cfg.anthropic.get("max_tokens", 4096)
-    max_rounds = cfg.anthropic.get("max_tool_rounds", 10)
+    # Root MLflow trace span — manually managed for async generator compatibility
+    span_ctx = mlflow.start_span(name="parsec:orchestrator", span_type=SpanType.CHAIN)
+    root_span = span_ctx.__enter__()
+    root_span.set_inputs({"question": question})
 
     try:
-        client = _build_client(cfg)
-    except ValueError as e:
-        yield sse_error(str(e))
+        # Fast-path: skip orchestrator for obvious single-domain queries
+        fast_agent = classify_fast(question)
+        if fast_agent and fast_agent in AGENTS:
+            logger.info("Fast-path routing to %s agent", fast_agent)
+            collector.record_agent_dispatch(fast_agent, routing_method="fast-path")
+            root_span.set_attribute("routing_method", "fast-path")
+            root_span.set_attribute("agent_type", fast_agent)
+            async for event in run_sub_agent_streaming(
+                agent_type=fast_agent,
+                task=question,
+                conversation_history=conversation_history,
+                metrics=collector,
+            ):
+                if event.startswith("event: text\n"):
+                    try:
+                        data_line = event.split("data: ", 1)[1].strip()
+                        response_parts.append(json.loads(data_line).get("content", ""))
+                    except (IndexError, json.JSONDecodeError, AttributeError):
+                        pass
+                yield event
+            collector.stop_timer()
+            asyncio.create_task(collector.flush_to_mlflow())
+            return
+
+        # Full orchestrator mode
+        model = cfg.anthropic.get("orchestrator_model", "") or cfg.anthropic.get(
+            "model", "claude-sonnet-4-20250514"
+        )
+        max_tokens = cfg.anthropic.get("max_tokens", 4096)
+        max_rounds = cfg.anthropic.get("max_tool_rounds", 10)
+
+        try:
+            client = _build_client(cfg)
+        except ValueError as e:
+            yield sse_error(str(e))
+            collector.stop_timer()
+            asyncio.create_task(collector.flush_to_mlflow())
+            yield sse_done()
+            return
+
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
+        system = f"{get_agent_prompt('orchestrator')}\n\nToday's date is {today}."
+
+        incoming_history = conversation_history or []
+        messages = _serialize_messages(_trim_history(incoming_history))
+        logger.info(
+            "Orchestrator loop: %d history messages received, %d after trim",
+            len(incoming_history),
+            len(messages),
+        )
+        messages.append({"role": "user", "content": question})
+
+        root_span.set_inputs(
+            {
+                "question": question,
+                "prompt_files": get_prompt_files("orchestrator"),
+                "tool_names": [t.get("name", "unknown") for t in orchestrator_tools],
+                "tool_count": len(orchestrator_tools),
+                "message_count": len(messages),
+            }
+        )
+
+        for _round in range(max_rounds):
+            _dump_api_request(
+                f"orchestrator_round_{_round}",
+                system,
+                messages,
+                orchestrator_tools,
+                model,
+            )
+
+            try:
+
+                def _call_api() -> anthropic.types.Message:
+                    return client.messages.create(
+                        model=model,
+                        max_tokens=max_tokens,
+                        system=system,
+                        tools=orchestrator_tools,  # type: ignore[arg-type]
+                        messages=messages,
+                    )
+
+                with mlflow.start_span(
+                    name=f"orchestrator_round_{_round}",
+                    span_type=SpanType.LLM,
+                ) as llm_span:
+                    yield sse_status("Orchestrator analyzing...")
+                    api_task: asyncio.Task[anthropic.types.Message] = asyncio.ensure_future(
+                        asyncio.to_thread(_call_api)
+                    )
+                    elapsed = 0
+                    while not api_task.done():
+                        await asyncio.sleep(10)
+                        if not api_task.done():
+                            elapsed += 10
+                            yield sse_status(f"Orchestrator analyzing... ({elapsed}s)")
+                    response = api_task.result()
+                    if hasattr(response, "usage"):
+                        collector.record_tokens(
+                            input_tokens=response.usage.input_tokens,
+                            output_tokens=response.usage.output_tokens,
+                        )
+                        if not collector.model:
+                            collector.record_model(response.model)
+                            collector.record_agent_dispatch("orchestrator", routing_method="llm")
+
+                    assistant_content = response.content
+                    tool_use_blocks = []
+                    response_text_parts: list[str] = []
+
+                    for block in assistant_content:
+                        if block.type == "text":
+                            response_text_parts.append(block.text)
+                        elif block.type == "tool_use":
+                            tool_use_blocks.append(block)
+
+                    tool_names = [b.name for b in tool_use_blocks]
+                    set_llm_span_outputs(
+                        llm_span,
+                        round_num=_round,
+                        model=response.model if hasattr(response, "model") else model,
+                        input_tokens=(
+                            response.usage.input_tokens if hasattr(response, "usage") else 0
+                        ),
+                        output_tokens=(
+                            response.usage.output_tokens if hasattr(response, "usage") else 0
+                        ),
+                        response_text="\n".join(response_text_parts),
+                        tool_use_names=tool_names,
+                    )
+
+                # Yield text outside the LLM span
+                for text in response_text_parts:
+                    yield sse_text(text)
+                    response_parts.append(text)
+
+            except anthropic.APIError as e:
+                logger.exception("Claude API error in orchestrator")
+                yield sse_error(f"Claude API error: {e}")
+                collector.stop_timer()
+                asyncio.create_task(collector.flush_to_mlflow())
+                yield sse_done()
+                return
+
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": [_clean_content_block(b) for b in assistant_content],
+                }
+            )
+
+            if not tool_use_blocks:
+                yield sse_event("history", {"messages": _serialize_messages(messages)})
+                collector.stop_timer()
+                asyncio.create_task(collector.flush_to_mlflow())
+                yield sse_done()
+                return
+
+            tool_results = []
+            for tool_block in tool_use_blocks:
+                tool_name = tool_block.name
+                tool_input = tool_block.input
+
+                agent_type = _DELEGATION_TOOL_MAP.get(tool_name)
+
+                if agent_type:
+                    handler = _handle_delegation(
+                        agent_type,
+                        tool_block,
+                        tool_input,
+                        client,
+                        incoming_history,
+                        collector=collector,
+                    )
+                else:
+                    handler = _handle_direct_tool(tool_block, tool_input)
+
+                async for sse_evt, tool_result in handler:
+                    if sse_evt is not None:
+                        yield sse_evt
+                    if tool_result is not None:
+                        tool_results.append(tool_result)
+
+            messages.append({"role": "user", "content": tool_results})
+            yield sse_event("history", {"messages": _serialize_messages(messages)})
+
+        max_rounds_text = (
+            "\n\nI've used all my planned tool calls but haven't finished. "
+            "Would you like me to keep going?\n\n"
+            "{{choices}}\n"
+            "Keep investigating\n"
+            "That's enough, thanks\n"
+            "{{/choices}}"
+        )
+        yield sse_text(max_rounds_text)
+        messages.append(
+            {"role": "assistant", "content": [{"type": "text", "text": max_rounds_text}]}
+        )
+        yield sse_event("history", {"messages": _serialize_messages(messages)})
         collector.stop_timer()
         asyncio.create_task(collector.flush_to_mlflow())
         yield sse_done()
-        return
 
-    today = datetime.now(UTC).strftime("%Y-%m-%d")
-    system = f"{get_agent_prompt('orchestrator')}\n\nToday's date is {today}."
-
-    incoming_history = conversation_history or []
-    messages = _serialize_messages(_trim_history(incoming_history))
-    logger.info(
-        "Orchestrator loop: %d history messages received, %d after trim",
-        len(incoming_history),
-        len(messages),
-    )
-    messages.append({"role": "user", "content": question})
-
-    for _round in range(max_rounds):
-        _dump_api_request(
-            f"orchestrator_round_{_round}",
-            system,
-            messages,
-            orchestrator_tools,
-            model,
+    finally:
+        set_root_span_outputs(
+            root_span,
+            response_text="\n".join(response_parts),
+            agent_type=collector.agent_type or "orchestrator",
+            routing_method=collector.routing_method or "llm",
+            model=collector.model,
+            total_input_tokens=collector.input_tokens,
+            total_output_tokens=collector.output_tokens,
         )
-
-        try:
-
-            def _call_api() -> anthropic.types.Message:
-                return client.messages.create(
-                    model=model,
-                    max_tokens=max_tokens,
-                    system=system,
-                    tools=orchestrator_tools,  # type: ignore[arg-type]
-                    messages=messages,
-                )
-
-            yield sse_status("Orchestrator analyzing...")
-            api_task: asyncio.Task[anthropic.types.Message] = asyncio.ensure_future(
-                asyncio.to_thread(_call_api)
-            )
-            elapsed = 0
-            while not api_task.done():
-                await asyncio.sleep(10)
-                if not api_task.done():
-                    elapsed += 10
-                    yield sse_status(f"Orchestrator analyzing... ({elapsed}s)")
-            response = api_task.result()
-            if hasattr(response, "usage"):
-                collector.record_tokens(
-                    input_tokens=response.usage.input_tokens,
-                    output_tokens=response.usage.output_tokens,
-                )
-                if not collector.model:
-                    collector.record_model(response.model)
-                    collector.record_agent_dispatch("orchestrator", routing_method="llm")
-        except anthropic.APIError as e:
-            logger.exception("Claude API error in orchestrator")
-            yield sse_error(f"Claude API error: {e}")
-            collector.stop_timer()
-            asyncio.create_task(collector.flush_to_mlflow())
-            yield sse_done()
-            return
-
-        assistant_content = response.content
-        tool_use_blocks = []
-
-        for block in assistant_content:
-            if block.type == "text":
-                yield sse_text(block.text)
-            elif block.type == "tool_use":
-                tool_use_blocks.append(block)
-
-        messages.append(
-            {"role": "assistant", "content": [_clean_content_block(b) for b in assistant_content]}
-        )
-
-        if not tool_use_blocks:
-            yield sse_event("history", {"messages": _serialize_messages(messages)})
-            collector.stop_timer()
-            asyncio.create_task(collector.flush_to_mlflow())
-            yield sse_done()
-            return
-
-        tool_results = []
-        for tool_block in tool_use_blocks:
-            tool_name = tool_block.name
-            tool_input = tool_block.input
-
-            agent_type = _DELEGATION_TOOL_MAP.get(tool_name)
-
-            if agent_type:
-                handler = _handle_delegation(
-                    agent_type, tool_block, tool_input, client, incoming_history
-                )
-            else:
-                handler = _handle_direct_tool(tool_block, tool_input)
-
-            async for sse_evt, tool_result in handler:
-                if sse_evt is not None:
-                    yield sse_evt
-                if tool_result is not None:
-                    tool_results.append(tool_result)
-
-        messages.append({"role": "user", "content": tool_results})
-        yield sse_event("history", {"messages": _serialize_messages(messages)})
-
-    max_rounds_text = (
-        "\n\nI've used all my planned tool calls but haven't finished. "
-        "Would you like me to keep going?\n\n"
-        "{{choices}}\n"
-        "Keep investigating\n"
-        "That's enough, thanks\n"
-        "{{/choices}}"
-    )
-    yield sse_text(max_rounds_text)
-    messages.append({"role": "assistant", "content": [{"type": "text", "text": max_rounds_text}]})
-    yield sse_event("history", {"messages": _serialize_messages(messages)})
-    collector.stop_timer()
-    asyncio.create_task(collector.flush_to_mlflow())
-    yield sse_done()
+        span_ctx.__exit__(*sys.exc_info())
 
 
 async def run_alert_investigation(
@@ -969,8 +1106,6 @@ async def run_alert_investigation(
     Returns a structured verdict dict with should_alert, severity, summary,
     investigation_log, and duration_seconds.
     """
-    import time as _time
-
     start = _time.monotonic()
     cfg = get_config()
     model = cfg.anthropic.get("model", "claude-sonnet-4-20250514")
@@ -1021,127 +1156,189 @@ async def run_alert_investigation(
     messages: list[dict] = [{"role": "user", "content": user_message}]
     investigation_log: list[str] = []
     verdict: dict | None = None
+    tool_call_count = 0
 
-    for _round in range(max_rounds):
-        _dump_api_request(
-            f"alert_{alert_type}_round_{_round}",
-            system,
-            messages,
-            alert_tools,
-            model,
-        )
-
-        try:
-
-            def _call_api() -> anthropic.types.Message:
-                return client.messages.create(
-                    model=model,
-                    max_tokens=max_tokens,
-                    system=system,
-                    tools=alert_tools,  # type: ignore[arg-type]
-                    messages=messages,  # type: ignore[arg-type]
-                )
-
-            response = await asyncio.to_thread(_call_api)
-        except anthropic.APIError as e:
-            logger.exception("Claude API error during alert investigation")
-            return {
-                "should_alert": True,
-                "severity": "medium",
-                "summary": f"Investigation failed: Claude API error ({e})",
-                "investigation_log": "\n".join(investigation_log),
-                "duration_seconds": round(_time.monotonic() - start, 1),
+    with mlflow.start_span(
+        name=f"parsec:alert_investigation:{alert_type}",
+        span_type=SpanType.CHAIN,
+    ) as root_span:
+        root_span.set_inputs(
+            {
+                "alert_type": alert_type,
+                "account_id": account_id,
+                "alert_text": alert_text[:500],
             }
-
-        # Process response
-        assistant_content = response.content
-        tool_use_blocks = []
-
-        for block in assistant_content:
-            if block.type == "text" and block.text.strip():
-                investigation_log.append(block.text)
-            elif block.type == "tool_use":
-                tool_use_blocks.append(block)
-
-        messages.append(
-            {"role": "assistant", "content": [_clean_content_block(b) for b in assistant_content]}
         )
 
-        if not tool_use_blocks:
-            # Claude stopped without calling any tools — done
-            break
+        for _round in range(max_rounds):
+            _dump_api_request(
+                f"alert_{alert_type}_round_{_round}",
+                system,
+                messages,
+                alert_tools,
+                model,
+            )
 
-        # Execute tool calls
-        tool_results = []
-        for tool_block in tool_use_blocks:
-            tool_name = tool_block.name
-            tool_input = tool_block.input
+            try:
 
-            if tool_name == "submit_alert_verdict":
-                verdict = {
-                    "should_alert": tool_input.get("should_alert", True),
-                    "severity": tool_input.get("severity", "medium"),
-                    "summary": tool_input.get("summary", ""),
+                def _call_api() -> anthropic.types.Message:
+                    return client.messages.create(
+                        model=model,
+                        max_tokens=max_tokens,
+                        system=system,
+                        tools=alert_tools,  # type: ignore[arg-type]
+                        messages=messages,  # type: ignore[arg-type]
+                    )
+
+                with mlflow.start_span(
+                    name=f"alert_{alert_type}_round_{_round}",
+                    span_type=SpanType.LLM,
+                ) as llm_span:
+                    response = await asyncio.to_thread(_call_api)
+
+                    assistant_content = response.content
+                    tool_use_blocks = []
+                    response_text_parts: list[str] = []
+
+                    for block in assistant_content:
+                        if block.type == "text" and block.text.strip():
+                            investigation_log.append(block.text)
+                            response_text_parts.append(block.text)
+                        elif block.type == "tool_use":
+                            tool_use_blocks.append(block)
+
+                    tool_names = [b.name for b in tool_use_blocks]
+                    set_llm_span_outputs(
+                        llm_span,
+                        round_num=_round,
+                        model=response.model if hasattr(response, "model") else model,
+                        input_tokens=(
+                            response.usage.input_tokens if hasattr(response, "usage") else 0
+                        ),
+                        output_tokens=(
+                            response.usage.output_tokens if hasattr(response, "usage") else 0
+                        ),
+                        response_text="\n".join(response_text_parts),
+                        tool_use_names=tool_names,
+                    )
+
+            except anthropic.APIError as e:
+                logger.exception("Claude API error during alert investigation")
+                root_span.set_outputs({"status": "error", "error": str(e)})
+                return {
+                    "should_alert": True,
+                    "severity": "medium",
+                    "summary": f"Investigation failed: Claude API error ({e})",
+                    "investigation_log": "\n".join(investigation_log),
+                    "duration_seconds": round(_time.monotonic() - start, 1),
                 }
+
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": [_clean_content_block(b) for b in assistant_content],
+                }
+            )
+
+            if not tool_use_blocks:
+                break
+
+            tool_results = []
+            for tool_block in tool_use_blocks:
+                tool_name = tool_block.name
+                tool_input = tool_block.input
+
+                if tool_name == "submit_alert_verdict":
+                    verdict = {
+                        "should_alert": tool_input.get("should_alert", True),
+                        "severity": tool_input.get("severity", "medium"),
+                        "summary": tool_input.get("summary", ""),
+                    }
+                    investigation_log.append(
+                        f"[Verdict] should_alert={verdict['should_alert']}, "
+                        f"severity={verdict['severity']}: {verdict['summary']}"
+                    )
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tool_block.id,
+                            "content": json.dumps({"status": "verdict_recorded"}),
+                        }
+                    )
+                    continue
+
+                tool_call_count += 1
                 investigation_log.append(
-                    f"[Verdict] should_alert={verdict['should_alert']}, "
-                    f"severity={verdict['severity']}: {verdict['summary']}"
+                    f"[Tool: {tool_name}] input={json.dumps(tool_input, default=str)[:200]}"
                 )
+
+                tool_start_t = _time.monotonic()
+                try:
+                    result = await _execute_tool(tool_name, tool_input)
+                except Exception as e:
+                    logger.exception("Tool %s failed during alert investigation", tool_name)
+                    result = {"error": str(e)}
+                tool_duration_ms = (_time.monotonic() - tool_start_t) * 1000
+
+                # Span records metadata only; actual duration is in duration_ms attr.
+                with mlflow.start_span(
+                    name=f"tool:{tool_name}",
+                    span_type=SpanType.TOOL,
+                ) as tool_span:
+                    set_tool_span_outputs(
+                        tool_span,
+                        tool_name=tool_name,
+                        tool_input=tool_input,
+                        result=result if "error" not in result else None,
+                        error=result.get("error") if "error" in result else None,
+                        duration_ms=tool_duration_ms,
+                        cached=False,
+                    )
+
+                result_str = json.dumps(result, default=str)
+                if len(result_str) > 300:
+                    investigation_log.append(f"[Tool: {tool_name}] result: {result_str[:300]}...")
+                else:
+                    investigation_log.append(f"[Tool: {tool_name}] result: {result_str}")
+
                 tool_results.append(
                     {
                         "type": "tool_result",
                         "tool_use_id": tool_block.id,
-                        "content": json.dumps({"status": "verdict_recorded"}),
+                        "content": json.dumps(result, default=str),
                     }
                 )
-                continue
 
-            investigation_log.append(
-                f"[Tool: {tool_name}] input={json.dumps(tool_input, default=str)[:200]}"
-            )
+            messages.append({"role": "user", "content": tool_results})
+            trimmed = _trim_history(messages)
+            messages[:] = trimmed
 
-            try:
-                result = await _execute_tool(tool_name, tool_input)
-            except Exception as e:
-                logger.exception("Tool %s failed during alert investigation", tool_name)
-                result = {"error": str(e)}
+            if verdict is not None:
+                break
 
-            # Summarize result for the log
-            result_str = json.dumps(result, default=str)
-            if len(result_str) > 300:
-                investigation_log.append(f"[Tool: {tool_name}] result: {result_str[:300]}...")
-            else:
-                investigation_log.append(f"[Tool: {tool_name}] result: {result_str}")
+        elapsed = round(_time.monotonic() - start, 1)
 
-            tool_results.append(
-                {
-                    "type": "tool_result",
-                    "tool_use_id": tool_block.id,
-                    "content": json.dumps(result, default=str),
-                }
-            )
+        if verdict is None:
+            verdict = {
+                "should_alert": True,
+                "severity": "medium",
+                "summary": "Investigation did not produce a verdict — alerting as a precaution.",
+            }
+            investigation_log.append("[No verdict submitted — defaulting to should_alert=true]")
 
-        messages.append({"role": "user", "content": tool_results})
-        trimmed = _trim_history(messages)
-        messages[:] = trimmed
+        verdict["investigation_log"] = "\n".join(investigation_log)
+        verdict["duration_seconds"] = elapsed
 
-        # If we got a verdict, stop the loop
-        if verdict is not None:
-            break
-
-    elapsed = round(_time.monotonic() - start, 1)
-
-    # If Claude never called submit_alert_verdict, default to alerting
-    if verdict is None:
-        verdict = {
-            "should_alert": True,
-            "severity": "medium",
-            "summary": "Investigation did not produce a verdict — alerting as a precaution.",
-        }
-        investigation_log.append("[No verdict submitted — defaulting to should_alert=true]")
-
-    verdict["investigation_log"] = "\n".join(investigation_log)
-    verdict["duration_seconds"] = elapsed
+        root_span.set_outputs(
+            {
+                "alert_type": alert_type,
+                "should_alert": verdict["should_alert"],
+                "severity": verdict["severity"],
+                "summary": verdict["summary"],
+                "tool_calls": tool_call_count,
+                "duration_seconds": elapsed,
+            }
+        )
 
     logger.info(
         "Alert investigation complete: type=%s account=%s should_alert=%s severity=%s duration=%.1fs",

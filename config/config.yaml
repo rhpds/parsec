@@ -119,6 +119,8 @@ splunk:
 # MLflow tracking server for agent performance metrics.
 # Set tracking_url to enable metrics collection.
 # Leave empty to disable (metrics silently skipped).
+# Authentication: set MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD
+# environment variables (MLflow SDK standard). Do NOT put credentials here.
 mlflow:
   tracking_url: ""
   experiment_name: "parsec-agent-metrics"
