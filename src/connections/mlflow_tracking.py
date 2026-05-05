@@ -21,11 +21,10 @@ logger = logging.getLogger(__name__)
 
 _client: MlflowClient | None = None
 _experiment_name: str | None = None
-_tracing_enabled: bool = False
 
 
 def init_mlflow() -> None:
-    global _client, _experiment_name, _tracing_enabled
+    global _client, _experiment_name
 
     cfg = get_config()
     mlflow_cfg = cfg.get("mlflow", {})
@@ -34,6 +33,7 @@ def init_mlflow() -> None:
 
     if not tracking_url:
         logger.info("MLflow tracking disabled (no tracking_url configured)")
+        mlflow.tracing.disable()
         return
 
     username = os.environ.get("MLFLOW_TRACKING_USERNAME") or mlflow_cfg.get("tracking_username", "")
@@ -50,7 +50,7 @@ def init_mlflow() -> None:
 
     try:
         _client.get_experiment_by_name(_experiment_name)
-        _tracing_enabled = True
+        mlflow.set_experiment(_experiment_name)
         logger.info(
             "MLflow tracking enabled: %s (experiment: %s)",
             tracking_url,
@@ -58,9 +58,11 @@ def init_mlflow() -> None:
         )
     except Exception:
         logger.warning(
-            "MLflow server at %s not reachable — metrics will be logged when available",
+            "MLflow server at %s not reachable — tracing disabled",
             tracking_url,
         )
+        _client = None
+        mlflow.tracing.disable()
 
 
 def get_mlflow_client() -> MlflowClient | None:
@@ -69,7 +71,3 @@ def get_mlflow_client() -> MlflowClient | None:
 
 def get_experiment_name() -> str:
     return _experiment_name or "parsec-agent-metrics"
-
-
-def is_tracing_enabled() -> bool:
-    return _tracing_enabled and _client is not None

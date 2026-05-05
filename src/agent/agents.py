@@ -11,18 +11,19 @@ import asyncio
 import json
 import logging
 import re
+import sys
 import time as _time
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import anthropic
+import mlflow
 
 if TYPE_CHECKING:
     from anthropic import AnthropicBedrock, AnthropicVertex
 
     from src.metrics.collector import MetricsCollector
-    from src.metrics.tracing import ConversationTracer
 
 from src.agent.streaming import (
     sse_event,
@@ -42,6 +43,7 @@ from src.agent.tool_definitions import (
     get_security_tools,
 )
 from src.config import get_config
+from src.metrics.tracing import SpanType, set_llm_span_outputs, set_tool_span_outputs
 
 logger = logging.getLogger(__name__)
 
@@ -353,7 +355,6 @@ async def run_sub_agent(  # noqa: C901
     client: anthropic.Anthropic | AnthropicVertex | AnthropicBedrock | None = None,
     event_queue: asyncio.Queue[str] | None = None,
     conversation_history: list | None = None,
-    tracer: ConversationTracer | None = None,
 ) -> dict:
     """Run a sub-agent's Claude tool-use loop and return structured results.
 
@@ -410,7 +411,7 @@ async def run_sub_agent(  # noqa: C901
     messages: list[dict] = [{"role": "user", "content": f"{task}{context_str}{history_context}"}]
     investigation_log: list[str] = []
     tool_call_count = 0
-    tool_outcomes: list[dict] = []  # Track tool results for confidence
+    tool_outcomes: list[dict] = []
     text_parts: list[str] = []
     _client = client
 
@@ -430,11 +431,6 @@ async def run_sub_agent(  # noqa: C901
         )
 
         try:
-            # Capture LLM context for MLflow tracing
-            if tracer:
-                from src.agent.system_prompt import get_prompt_files
-
-                tracer.set_llm_context(get_prompt_files(agent_type), agent_cfg.tools, messages)
 
             def _call_api() -> anthropic.types.Message:
                 return _client.messages.create(
@@ -445,8 +441,38 @@ async def run_sub_agent(  # noqa: C901
                     messages=messages,  # type: ignore[arg-type]
                 )
 
-            await _emit(sse_status(f"{agent_cfg.name}: Analyzing..."))
-            response = await asyncio.to_thread(_call_api)
+            with mlflow.start_span(
+                name=f"sub_{agent_type}_round_{_round}",
+                span_type=SpanType.LLM,
+            ) as llm_span:
+                await _emit(sse_status(f"{agent_cfg.name}: Analyzing..."))
+                response = await asyncio.to_thread(_call_api)
+
+                assistant_content = response.content
+                tool_use_blocks = []
+                response_text_parts: list[str] = []
+
+                for block in assistant_content:
+                    if block.type == "text" and block.text.strip():
+                        text_parts.append(block.text)
+                        response_text_parts.append(block.text)
+                        investigation_log.append(block.text)
+                    elif block.type == "tool_use":
+                        tool_use_blocks.append(block)
+
+                tool_names = [b.name for b in tool_use_blocks]
+                set_llm_span_outputs(
+                    llm_span,
+                    round_num=_round,
+                    model=response.model if hasattr(response, "model") else model,
+                    input_tokens=(response.usage.input_tokens if hasattr(response, "usage") else 0),
+                    output_tokens=(
+                        response.usage.output_tokens if hasattr(response, "usage") else 0
+                    ),
+                    response_text="\n".join(response_text_parts),
+                    tool_use_names=tool_names,
+                )
+
         except anthropic.APIError as e:
             logger.exception("Claude API error in %s sub-agent", agent_type)
             return {
@@ -459,36 +485,17 @@ async def run_sub_agent(  # noqa: C901
                 "duration_seconds": round(_time.monotonic() - start, 1),
             }
 
-        assistant_content = response.content
-        tool_use_blocks = []
-        response_text_parts = []
-
-        for block in assistant_content:
-            if block.type == "text" and block.text.strip():
-                text_parts.append(block.text)
-                response_text_parts.append(block.text)
-                investigation_log.append(block.text)
-                await _emit(sse_text(block.text))
-                if tracer:
-                    tracer.append_response(block.text)
-            elif block.type == "tool_use":
-                tool_use_blocks.append(block)
-
-        if tracer:
-            tracer.record_llm_call(
-                round_num=_round,
-                label=f"sub_{agent_type}",
-                input_tokens=response.usage.input_tokens if hasattr(response, "usage") else 0,
-                output_tokens=response.usage.output_tokens if hasattr(response, "usage") else 0,
-                model=response.model if hasattr(response, "model") else model,
-                response_text="\n".join(response_text_parts),
-                tool_use_names=[b.name for b in tool_use_blocks],
-            )
+        # Emit text outside the LLM span
+        for text in response_text_parts:
+            await _emit(sse_text(text))
 
         from src.agent.orchestrator import _clean_content_block
 
         messages.append(
-            {"role": "assistant", "content": [_clean_content_block(b) for b in assistant_content]}
+            {
+                "role": "assistant",
+                "content": [_clean_content_block(b) for b in assistant_content],
+            }
         )
 
         if not tool_use_blocks:
@@ -549,8 +556,14 @@ async def run_sub_agent(  # noqa: C901
 
             tool_duration_ms = (_time.monotonic() - tool_start_time) * 1000
 
-            if tracer:
-                tracer.record_tool_call(
+            # Span records metadata only (tool already executed above with
+            # async progress polling); actual duration is in duration_ms attr.
+            with mlflow.start_span(
+                name=f"tool:{tool_name}",
+                span_type=SpanType.TOOL,
+            ) as tool_span:
+                set_tool_span_outputs(
+                    tool_span,
                     tool_name=tool_name,
                     tool_input=tool_input,
                     result=result if "error" not in result else None,
@@ -564,7 +577,11 @@ async def run_sub_agent(  # noqa: C901
             # Track outcome for confidence
             if "error" in result:
                 tool_outcomes.append(
-                    {"tool": tool_name, "status": "error", "reason": str(result["error"])[:100]}
+                    {
+                        "tool": tool_name,
+                        "status": "error",
+                        "reason": str(result["error"])[:100],
+                    }
                 )
             elif isinstance(result, dict) and result.get("count", -1) == 0:
                 tool_outcomes.append(
@@ -634,7 +651,6 @@ async def run_sub_agent_streaming(  # noqa: C901
     client: anthropic.Anthropic | AnthropicVertex | AnthropicBedrock | None = None,
     conversation_history: list | None = None,
     metrics: MetricsCollector | None = None,
-    tracer: ConversationTracer | None = None,
 ) -> AsyncGenerator[str, None]:
     """Run a sub-agent as the top-level agent, yielding SSE events directly.
 
@@ -706,268 +722,297 @@ async def run_sub_agent_streaming(  # noqa: C901
         task[:120],
     )
     tool_call_count = 0
-    tool_outcomes: list[dict] = []  # Track tool results for confidence
+    tool_outcomes: list[dict] = []
+    text_parts: list[str] = []
     start_time = _time.monotonic()
     _client = client
 
-    if tracer:
-        tracer.start_agent_span(agent_type, agent_cfg.name)
+    # Agent span — manually managed for async generator compatibility
+    agent_span_ctx = mlflow.start_span(
+        name=f"streaming_agent:{agent_type}",
+        span_type=SpanType.AGENT,
+    )
+    agent_span = agent_span_ctx.__enter__()
+    agent_span.set_inputs({"agent_type": agent_type, "task": task[:500]})
+    agent_status = "success"
 
     yield sse_event("agent_start", {"agent": agent_type, "name": agent_cfg.name})
 
-    for _round in range(agent_cfg.max_rounds):
-        from src.agent.orchestrator import _dump_api_request
+    try:
+        for _round in range(agent_cfg.max_rounds):
+            from src.agent.orchestrator import _dump_api_request
 
-        _dump_api_request(
-            f"streaming_{agent_type}_round_{_round}",
-            system,
-            messages,
-            agent_cfg.tools,
-            model,
-        )
-
-        try:
-            # Capture LLM context for MLflow tracing
-            if tracer:
-                from src.agent.system_prompt import get_prompt_files
-
-                tracer.set_llm_context(get_prompt_files(agent_type), agent_cfg.tools, messages)
-
-            def _call_api() -> anthropic.types.Message:
-                return _client.messages.create(
-                    model=model,
-                    max_tokens=max_tokens,
-                    system=system,
-                    tools=agent_cfg.tools,  # type: ignore[arg-type]
-                    messages=messages,  # type: ignore[arg-type]
-                )
-
-            yield sse_status(f"{agent_cfg.name}: Analyzing...")
-            api_task: asyncio.Task[anthropic.types.Message] = asyncio.ensure_future(
-                asyncio.to_thread(_call_api)
-            )
-            elapsed = 0
-            while not api_task.done():
-                await asyncio.sleep(10)
-                if not api_task.done():
-                    elapsed += 10
-                    yield sse_status(f"{agent_cfg.name}: Analyzing... ({elapsed}s)")
-            response = api_task.result()
-            if metrics and hasattr(response, "usage"):
-                metrics.record_tokens(
-                    input_tokens=response.usage.input_tokens,
-                    output_tokens=response.usage.output_tokens,
-                )
-                if not metrics.model:
-                    metrics.record_model(response.model)
-        except anthropic.APIError as e:
-            logger.exception("Claude API error in %s streaming sub-agent", agent_type)
-            yield sse_error(f"Claude API error: {e}")
-            yield sse_done()
-            return
-        except Exception as e:
-            logger.exception("Unexpected error in %s streaming sub-agent", agent_type)
-            yield sse_error(f"Agent error: {e}")
-            yield sse_done()
-            return
-
-        assistant_content = response.content
-        tool_use_blocks = []
-        response_text_parts: list[str] = []
-
-        for block in assistant_content:
-            if block.type == "text":
-                yield sse_text(block.text)
-                response_text_parts.append(block.text)
-                if tracer:
-                    tracer.append_response(block.text)
-            elif block.type == "tool_use":
-                tool_use_blocks.append(block)
-
-        if tracer:
-            tracer.record_llm_call(
-                round_num=_round,
-                label=f"streaming_{agent_type}",
-                input_tokens=response.usage.input_tokens if hasattr(response, "usage") else 0,
-                output_tokens=response.usage.output_tokens if hasattr(response, "usage") else 0,
-                model=response.model if hasattr(response, "model") else model,
-                response_text="\n".join(response_text_parts),
-                tool_use_names=[b.name for b in tool_use_blocks],
+            _dump_api_request(
+                f"streaming_{agent_type}_round_{_round}",
+                system,
+                messages,
+                agent_cfg.tools,
+                model,
             )
 
-        from src.agent.orchestrator import _clean_content_block
-
-        messages.append(
-            {"role": "assistant", "content": [_clean_content_block(b) for b in assistant_content]}
-        )
-
-        if not tool_use_blocks:
-            logger.info(
-                "Streaming sub-agent %s complete: %d tool calls, %.1fs",
-                agent_type,
-                tool_call_count,
-                _time.monotonic() - start_time,
-            )
-            # Emit confidence
-            from src.agent.streaming import sse_confidence
-
-            confidence_level, reasons = _compute_confidence(tool_outcomes)
-            if confidence_level != "high":
-                yield sse_confidence(confidence_level, reasons)
-
-            if metrics:
-                metrics.record_sub_agent_result(
-                    agent_type=agent_type,
-                    duration_seconds=round(_time.monotonic() - start_time, 1),
-                    tool_calls=tool_call_count,
-                    tool_errors=sum(1 for t in tool_outcomes if t.get("status") == "error"),
-                    rounds_used=_round + 1,
-                    max_rounds=agent_cfg.max_rounds,
-                    status="success",
-                )
-                metrics.record_confidence(confidence_level)
-
-            if tracer:
-                tracer.end_agent_span(
-                    status="success",
-                    tool_calls=tool_call_count,
-                    duration_seconds=round(_time.monotonic() - start_time, 1),
-                )
-
-            yield sse_event("agent_done", {"agent": agent_type})
-            yield sse_event("history", {"messages": _serialize_messages(messages)})
-            yield sse_done()
-            return
-
-        tool_results = []
-        for tool_block in tool_use_blocks:
-            tool_name = tool_block.name
-            tool_input = tool_block.input
-
-            tool_call_count += 1
-
-            yield sse_tool_start(tool_name, tool_input)
-
-            result: dict = {}
-            tool_start_t = _time.monotonic()
-            cached = False
             try:
-                cache = _tool_cache.get(None)
-                if cache is not None and tool_name not in _UNCACHEABLE_TOOLS:
-                    key = _cache_key(tool_name, tool_input)
-                    if key in cache:
-                        result = cache[key]
-                        cached = True
-                        yield sse_event("cache_hit", {"tool": tool_name})
 
-                if not cached:
-                    tool_task = asyncio.create_task(_execute_tool(tool_name, tool_input))
+                def _call_api() -> anthropic.types.Message:
+                    return _client.messages.create(
+                        model=model,
+                        max_tokens=max_tokens,
+                        system=system,
+                        tools=agent_cfg.tools,  # type: ignore[arg-type]
+                        messages=messages,  # type: ignore[arg-type]
+                    )
+
+                # LLM span covers the API call
+                with mlflow.start_span(
+                    name=f"streaming_{agent_type}_round_{_round}",
+                    span_type=SpanType.LLM,
+                ) as llm_span:
+                    yield sse_status(f"{agent_cfg.name}: Analyzing...")
+                    api_task: asyncio.Task[anthropic.types.Message] = asyncio.ensure_future(
+                        asyncio.to_thread(_call_api)
+                    )
                     elapsed = 0
-                    while not tool_task.done():
-                        done, _ = await asyncio.wait({tool_task}, timeout=10)
-                        if not done:
+                    while not api_task.done():
+                        await asyncio.sleep(10)
+                        if not api_task.done():
                             elapsed += 10
-                            label = agent_cfg.slow_tool_labels.get(
-                                tool_name, f"Processing {tool_name}"
-                            )
-                            yield sse_status(f"{agent_cfg.name}: {label}... ({elapsed}s)")
-                    result = tool_task.result()
-                    if (
-                        cache is not None
-                        and tool_name not in _UNCACHEABLE_TOOLS
-                        and "error" not in result
-                    ):
-                        cache[_cache_key(tool_name, tool_input)] = result
+                            yield sse_status(f"{agent_cfg.name}: Analyzing... ({elapsed}s)")
+                    response = api_task.result()
+                    if metrics and hasattr(response, "usage"):
+                        metrics.record_tokens(
+                            input_tokens=response.usage.input_tokens,
+                            output_tokens=response.usage.output_tokens,
+                        )
+                        if not metrics.model:
+                            metrics.record_model(response.model)
+
+                    assistant_content = response.content
+                    tool_use_blocks = []
+                    response_text_parts: list[str] = []
+
+                    for block in assistant_content:
+                        if block.type == "text":
+                            response_text_parts.append(block.text)
+                        elif block.type == "tool_use":
+                            tool_use_blocks.append(block)
+
+                    tool_names = [b.name for b in tool_use_blocks]
+                    set_llm_span_outputs(
+                        llm_span,
+                        round_num=_round,
+                        model=response.model if hasattr(response, "model") else model,
+                        input_tokens=(
+                            response.usage.input_tokens if hasattr(response, "usage") else 0
+                        ),
+                        output_tokens=(
+                            response.usage.output_tokens if hasattr(response, "usage") else 0
+                        ),
+                        response_text="\n".join(response_text_parts),
+                        tool_use_names=tool_names,
+                    )
+
+            except anthropic.APIError as e:
+                logger.exception("Claude API error in %s streaming sub-agent", agent_type)
+                agent_status = "error"
+                yield sse_error(f"Claude API error: {e}")
+                yield sse_done()
+                return
             except Exception as e:
-                logger.exception("Tool %s failed in %s streaming sub-agent", tool_name, agent_type)
-                result = {"error": str(e)}
+                logger.exception("Unexpected error in %s streaming sub-agent", agent_type)
+                agent_status = "error"
+                yield sse_error(f"Agent error: {e}")
+                yield sse_done()
+                return
 
-            tool_duration_ms = (_time.monotonic() - tool_start_t) * 1000
+            # Yield text outside the LLM span
+            for text in response_text_parts:
+                text_parts.append(text)
+                yield sse_text(text)
 
-            if tracer:
-                tracer.record_tool_call(
-                    tool_name=tool_name,
-                    tool_input=tool_input,
-                    result=result if "error" not in result else None,
-                    error=result.get("error") if "error" in result else None,
-                    duration_ms=tool_duration_ms,
-                    cached=cached,
-                )
+            from src.agent.orchestrator import _clean_content_block
 
-            yield sse_tool_result(tool_name, result)
-
-            # Track outcome for confidence
-            if "error" in result:
-                tool_outcomes.append(
-                    {"tool": tool_name, "status": "error", "reason": str(result["error"])[:100]}
-                )
-            elif isinstance(result, dict) and result.get("count", -1) == 0:
-                tool_outcomes.append(
-                    {"tool": tool_name, "status": "empty", "reason": "no results returned"}
-                )
-            else:
-                tool_outcomes.append({"tool": tool_name, "status": "success"})
-
-            if tool_name == "generate_report" and "error" not in result:
-                download_url = f"/api/reports/{result['filename']}"
-                yield sse_report(result["filename"], result["format"], download_url)
-            elif tool_name == "render_chart" and "error" not in result:
-                yield sse_event("chart", result)
-
-            tool_results.append(
+            messages.append(
                 {
-                    "type": "tool_result",
-                    "tool_use_id": tool_block.id,
-                    "content": json.dumps(result),
+                    "role": "assistant",
+                    "content": [_clean_content_block(b) for b in assistant_content],
                 }
             )
 
-        messages.append({"role": "user", "content": tool_results})
-        messages[:] = _trim_history(messages)
+            if not tool_use_blocks:
+                logger.info(
+                    "Streaming sub-agent %s complete: %d tool calls, %.1fs",
+                    agent_type,
+                    tool_call_count,
+                    _time.monotonic() - start_time,
+                )
+                from src.agent.streaming import sse_confidence
+
+                confidence_level, reasons = _compute_confidence(tool_outcomes)
+                if confidence_level != "high":
+                    yield sse_confidence(confidence_level, reasons)
+
+                if metrics:
+                    metrics.record_sub_agent_result(
+                        agent_type=agent_type,
+                        duration_seconds=round(_time.monotonic() - start_time, 1),
+                        tool_calls=tool_call_count,
+                        tool_errors=sum(1 for t in tool_outcomes if t.get("status") == "error"),
+                        rounds_used=_round + 1,
+                        max_rounds=agent_cfg.max_rounds,
+                        status="success",
+                    )
+                    metrics.record_confidence(confidence_level)
+
+                yield sse_event("agent_done", {"agent": agent_type})
+                yield sse_event("history", {"messages": _serialize_messages(messages)})
+                yield sse_done()
+                return
+
+            tool_results = []
+            for tool_block in tool_use_blocks:
+                tool_name = tool_block.name
+                tool_input = tool_block.input
+
+                tool_call_count += 1
+
+                yield sse_tool_start(tool_name, tool_input)
+
+                result: dict = {}
+                tool_start_t = _time.monotonic()
+                cached = False
+                try:
+                    cache = _tool_cache.get(None)
+                    if cache is not None and tool_name not in _UNCACHEABLE_TOOLS:
+                        key = _cache_key(tool_name, tool_input)
+                        if key in cache:
+                            result = cache[key]
+                            cached = True
+                            yield sse_event("cache_hit", {"tool": tool_name})
+
+                    if not cached:
+                        tool_task = asyncio.create_task(_execute_tool(tool_name, tool_input))
+                        elapsed = 0
+                        while not tool_task.done():
+                            done, _ = await asyncio.wait({tool_task}, timeout=10)
+                            if not done:
+                                elapsed += 10
+                                label = agent_cfg.slow_tool_labels.get(
+                                    tool_name, f"Processing {tool_name}"
+                                )
+                                yield sse_status(f"{agent_cfg.name}: {label}... ({elapsed}s)")
+                        result = tool_task.result()
+                        if (
+                            cache is not None
+                            and tool_name not in _UNCACHEABLE_TOOLS
+                            and "error" not in result
+                        ):
+                            cache[_cache_key(tool_name, tool_input)] = result
+                except Exception as e:
+                    logger.exception(
+                        "Tool %s failed in %s streaming sub-agent", tool_name, agent_type
+                    )
+                    result = {"error": str(e)}
+
+                tool_duration_ms = (_time.monotonic() - tool_start_t) * 1000
+
+                # Span records metadata only (tool already executed above with
+                # async progress polling); actual duration is in duration_ms attr.
+                with mlflow.start_span(
+                    name=f"tool:{tool_name}",
+                    span_type=SpanType.TOOL,
+                ) as tool_span:
+                    set_tool_span_outputs(
+                        tool_span,
+                        tool_name=tool_name,
+                        tool_input=tool_input,
+                        result=result if "error" not in result else None,
+                        error=result.get("error") if "error" in result else None,
+                        duration_ms=tool_duration_ms,
+                        cached=cached,
+                    )
+
+                yield sse_tool_result(tool_name, result)
+
+                # Track outcome for confidence
+                if "error" in result:
+                    tool_outcomes.append(
+                        {
+                            "tool": tool_name,
+                            "status": "error",
+                            "reason": str(result["error"])[:100],
+                        }
+                    )
+                elif isinstance(result, dict) and result.get("count", -1) == 0:
+                    tool_outcomes.append(
+                        {"tool": tool_name, "status": "empty", "reason": "no results returned"}
+                    )
+                else:
+                    tool_outcomes.append({"tool": tool_name, "status": "success"})
+
+                if tool_name == "generate_report" and "error" not in result:
+                    download_url = f"/api/reports/{result['filename']}"
+                    yield sse_report(result["filename"], result["format"], download_url)
+                elif tool_name == "render_chart" and "error" not in result:
+                    yield sse_event("chart", result)
+
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_block.id,
+                        "content": json.dumps(result),
+                    }
+                )
+
+            messages.append({"role": "user", "content": tool_results})
+            messages[:] = _trim_history(messages)
+            yield sse_event("history", {"messages": _serialize_messages(messages)})
+
+        logger.info(
+            "Streaming sub-agent %s exhausted max rounds: %d tool calls, %.1fs",
+            agent_type,
+            tool_call_count,
+            _time.monotonic() - start_time,
+        )
+        from src.agent.streaming import sse_confidence
+
+        confidence_level, reasons = _compute_confidence(tool_outcomes)
+        if confidence_level != "high":
+            yield sse_confidence(confidence_level, reasons)
+
+        if metrics:
+            metrics.record_sub_agent_result(
+                agent_type=agent_type,
+                duration_seconds=round(_time.monotonic() - start_time, 1),
+                tool_calls=tool_call_count,
+                tool_errors=sum(1 for t in tool_outcomes if t.get("status") == "error"),
+                rounds_used=agent_cfg.max_rounds,
+                max_rounds=agent_cfg.max_rounds,
+                status="success",
+            )
+            metrics.record_confidence(confidence_level)
+
+        yield sse_event("agent_done", {"agent": agent_type})
+        max_rounds_text = (
+            "\n\nI've used all my planned tool calls but haven't finished. "
+            "Would you like me to keep going?\n\n"
+            "{{choices}}\n"
+            "Keep investigating\n"
+            "That's enough, thanks\n"
+            "{{/choices}}"
+        )
+        yield sse_text(max_rounds_text)
+        messages.append(
+            {"role": "assistant", "content": [{"type": "text", "text": max_rounds_text}]}
+        )
         yield sse_event("history", {"messages": _serialize_messages(messages)})
+        yield sse_done()
 
-    logger.info(
-        "Streaming sub-agent %s exhausted max rounds: %d tool calls, %.1fs",
-        agent_type,
-        tool_call_count,
-        _time.monotonic() - start_time,
-    )
-    # Emit confidence
-    from src.agent.streaming import sse_confidence
-
-    confidence_level, reasons = _compute_confidence(tool_outcomes)
-    if confidence_level != "high":
-        yield sse_confidence(confidence_level, reasons)
-
-    if metrics:
-        metrics.record_sub_agent_result(
-            agent_type=agent_type,
-            duration_seconds=round(_time.monotonic() - start_time, 1),
-            tool_calls=tool_call_count,
-            tool_errors=sum(1 for t in tool_outcomes if t.get("status") == "error"),
-            rounds_used=agent_cfg.max_rounds,
-            max_rounds=agent_cfg.max_rounds,
-            status="success",
+    finally:
+        agent_span.set_outputs(
+            {
+                "status": agent_status,
+                "response": "\n\n".join(text_parts)[:8000],
+                "tool_calls": tool_call_count,
+                "duration_seconds": round(_time.monotonic() - start_time, 1),
+            }
         )
-        metrics.record_confidence(confidence_level)
-
-    if tracer:
-        tracer.end_agent_span(
-            status="max_rounds",
-            tool_calls=tool_call_count,
-            duration_seconds=round(_time.monotonic() - start_time, 1),
-        )
-
-    yield sse_event("agent_done", {"agent": agent_type})
-    max_rounds_text = (
-        "\n\nI've used all my planned tool calls but haven't finished. "
-        "Would you like me to keep going?\n\n"
-        "{{choices}}\n"
-        "Keep investigating\n"
-        "That's enough, thanks\n"
-        "{{/choices}}"
-    )
-    yield sse_text(max_rounds_text)
-    messages.append({"role": "assistant", "content": [{"type": "text", "text": max_rounds_text}]})
-    yield sse_event("history", {"messages": _serialize_messages(messages)})
-    yield sse_done()
+        agent_span_ctx.__exit__(*sys.exc_info())
