@@ -22,9 +22,10 @@ async def mcp_session(
     from mcp import ClientSession
     from mcp.client.streamable_http import streamable_http_client
 
+    normalized_url = url if url.endswith("/") else url + "/"
     async with (
         httpx.AsyncClient(headers=headers or {}, timeout=timeout) as client,
-        streamable_http_client(url=url, http_client=client) as (
+        streamable_http_client(url=normalized_url, http_client=client) as (
             read_stream,
             write_stream,
             _,
