@@ -2,7 +2,7 @@
 
 Natural language cloud cost and provisioning investigation tool for the RHDP platform. Type questions like "what services does user@redhat.com have?" or "what instances should clusterplatform.ocp4-aws.prod be running?" and get answers drawn from real data sources.
 
-## How It Works
+## How It Works 
 
 1. Investigator types a question in the chat UI
 2. The question is sent to Claude with tool definitions for multiple data sources
