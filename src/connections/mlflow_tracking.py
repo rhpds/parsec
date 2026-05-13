@@ -10,6 +10,7 @@ startup, getter for the client.
 from __future__ import annotations
 
 import logging
+import os
 
 import mlflow
 from mlflow.tracking import MlflowClient
@@ -32,13 +33,24 @@ def init_mlflow() -> None:
 
     if not tracking_url:
         logger.info("MLflow tracking disabled (no tracking_url configured)")
+        mlflow.tracing.disable()
         return
+
+    username = os.environ.get("MLFLOW_TRACKING_USERNAME") or mlflow_cfg.get("tracking_username", "")
+    password = os.environ.get("MLFLOW_TRACKING_PASSWORD") or mlflow_cfg.get("tracking_password", "")
+
+    if username:
+        os.environ.setdefault("MLFLOW_TRACKING_USERNAME", username)
+        logger.info("MLflow basic auth enabled (username: %s)", username)
+    if password:
+        os.environ.setdefault("MLFLOW_TRACKING_PASSWORD", password)
 
     mlflow.set_tracking_uri(tracking_url)
     _client = mlflow.MlflowClient()
 
     try:
         _client.get_experiment_by_name(_experiment_name)
+        mlflow.set_experiment(_experiment_name)
         logger.info(
             "MLflow tracking enabled: %s (experiment: %s)",
             tracking_url,
@@ -46,9 +58,11 @@ def init_mlflow() -> None:
         )
     except Exception:
         logger.warning(
-            "MLflow server at %s not reachable — metrics will be logged when available",
+            "MLflow server at %s not reachable — tracing disabled",
             tracking_url,
         )
+        _client = None
+        mlflow.tracing.disable()
 
 
 def get_mlflow_client() -> MlflowClient | None:
