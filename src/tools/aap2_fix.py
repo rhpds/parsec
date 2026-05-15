@@ -280,8 +280,8 @@ The "after" field must show the corrected version with FQCN."""
     try:
         import anthropic
 
+        client: anthropic.Anthropic | anthropic.AnthropicBedrock | anthropic.AnthropicVertex
         if backend == "vertex":
-            from anthropic import AnthropicVertex
             from google.oauth2 import service_account
 
             project_id = cfg.anthropic.get("vertex_project_id", "") or cfg.gcp.get("project_id", "")
@@ -294,12 +294,10 @@ The "after" field must show the corrected version with FQCN."""
                     scopes=["https://www.googleapis.com/auth/cloud-platform"],
                 )
                 kwargs["credentials"] = credentials
-            client = AnthropicVertex(**kwargs)
+            client = anthropic.AnthropicVertex(**kwargs)
         elif backend == "bedrock":
-            from anthropic import AnthropicBedrock
-
             region = cfg.anthropic.get("bedrock_region", "us-east-1")
-            client = AnthropicBedrock(aws_region=region)
+            client = anthropic.AnthropicBedrock(aws_region=region)
         else:
             api_key = cfg.anthropic.get("api_key", "") or os.environ.get("ANTHROPIC_API_KEY", "")
             if not api_key:

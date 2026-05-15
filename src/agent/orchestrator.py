@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import sys
 import time as _time
+import uuid
 from collections.abc import AsyncGenerator
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -842,6 +844,8 @@ async def _handle_direct_tool(
 async def run_agent(  # noqa: C901
     question: str,
     conversation_history: list | None = None,
+    conversation_id: str | None = None,
+    session_id: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Run the orchestrator agent loop and yield SSE events.
 
@@ -859,11 +863,18 @@ async def run_agent(  # noqa: C901
 
     orchestrator_tools = get_orchestrator_tools()
 
-    logger.info("run_agent: question=%s", question[:120])
+    logger.info(
+        "run_agent: question=%s session_id=%s conversation_id=%s",
+        question[:120],
+        session_id,
+        conversation_id,
+    )
+
+    session_id = session_id or conversation_id or str(uuid.uuid4())
 
     _tool_cache.set({})
 
-    collector = MetricsCollector(conversation_id="pending")
+    collector = MetricsCollector(conversation_id=session_id)
     collector.start_timer()
 
     cfg = get_config()
@@ -873,6 +884,11 @@ async def run_agent(  # noqa: C901
     span_ctx = mlflow.start_span(name="parsec:orchestrator", span_type=SpanType.CHAIN)
     root_span = span_ctx.__enter__()
     root_span.set_inputs({"question": question})
+    with contextlib.suppress(Exception):
+        mlflow.update_current_trace(
+            client_request_id=session_id,
+            metadata={"mlflow.trace.session": session_id},
+        )
 
     try:
         # Fast-path: skip orchestrator for obvious single-domain queries
