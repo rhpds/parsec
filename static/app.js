@@ -15,6 +15,7 @@ let pendingAttachment = null; // { name, content }
 
 let conversationHistory = [];
 let currentConversationId = null;
+const sessionId = crypto.randomUUID();
 
 // Prompt history (up-arrow recall within session)
 let promptHistory = [];
@@ -865,9 +866,15 @@ form.addEventListener("submit", async (e) => {
         if (attachment) {
             fullQuestion = question + "\n\n--- Attached file: " + attachment.name + " ---\n" + attachment.content;
         }
+        if (!currentConversationId) {
+            currentConversationId = crypto.randomUUID();
+            try { localStorage.setItem("parsec_conv_id", currentConversationId); } catch (e) {}
+        }
         const payload = {
             question: fullQuestion,
             conversation_history: conversationHistory.length > 0 ? conversationHistory : null,
+            conversation_id: currentConversationId,
+            session_id: sessionId,
         };
         const response = await fetch("/api/query", {
             method: "POST",
