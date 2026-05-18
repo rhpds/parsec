@@ -68,6 +68,8 @@ async def _get_user_groups(user: str) -> set[str]:
 class QueryRequest(BaseModel):
     question: str
     conversation_history: list | None = None
+    conversation_id: str | None = None
+    session_id: str | None = None
 
 
 def _log_identity_debug(request: Request) -> None:
@@ -195,9 +197,11 @@ async def query(
     await _check_user_allowed(request, user)
 
     logger.info(
-        "Query from user=%s preferred_username=%s: %s",
+        "Query from user=%s preferred_username=%s session_id=%s conversation_id=%s: %s",
         user,
         x_forwarded_preferred_username,
+        body.session_id,
+        body.conversation_id,
         body.question[:200],
     )
 
@@ -205,6 +209,8 @@ async def query(
         async for event in run_agent(
             body.question,
             body.conversation_history,
+            conversation_id=body.conversation_id,
+            session_id=body.session_id,
         ):
             yield event
 
