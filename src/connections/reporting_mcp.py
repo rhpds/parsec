@@ -164,8 +164,10 @@ async def fetch_server_instructions() -> str:
         return ""
 
     try:
-        async with mcp_session(_mcp_url, _auth_headers(), _MCP_TIMEOUT_SECONDS) as (session, init_result):
-
+        async with mcp_session(_mcp_url, _auth_headers(), _MCP_TIMEOUT_SECONDS) as (
+            session,
+            init_result,
+        ):
             # 1. Cache instructions
             instructions = init_result.instructions or ""
             if instructions:
