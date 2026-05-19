@@ -26,5 +26,9 @@ mlflow_s3_storage_class: "openshift-storage.noobaa.io"
 mlflow_oauth_groups: "rhpds-admins,ace-octo-team"
 mlflow_oauth_proxy_image: "registry.redhat.io/openshift4/ose-oauth-proxy-rhel9:latest"
 
+# API proxy (basic auth for programmatic access)
+mlflow_api_username: "mlflow-api"
+mlflow_api_image: "nginxinc/nginx-unprivileged:1.27-alpine"
+
 # Kubeconfig (cluster-admin for namespace creation + CRDs)
 mlflow_kubeconfig: "{{ lookup('env', 'HOME') }}/secrets/ocpv-infra01.dal12.infra.demo.redhat.com.kubeconfig"

@@ -122,6 +122,59 @@ sidebarExamplesEl.style.display = "none";
 
 var learningsPanel = document.getElementById("learnings-panel");
 var isAdmin = false;
+var adminViewAllChats = false;
+
+function showAdminChatToggle() {
+    var existing = document.getElementById("admin-chat-toggle");
+    if (existing) { existing.style.display = "flex"; return; }
+    var toggle = document.createElement("div");
+    toggle.id = "admin-chat-toggle";
+    toggle.className = "admin-chat-toggle";
+    var myBtn = document.createElement("button");
+    myBtn.id = "admin-toggle-my";
+    myBtn.className = "admin-toggle-btn" + (!adminViewAllChats ? " active" : "");
+    myBtn.textContent = "My Chats";
+    var allBtn = document.createElement("button");
+    allBtn.id = "admin-toggle-all";
+    allBtn.className = "admin-toggle-btn" + (adminViewAllChats ? " active" : "");
+    allBtn.textContent = "All Users";
+    myBtn.addEventListener("click", function() {
+        adminViewAllChats = false;
+        myBtn.classList.add("active");
+        allBtn.classList.remove("active");
+        loadConversationList();
+    });
+    allBtn.addEventListener("click", function() {
+        adminViewAllChats = true;
+        allBtn.classList.add("active");
+        myBtn.classList.remove("active");
+        loadConversationList();
+    });
+    var dlBtn = document.createElement("button");
+    dlBtn.className = "admin-toggle-btn admin-download-btn";
+    dlBtn.textContent = "⤓";
+    dlBtn.title = "Download all conversations as JSON";
+    dlBtn.addEventListener("click", function() {
+        dlBtn.textContent = "…";
+        fetch("/api/conversations/export").then(function(resp) {
+            if (!resp.ok) throw new Error("Export failed");
+            return resp.json();
+        }).then(function(data) {
+            var blob = new Blob([JSON.stringify(data.conversations, null, 2)], { type: "application/json" });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement("a");
+            a.href = url;
+            a.download = "parsec-conversations-" + new Date().toISOString().slice(0, 10) + ".json";
+            a.click();
+            URL.revokeObjectURL(url);
+            dlBtn.textContent = "⤓";
+        }).catch(function() { dlBtn.textContent = "⤓"; });
+    });
+    toggle.appendChild(myBtn);
+    toggle.appendChild(allBtn);
+    toggle.appendChild(dlBtn);
+    sidebarListEl.parentNode.insertBefore(toggle, sidebarListEl);
+}
 
 function openSidebar(section) {
     if (section === "history") {
@@ -129,7 +182,10 @@ function openSidebar(section) {
         sidebarHistoryTitle.textContent = "History";
         sidebarListEl.style.display = "";
         sidebarExamplesEl.style.display = "none";
-        if (isAdmin) learningsPanel.style.display = "block";
+        if (isAdmin) {
+            learningsPanel.style.display = "block";
+            showAdminChatToggle();
+        }
         loadConversationList();
     } else {
         sidebarHistoryTitle.style.display = "";
@@ -137,6 +193,8 @@ function openSidebar(section) {
         sidebarListEl.style.display = "none";
         sidebarExamplesEl.style.display = "";
         learningsPanel.style.display = "none";
+        var adminToggle = document.getElementById("admin-chat-toggle");
+        if (adminToggle) adminToggle.style.display = "none";
     }
     sidebarEl.classList.add("open");
 }
@@ -234,7 +292,9 @@ document.getElementById("learnings-clear-btn").addEventListener("click", functio
 });
 
 function loadConversationList() {
-    fetch("/api/conversations").then(function(resp) {
+    var url = "/api/conversations";
+    if (isAdmin && adminViewAllChats) url += "?all_users=true";
+    fetch(url).then(function(resp) {
         if (!resp.ok) return;
         return resp.json();
     }).then(function(data) {
@@ -248,7 +308,7 @@ function renderConversationList(conversations) {
     if (conversations.length === 0) {
         var empty = document.createElement("div");
         empty.className = "sidebar-empty";
-        empty.textContent = "No previous conversations";
+        empty.textContent = adminViewAllChats ? "No conversations found" : "No previous conversations";
         sidebarListEl.appendChild(empty);
         return;
     }
@@ -264,12 +324,17 @@ function renderConversationList(conversations) {
         var metaEl = document.createElement("div");
         metaEl.className = "sidebar-item-meta";
         var date = new Date(conv.updated_at);
-        metaEl.textContent = date.toLocaleDateString() + " \u00b7 " + conv.message_count + " msgs";
+        var metaText = date.toLocaleDateString() + " \u00b7 " + conv.message_count + " msgs";
+        if (adminViewAllChats && conv.owner) {
+            metaText = conv.owner + " \u00b7 " + metaText;
+        }
+        metaEl.textContent = metaText;
 
         var deleteBtn = document.createElement("button");
         deleteBtn.className = "sidebar-item-delete";
         deleteBtn.textContent = "\u00d7";
         deleteBtn.title = "Delete conversation";
+        if (adminViewAllChats) deleteBtn.style.display = "none";
         deleteBtn.addEventListener("click", function(e) {
             e.stopPropagation();
             if (!confirm("Delete this conversation?")) return;

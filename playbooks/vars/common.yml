@@ -31,7 +31,7 @@ babylon_kubeconfigs:
   babydev: "{{ lookup('env', 'HOME') }}/secrets/babylon-readonly/babydev.kubeconfig"
 
 # Reporting MCP (cross-namespace, demo-reporting)
-reporting_mcp_url: "http://reporting-mcp.demo-reporting.svc:8080/mcp"
+reporting_mcp_url: "http://reporting-mcp.demo-reporting.svc:8080/mcp/"
 
 # MLflow tracking (cross-namespace, mlflow namespace)
 mlflow_tracking_url: "http://mlflow-tracking.mlflow.svc:5000"

@@ -529,3 +529,223 @@ spec:
     - ports:
         - protocol: TCP
           port: 8443
+---
+# RBAC: allow configured groups to pass the OAuth proxy SAR check
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mlflow-oauth-viewer
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+    component: oauth
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get"]
+{% for group in mlflow_oauth_groups.split(',') %}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mlflow-oauth-{{ group | trim }}
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+    component: oauth
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mlflow-oauth-viewer
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: {{ group | trim }}
+{% endfor %}
+---
+# API Proxy: nginx reverse proxy with basic auth for programmatic access
+# Note: mlflow-api-htpasswd Secret is created by playbooks/tasks/mlflow-api-htpasswd.yml (idempotent)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mlflow-api-nginx-config
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+    component: api-proxy
+data:
+  default.conf: |
+    server {
+        listen 8080;
+
+        location / {
+            auth_basic "MLflow API";
+            auth_basic_user_file /etc/nginx/htpasswd/htpasswd;
+
+            proxy_pass http://mlflow-tracking:5000;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location /health {
+            return 200 'ok';
+            add_header Content-Type text/plain;
+        }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow-api-proxy
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+    component: api-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mlflow
+      component: api-proxy
+  template:
+    metadata:
+      labels:
+        app: mlflow
+        component: api-proxy
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nginx
+          image: {{ mlflow_api_image }}
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+            - name: htpasswd
+              mountPath: /etc/nginx/htpasswd
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "10m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 30
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: mlflow-api-nginx-config
+        - name: htpasswd
+          secret:
+            secretName: mlflow-api-htpasswd
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow-api-proxy
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+    component: api-proxy
+spec:
+  type: ClusterIP
+  selector:
+    app: mlflow
+    component: api-proxy
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: mlflow-api-route
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+    component: api-proxy
+spec:
+  host: mlflow-api.{{ mlflow_cluster_domain }}
+  to:
+    kind: Service
+    name: mlflow-api-proxy
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+---
+# NetworkPolicy: allow api-proxy to reach tracking server
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-proxy-to-tracking
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+spec:
+  podSelector:
+    matchLabels:
+      app: mlflow
+      component: tracking
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: mlflow
+              component: api-proxy
+      ports:
+        - protocol: TCP
+          port: 5000
+---
+# NetworkPolicy: allow external traffic to api-proxy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-to-api-proxy
+  namespace: {{ mlflow_namespace }}
+  labels:
+    app: mlflow
+spec:
+  podSelector:
+    matchLabels:
+      app: mlflow
+      component: api-proxy
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8080

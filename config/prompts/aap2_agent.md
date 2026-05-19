@@ -81,6 +81,8 @@ to find the job directly.
 - **Job ID typos are common.** If a job ID is not found on the expected controller,
   ask the user to double-check the number before sweeping all controllers. If you do
   sweep, check all remaining controllers in a single batch — don't try them one at a time.
+- **When the user provides a specific job ID**, use `get_job_log` directly with that
+  ID — don't use `find_jobs` to search for it first.
 
 ### Investigate AAP2 Job Failures
 

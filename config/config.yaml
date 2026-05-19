@@ -130,7 +130,9 @@ alert_api_key: ""
 learnings:
   # Comma-separated list of users who can view/manage agent learnings
   # These users see the learnings panel in the sidebar
-  admin_users: "prutledg@redhat.com,andrjone@redhat.com"
+  admin_users: "prutledg@redhat.com,andrjone@redhat.com,yordangit@redhat.com"
+  # Comma-separated list of OpenShift groups that grant admin access
+  admin_groups: "ace-octo-team"
   # Set to true in config.local.yaml to allow anonymous (no OAuth) admin access
   # NEVER set this in production
   allow_anonymous_admin: false
@@ -144,7 +146,7 @@ auth:
   # Comma-separated list of allowed OpenShift groups (from X-Forwarded-Groups)
   # When set, only users in these groups (or in allowed_users) can access Parsec
   # When empty, group check is skipped and allowed_users is used instead
-  allowed_groups: "rhpds-admins,parsec-local-users"
+  allowed_groups: "rhpds-admins,parsec-local-users,ace-octo-team"
   # Comma-separated list of allowed email addresses or usernames (fallback)
   # When empty and allowed_groups is also empty, all authenticated users are allowed
   allowed_users: ""
