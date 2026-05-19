@@ -140,6 +140,20 @@ debug:
   # data/debug/ as JSON before each API call. Useful for prompt inspection.
   dump_prompts: false
 
+agent:
+  # Which LLM runtime drives the orchestrator + sub-agents.
+  #   legacy — direct anthropic SDK (today's default, unchanged behavior)
+  #   sdk    — Claude Agent SDK (experimental; requires `pip install claude-agent-sdk`)
+  # See artifacts/parsec-agent-sdk-migration-plan.md for the migration plan.
+  runtime: "legacy"
+  # SDK-specific overrides (only honored when runtime: sdk)
+  sdk:
+    # model: ""          # falls back to anthropic.model
+    # max_turns: 10      # falls back to anthropic.max_tool_rounds
+    # cwd: ""            # working directory for the SDK subprocess (default: pwd)
+    setting_sources: ["project"]   # where the SDK discovers SKILL.md files
+    env: {}              # extra env vars merged into the subprocess (e.g. OTel)
+
 auth:
   # Comma-separated list of allowed OpenShift groups (from X-Forwarded-Groups)
   # When set, only users in these groups (or in allowed_users) can access Parsec
