@@ -65,6 +65,8 @@ Once found, extract from the service object:
 Also check for related context:
 - Use `action: "get_comments"` for the host/service to see if there are notes from other engineers.
 - Use `action: "get_downtimes"` for the host/service to check for scheduled maintenance.
+  If the service is already in downtime, report this first — the issue may already be
+  addressed before proceeding with deeper investigation.
 
 ### Step 0.1: Determine the Deployment Platform
 
@@ -134,6 +136,13 @@ After identifying the alert, find and read the source of the monitoring script t
   the information needed to diagnose the problem. Only search `monitoring-config` or
   `monitoring-scripts` repos when you need to understand thresholds, check logic, or
   apply rules.
+
+### Common Alert Patterns
+
+- **OCP Nodes Ready alerts:** Fetch the `check_ocp_nodes_ready.sh` script early
+  to understand the percentage thresholds and node counting logic before analyzing
+  the alert status. The script's threshold logic determines what percentage of
+  NotReady nodes triggers WARNING vs CRITICAL.
 
 ### Host Configuration Shortcuts
 

@@ -123,6 +123,29 @@ body::before {
     padding: 8px;
 }
 
+.admin-chat-toggle {
+    display: flex;
+    gap: 4px;
+    padding: 8px;
+    border-bottom: 1px solid var(--border);
+}
+.admin-toggle-btn {
+    flex: 1;
+    padding: 5px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--font-sans);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background var(--transition), color var(--transition);
+}
+.admin-toggle-btn:hover { color: var(--text-bright); background: var(--bg-surface); }
+.admin-toggle-btn.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent-dim); }
+.admin-download-btn { flex: 0; padding: 5px 10px; font-size: 13px; }
+
 .sidebar-empty {
     color: var(--text-muted);
     font-size: 12px;

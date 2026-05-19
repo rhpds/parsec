@@ -16,8 +16,10 @@ The provision database schema, JOIN patterns, query examples, and pitfalls
 are provided by the Reporting MCP server and appended to this prompt
 automatically. Refer to the **"Reporting Database Reference"** section below.
 
-If a table is NOT listed in the reference, use `db_describe_table` to check
-its columns. Use `db_list_tables` to discover all available tables.
+**MANDATORY: Call `db_describe_table` before querying ANY table you haven't
+already described in this conversation.** Do NOT guess column names — even for
+tables you think you know. Column name errors are the #1 source of wasted
+tool calls. Use `db_list_tables` to discover available tables.
 Use `db_table_sample` to preview data format and values.
 
 For complex business logic (chargeback, sales deduplication, capacity
@@ -117,6 +119,13 @@ When searching for catalog items by hostname or image name (e.g. `rh1-lb1187-rhe
 - **Identifier not found in provisions DB:** If a GUID or name returns zero rows,
   do NOT retry with different column guesses. It may be a MultiWorkshop or Workshop
   name that only exists as a Babylon K8s resource — delegate to the Babylon agent.
+- **For numeric identifiers** (e.g. `2452246`), search across multiple fields
+  (`uuid`, `babylon_guid`, `catalog_id`) since the type is ambiguous.
+- **Destroy failures:** Check both AAP2 job events and Babylon AnarchySubject
+  status in parallel for faster diagnosis.
+- **AAP2 quota exceeded (429):** If the AAP2 agent returns a rate limit error,
+  immediately pivot to direct database queries (`tower_job_log`, `lifecycle_log`)
+  rather than retrying the agent call.
 
 ## Source Citations
 
@@ -156,9 +165,13 @@ Keep it concise — just list the tools/sources used, not every query detail.
 - **CRITICAL: Consult the "Reporting Database Reference" section before writing
   SQL.** Do not guess column names — use ONLY columns listed in the schema
   reference. If unsure, call `db_describe_table` to check. Common mistakes:
-  - `provisions` has NO `email` column — join with `users` via `user_id`
+  - `provisions` has NO `email` or `user_email` column — join with `users` via `user_id`. The requesting user's name is in `ordered_by`.
   - `provisions` has `catalog_id` (NOT `catalog_item_id`, NOT `catalog_item_name`) — join with `catalog_items` via `p.catalog_id = ci.id`
   - `provisions` has both `updated_at` and `modified_at` — use `modified_at`
+  - `lifecycle_log` joins to provisions via `provision_uuid` (the provision's `uuid`, NOT the `babylon_guid`)
+  - `tower_job_log` column names are snake_case (`deployer_job`, not `deployerJob`)
+  - `provision_cost` is partitioned — always include a `month_ts` filter to avoid full partition scans
+  - When joining tables with shared column names (e.g. `category`), always use table aliases to avoid ambiguous column errors
 - **Don't re-fetch data already in context.** If a prior tool call returned data
   (e.g., job details, provision records), extract what you need from the existing
   result before making another call.
