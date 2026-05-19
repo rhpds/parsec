@@ -28,6 +28,7 @@ from src.routes.learnings import router as learnings_router
 from src.routes.query import router as query_router
 from src.routes.share import ensure_shares_dir
 from src.routes.share import router as share_router
+from src.routes.skills import router as skills_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -101,6 +102,7 @@ app.include_router(share_router)
 app.include_router(conversations_router)
 app.include_router(learnings_router)
 app.include_router(debug_router)
+app.include_router(skills_router)
 
 # Serve static frontend files
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
