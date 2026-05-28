@@ -154,45 +154,34 @@ class AgentSdkClient:
         is_error = False
         error_message: str | None = None
 
+        state: dict[str, Any] = {
+            "text_parts": text_parts,
+            "tool_invocations": tool_invocations,
+            "model": model,
+            "session_id": session_id,
+            "usage": usage,
+            "is_error": is_error,
+            "error_message": error_message,
+        }
+
         try:
             async for message in sdk.query(prompt=prompt, options=options):
                 if isinstance(message, sdk.AssistantMessage):
-                    for block in getattr(message, "content", []) or []:
-                        if isinstance(block, sdk.TextBlock):
-                            text_parts.append(getattr(block, "text", ""))
-                        elif isinstance(block, sdk.ToolUseBlock):
-                            tool_invocations.append(
-                                {
-                                    "name": getattr(block, "name", None),
-                                    "input": getattr(block, "input", {}),
-                                    "id": getattr(block, "id", None),
-                                }
-                            )
+                    _ingest_assistant(sdk, message, state)
                 elif isinstance(message, sdk.UserMessage):
-                    for block in getattr(message, "content", []) or []:
-                        if isinstance(block, sdk.ToolResultBlock):
-                            tool_id = getattr(block, "tool_use_id", None)
-                            for inv in tool_invocations:
-                                if inv.get("id") == tool_id and "result" not in inv:
-                                    inv["result"] = getattr(block, "content", None)
-                                    inv["is_error"] = bool(getattr(block, "is_error", False))
-                                    break
+                    _ingest_user(sdk, message, state)
                 elif isinstance(message, sdk.ResultMessage):
-                    model = getattr(message, "model", None) or model
-                    session_id = getattr(message, "session_id", None) or session_id
-                    raw_usage = getattr(message, "usage", None) or {}
-                    usage = _coerce_usage(
-                        raw_usage,
-                        total_cost_usd=float(getattr(message, "total_cost_usd", 0.0) or 0.0),
-                        num_turns=int(getattr(message, "num_turns", 0) or 0),
-                    )
-                    is_error = bool(getattr(message, "is_error", False))
-                    if is_error:
-                        error_message = getattr(message, "result", None) or "SDK reported error"
+                    _ingest_result(message, state)
         except Exception as e:
             logger.exception("Claude Agent SDK query failed")
-            is_error = True
-            error_message = f"{type(e).__name__}: {e}"
+            state["is_error"] = True
+            state["error_message"] = f"{type(e).__name__}: {e}"
+
+        model = state["model"]
+        session_id = state["session_id"]
+        usage = state["usage"]
+        is_error = state["is_error"]
+        error_message = state["error_message"]
 
         return SdkResult(
             text="".join(text_parts),
@@ -229,6 +218,61 @@ def _get_section(config: Any, key: str) -> dict[str, Any] | Any:
         return {}
     sub = config.get(key, {}) if hasattr(config, "get") else getattr(config, key, {})
     return sub if sub is not None else {}
+
+
+def _ingest_assistant(sdk: Any, message: Any, state: dict[str, Any]) -> None:
+    """Capture model/session_id and accumulate text + tool_use blocks.
+
+    ``AssistantMessage.model`` is the source of truth for the running model
+    name — ``ResultMessage`` (per SDK 0.2.x) carries cost/usage but has no
+    ``model`` field. Last assistant message wins if the conversation
+    switches models mid-flight.
+    """
+    msg_model = getattr(message, "model", None)
+    if msg_model:
+        state["model"] = msg_model
+    msg_session = getattr(message, "session_id", None)
+    if msg_session:
+        state["session_id"] = msg_session
+
+    for block in getattr(message, "content", []) or []:
+        if isinstance(block, sdk.TextBlock):
+            state["text_parts"].append(getattr(block, "text", ""))
+        elif isinstance(block, sdk.ToolUseBlock):
+            state["tool_invocations"].append(
+                {
+                    "name": getattr(block, "name", None),
+                    "input": getattr(block, "input", {}),
+                    "id": getattr(block, "id", None),
+                }
+            )
+
+
+def _ingest_user(sdk: Any, message: Any, state: dict[str, Any]) -> None:
+    """Pair tool_result blocks back to their tool_use entries by id."""
+    for block in getattr(message, "content", []) or []:
+        if not isinstance(block, sdk.ToolResultBlock):
+            continue
+        tool_id = getattr(block, "tool_use_id", None)
+        for inv in state["tool_invocations"]:
+            if inv.get("id") == tool_id and "result" not in inv:
+                inv["result"] = getattr(block, "content", None)
+                inv["is_error"] = bool(getattr(block, "is_error", False))
+                break
+
+
+def _ingest_result(message: Any, state: dict[str, Any]) -> None:
+    """Capture usage/cost from ResultMessage; session_id as a fallback."""
+    state["session_id"] = getattr(message, "session_id", None) or state["session_id"]
+    raw_usage = getattr(message, "usage", None) or {}
+    state["usage"] = _coerce_usage(
+        raw_usage,
+        total_cost_usd=float(getattr(message, "total_cost_usd", 0.0) or 0.0),
+        num_turns=int(getattr(message, "num_turns", 0) or 0),
+    )
+    if bool(getattr(message, "is_error", False)):
+        state["is_error"] = True
+        state["error_message"] = getattr(message, "result", None) or "SDK reported error"
 
 
 def _coerce_usage(raw: Any, *, total_cost_usd: float, num_turns: int) -> SdkUsage:

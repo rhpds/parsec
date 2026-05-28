@@ -50,6 +50,8 @@ class _ToolResultBlock:
 @dataclass
 class _AssistantMessage:
     content: list
+    model: str | None = None
+    session_id: str | None = None
 
 
 @dataclass
@@ -212,11 +214,24 @@ async def test_complete_raises_when_sdk_not_installed(monkeypatch):
 
 
 async def test_complete_aggregates_text_blocks_in_order(fake_sdk):
+    """Verify model + session_id are captured from AssistantMessage, not ResultMessage.
+
+    Mirrors the real SDK shape (claude_agent_sdk >=0.2.x): ResultMessage has
+    usage/cost but no model field; AssistantMessage is the source of truth for
+    the model name. Regression test for the smoke-test finding on 2026-05-21.
+    """
     fake_sdk.stream = [
-        _AssistantMessage(content=[_TextBlock(text="Hello, ")]),
-        _AssistantMessage(content=[_TextBlock(text="world.")]),
-        _ResultMessage(
+        _AssistantMessage(
+            content=[_TextBlock(text="Hello, ")],
             model="claude-sonnet-4-6",
+            session_id="sess-1",
+        ),
+        _AssistantMessage(
+            content=[_TextBlock(text="world.")],
+            model="claude-sonnet-4-6",
+            session_id="sess-1",
+        ),
+        _ResultMessage(
             session_id="sess-1",
             usage={"input_tokens": 100, "output_tokens": 20},
             total_cost_usd=0.0123,
@@ -234,6 +249,22 @@ async def test_complete_aggregates_text_blocks_in_order(fake_sdk):
     assert result.usage.total_cost_usd == 0.0123
     assert result.usage.num_turns == 2
     assert result.succeeded is True
+
+
+async def test_complete_captures_model_from_assistant_even_when_result_has_none(fake_sdk):
+    """Real-SDK regression: ResultMessage has no .model field at all."""
+    fake_sdk.stream = [
+        _AssistantMessage(
+            content=[_TextBlock(text="ok")],
+            model="claude-opus-4-7",
+            session_id="sess-42",
+        ),
+        _ResultMessage(session_id="sess-42", usage={"input_tokens": 5, "output_tokens": 1}),
+    ]
+    client = AgentSdkClient(AgentSdkConfig(model="claude-opus-4-7"))
+    result = await client.complete(prompt="hi")
+    assert result.model == "claude-opus-4-7"
+    assert result.session_id == "sess-42"
 
 
 async def test_complete_pairs_tool_use_with_tool_result(fake_sdk):
