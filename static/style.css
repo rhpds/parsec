@@ -1857,7 +1857,11 @@ footer {
 .skills-panel {
     border-top: 1px solid var(--border);
     padding: 12px;
-    flex-shrink: 0;
+    /* Fill the remaining sidebar height and scroll internally, rather than
+       overflowing the viewport when many/tall skill cards are present.
+       min-height:0 is required for a flex child to shrink below content size. */
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
 }
 
@@ -1935,6 +1939,16 @@ footer {
     color: var(--warning);
     margin-top: 6px;
     line-height: 1.4;
+}
+
+.skill-path {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border-subtle);
+    word-break: break-all;
 }
 
 .skills-empty {

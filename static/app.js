@@ -312,6 +312,14 @@ function renderSkills(skills) {
             card.appendChild(warn);
         });
 
+        if (s.skill_path) {
+            var path = document.createElement("div");
+            path.className = "skill-path";
+            path.textContent = s.skill_path;
+            path.title = "Discovered from " + s.skill_path;
+            card.appendChild(path);
+        }
+
         skillsListEl.appendChild(card);
     });
 }
