@@ -1862,7 +1862,32 @@ footer {
        min-height:0 is required for a flex child to shrink below content size. */
     flex: 1 1 auto;
     min-height: 0;
-    overflow-y: auto;
+    overflow-y: scroll;
+    /* Keep a persistent, visible scrollbar. macOS uses auto-hiding overlay
+       scrollbars by default, which made a working scroll look like it was
+       broken. overflow-y:scroll + an explicit ::-webkit-scrollbar forces a
+       classic always-present scrollbar; scrollbar-gutter avoids layout shift. */
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: var(--text-muted) transparent;
+}
+
+.skills-panel::-webkit-scrollbar {
+    width: 10px;
+}
+
+.skills-panel::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.skills-panel::-webkit-scrollbar-thumb {
+    background: var(--text-muted);
+    border-radius: 5px;
+    border: 2px solid var(--bg-elevated);
+}
+
+.skills-panel::-webkit-scrollbar-thumb:hover {
+    background: var(--text-bright);
 }
 
 .skills-panel-intro {
