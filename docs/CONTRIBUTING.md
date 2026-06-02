@@ -18,23 +18,52 @@ Parsec is a natural language cloud cost investigation tool for RHDP. Contributio
 git clone https://github.com/rhpds/parsec.git
 cd parsec
 
-# Configure
-cp config/config.local.yaml.template config/config.local.yaml
-# Edit config.local.yaml with your credentials
-
 # Install
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-
-# Run
-uvicorn src.app:app --host 0.0.0.0 --port 8080
-
-# If you need cost-monitor integration locally:
-oc port-forward svc/cost-data-service 8001:8000 -n cost-monitor
 ```
 
-Open http://localhost:8080
+### Testing Locally
+
+1. **Create a local config** by copying the base config:
+
+   ```bash
+   cp config/config.yaml config/config.local.yaml
+   ```
+
+2. **Disable auth** in `config/config.local.yaml` so you can access the UI without
+   OpenShift OAuth. Set both `allowed_groups` and `allowed_users` to empty strings:
+
+   ```yaml
+   auth:
+     allowed_groups: ""
+     allowed_users: ""
+   ```
+
+3. **Fill in credentials** — add your API keys if needed and connection details to
+   `config/config.local.yaml` (this file is gitignored).
+
+4. **Start the server** using the local dev script:
+
+   ```bash
+   scripts/local-server.sh start    # start the server (port 8000)
+   scripts/local-server.sh stop     # stop the server
+   scripts/local-server.sh restart  # restart the server
+   scripts/local-server.sh status   # check if the server is running
+   ```
+
+   Open http://localhost:8000
+
+The start command automatically activates the venv, launches the Uvicorn server in the
+background, and sets up any configured MCP sidecars (Icinga, Reporting MCP port-forward).
+Logs are written to `logs/server.log`.
+
+If you need cost-monitor integration locally:
+
+```bash
+oc port-forward svc/cost-data-service 8001:8000 -n cost-monitor
+```
 
 ### Pre-commit Hooks
 
