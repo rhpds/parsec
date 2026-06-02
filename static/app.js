@@ -114,13 +114,15 @@ var sidebarHistoryTitle = sidebarEl.querySelector(".sidebar-title");
 var sidebarExamplesEl = sidebarEl.querySelector(".sidebar-examples");
 var tabHistory = document.getElementById("sidebar-tab-history");
 var tabExamples = document.getElementById("sidebar-tab-examples");
+var tabSkills = document.getElementById("sidebar-tab-skills");
 
-// Sidebar sections — hide both by default, show based on which tab was clicked
+// Sidebar sections — hide all by default, show based on which tab was clicked
 sidebarListEl.style.display = "none";
 sidebarHistoryTitle.style.display = "none";
 sidebarExamplesEl.style.display = "none";
 
 var learningsPanel = document.getElementById("learnings-panel");
+var skillsPanel = document.getElementById("skills-panel");
 var isAdmin = false;
 var adminViewAllChats = false;
 
@@ -177,24 +179,31 @@ function showAdminChatToggle() {
 }
 
 function openSidebar(section) {
+    // Default all togglable panels off, then turn on the one for this section.
+    sidebarExamplesEl.style.display = "none";
+    learningsPanel.style.display = "none";
+    skillsPanel.style.display = "none";
+    var adminToggle = document.getElementById("admin-chat-toggle");
+    if (adminToggle) adminToggle.style.display = "none";
+    sidebarHistoryTitle.style.display = "";
+
     if (section === "history") {
-        sidebarHistoryTitle.style.display = "";
         sidebarHistoryTitle.textContent = "History";
         sidebarListEl.style.display = "";
-        sidebarExamplesEl.style.display = "none";
         if (isAdmin) {
             learningsPanel.style.display = "block";
             showAdminChatToggle();
         }
         loadConversationList();
+    } else if (section === "skills") {
+        sidebarHistoryTitle.textContent = "Skills";
+        sidebarListEl.style.display = "none";
+        skillsPanel.style.display = "block";
+        loadSkills();
     } else {
-        sidebarHistoryTitle.style.display = "";
         sidebarHistoryTitle.textContent = "Examples";
         sidebarListEl.style.display = "none";
         sidebarExamplesEl.style.display = "";
-        learningsPanel.style.display = "none";
-        var adminToggle = document.getElementById("admin-chat-toggle");
-        if (adminToggle) adminToggle.style.display = "none";
     }
     sidebarEl.classList.add("open");
 }
@@ -206,6 +215,7 @@ function closeSidebar() {
 document.getElementById("sidebar-close-btn").addEventListener("click", closeSidebar);
 tabHistory.addEventListener("click", function() { showChatView(); openSidebar("history"); });
 tabExamples.addEventListener("click", function() { showChatView(); openSidebar("examples"); });
+tabSkills.addEventListener("click", function() { showChatView(); openSidebar("skills"); });
 
 var tabDebug = document.getElementById("sidebar-tab-debug");
 tabDebug.addEventListener("click", function() {
@@ -223,6 +233,96 @@ document.querySelectorAll(".sidebar-examples-list li").forEach(function(li) {
         closeSidebar();
     });
 });
+
+// ─── Skills panel (read-only view of GET /api/skills) ───
+// Nodes are built with textContent (never innerHTML) so skill metadata —
+// which comes from arbitrary on-disk SKILL.md files — can't inject markup.
+
+var skillsListEl = document.getElementById("skills-list");
+
+function loadSkills() {
+    skillsListEl.textContent = "Loading…";
+    fetch("/api/skills").then(function(resp) {
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        return resp.json();
+    }).then(function(data) {
+        renderSkills(data.skills || []);
+    }).catch(function(err) {
+        skillsListEl.textContent = "";
+        var e = document.createElement("div");
+        e.className = "skills-empty";
+        e.textContent = "Could not load skills: " + err.message;
+        skillsListEl.appendChild(e);
+    });
+}
+
+function renderSkills(skills) {
+    skillsListEl.textContent = "";
+    if (!skills.length) {
+        var empty = document.createElement("div");
+        empty.className = "skills-empty";
+        empty.textContent = "No skills discovered. Set skills.plugin_paths to mount a skill repo.";
+        skillsListEl.appendChild(empty);
+        return;
+    }
+    skills.forEach(function(s) {
+        var card = document.createElement("div");
+        card.className = "skill-card";
+
+        var head = document.createElement("div");
+        head.className = "skill-card-head";
+        var name = document.createElement("span");
+        name.className = "skill-name";
+        name.textContent = s.name;
+        head.appendChild(name);
+        if (s.source) {
+            var src = document.createElement("span");
+            src.className = "skill-badge";
+            src.textContent = s.source;
+            head.appendChild(src);
+        }
+        if (s.is_parsec_native) {
+            var nat = document.createElement("span");
+            nat.className = "skill-badge skill-badge-native";
+            nat.textContent = "parsec";
+            head.appendChild(nat);
+        }
+        card.appendChild(head);
+
+        var desc = document.createElement("div");
+        desc.className = "skill-desc";
+        desc.textContent = s.description || "";
+        card.appendChild(desc);
+
+        var bits = [];
+        if (s.parsec && s.parsec.version) bits.push("v" + s.parsec.version);
+        if (s.parsec && s.parsec.domain) bits.push(s.parsec.domain);
+        if (s.allowed_tools && s.allowed_tools.length) bits.push(s.allowed_tools.length + " tools");
+        if (bits.length) {
+            var meta = document.createElement("div");
+            meta.className = "skill-meta";
+            meta.textContent = bits.join(" · ");
+            card.appendChild(meta);
+        }
+
+        (s.warnings || []).forEach(function(w) {
+            var warn = document.createElement("div");
+            warn.className = "skill-warning";
+            warn.textContent = "⚠ " + w;
+            card.appendChild(warn);
+        });
+
+        if (s.skill_path) {
+            var path = document.createElement("div");
+            path.className = "skill-path";
+            path.textContent = s.skill_path;
+            path.title = "Discovered from " + s.skill_path;
+            card.appendChild(path);
+        }
+
+        skillsListEl.appendChild(card);
+    });
+}
 
 // ─── Learnings panel (admin only) ───
 
