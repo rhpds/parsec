@@ -4,7 +4,7 @@ import logging
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
-from src.agent.learnings import clear_learnings, get_learnings, is_admin_user
+from src.agent.learnings import clear_learnings, get_learnings, is_admin_user_async
 from src.routes.query import _check_user_allowed
 
 logger = logging.getLogger(__name__)
@@ -12,9 +12,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["learnings"])
 
 
-def _require_admin(user: str | None) -> None:
+async def _require_admin(user: str | None) -> None:
     """Raise 403 if the user is not an admin."""
-    if not is_admin_user(user):
+    if not await is_admin_user_async(user):
         raise HTTPException(status_code=403, detail="Admin access required")
 
 
@@ -27,7 +27,7 @@ async def get_learnings_api(
     """Get the current learnings content (admin only)."""
     user = x_forwarded_email or x_forwarded_user
     await _check_user_allowed(request, user)
-    _require_admin(user)
+    await _require_admin(user)
 
     content = get_learnings()
     return {"content": content, "has_learnings": bool(content.strip())}
@@ -42,7 +42,7 @@ async def delete_learnings_api(
     """Clear the learnings file (admin only)."""
     user = x_forwarded_email or x_forwarded_user
     await _check_user_allowed(request, user)
-    _require_admin(user)
+    await _require_admin(user)
 
     clear_learnings()
     logger.info("Learnings cleared by %s", user)
@@ -59,4 +59,4 @@ async def check_learnings_admin(
     user = x_forwarded_email or x_forwarded_user
     await _check_user_allowed(request, user)
 
-    return {"is_admin": is_admin_user(user)}
+    return {"is_admin": await is_admin_user_async(user)}

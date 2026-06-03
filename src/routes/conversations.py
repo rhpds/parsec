@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
+from src.agent.learnings import is_admin_user_async
 from src.routes.query import _check_user_allowed
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ class ConversationSummary(BaseModel):
     created_at: str
     updated_at: str
     message_count: int
+    owner: str | None = None
 
 
 def _auto_title(messages: list) -> str:
@@ -145,10 +147,12 @@ async def _background_learn(messages: list) -> None:
         logger.exception("Background learning analysis failed (non-fatal)")
 
 
-def _list_conversations_sync(owner: str) -> list[dict]:
-    """Scan conversations directory and return summaries for the given owner.
+def _list_conversations_sync(owner: str, *, all_users: bool = False) -> list[dict]:
+    """Scan conversations directory and return summaries.
 
-    Blocking I/O — always call via asyncio.to_thread.
+    When *all_users* is True (admin mode), returns every conversation with the
+    ``owner`` field populated.  Otherwise returns only conversations owned by
+    *owner*.  Blocking I/O — always call via asyncio.to_thread.
     """
     conversations: list[dict] = []
     try:
@@ -159,17 +163,18 @@ def _list_conversations_sync(owner: str) -> list[dict]:
             try:
                 with open(fpath) as f:
                     data = json.load(f)
-                if data.get("owner") != owner:
+                if not all_users and data.get("owner") != owner:
                     continue
-                conversations.append(
-                    {
-                        "id": data["id"],
-                        "title": data.get("title", "Untitled"),
-                        "created_at": data.get("created_at", ""),
-                        "updated_at": data.get("updated_at", data.get("created_at", "")),
-                        "message_count": _count_user_messages(data.get("messages", [])),
-                    }
-                )
+                summary: dict = {
+                    "id": data["id"],
+                    "title": data.get("title", "Untitled"),
+                    "created_at": data.get("created_at", ""),
+                    "updated_at": data.get("updated_at", data.get("created_at", "")),
+                    "message_count": _count_user_messages(data.get("messages", [])),
+                }
+                if all_users:
+                    summary["owner"] = data.get("owner", "unknown")
+                conversations.append(summary)
             except Exception:  # nosec B112 — skip corrupt/unreadable JSON files
                 continue
     except FileNotFoundError:
@@ -182,16 +187,61 @@ def _list_conversations_sync(owner: str) -> list[dict]:
 @router.get("/conversations")
 async def list_conversations(
     request: Request,
+    all_users: bool = False,
     x_forwarded_user: str | None = Header(None),
     x_forwarded_email: str | None = Header(None),
 ):
-    """List conversations for the current user, newest first."""
+    """List conversations for the current user (or all users for admins)."""
     user = x_forwarded_email or x_forwarded_user
     await _check_user_allowed(request, user)
     owner = user or "anonymous"
 
-    conversations = await asyncio.to_thread(_list_conversations_sync, owner)
+    if all_users:
+        if not await is_admin_user_async(user):
+            raise HTTPException(status_code=403, detail="Admin access required")
+        conversations = await asyncio.to_thread(_list_conversations_sync, owner, all_users=True)
+    else:
+        conversations = await asyncio.to_thread(_list_conversations_sync, owner)
+
     return {"conversations": conversations}
+
+
+@router.get("/conversations/export")
+async def export_conversations(
+    request: Request,
+    x_forwarded_user: str | None = Header(None),
+    x_forwarded_email: str | None = Header(None),
+):
+    """Export all conversations with full messages (admin only)."""
+    user = x_forwarded_email or x_forwarded_user
+    await _check_user_allowed(request, user)
+    if not await is_admin_user_async(user):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    conversations = await asyncio.to_thread(_export_all_conversations_sync)
+    return {"conversations": conversations}
+
+
+def _export_all_conversations_sync() -> list[dict]:
+    """Read all conversation files with full content.
+
+    Blocking I/O — always call via asyncio.to_thread.
+    """
+    conversations: list[dict] = []
+    try:
+        for fname in os.listdir(CONVERSATIONS_DIR):
+            if not fname.endswith(".json"):
+                continue
+            fpath = os.path.join(CONVERSATIONS_DIR, fname)
+            try:
+                with open(fpath) as f:
+                    conversations.append(json.load(f))
+            except Exception:  # nosec B112
+                continue
+    except FileNotFoundError:
+        pass
+    conversations.sort(key=lambda c: c.get("updated_at", ""), reverse=True)
+    return conversations
 
 
 @router.get("/conversations/{conv_id}")
@@ -215,7 +265,7 @@ async def get_conversation(
 
     data = await asyncio.to_thread(_read_json, fpath)
 
-    if data.get("owner") != owner:
+    if data.get("owner") != owner and not await is_admin_user_async(user):
         raise HTTPException(status_code=403, detail="Not your conversation")
 
     return data

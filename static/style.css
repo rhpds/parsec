@@ -123,6 +123,29 @@ body::before {
     padding: 8px;
 }
 
+.admin-chat-toggle {
+    display: flex;
+    gap: 4px;
+    padding: 8px;
+    border-bottom: 1px solid var(--border);
+}
+.admin-toggle-btn {
+    flex: 1;
+    padding: 5px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--font-sans);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background var(--transition), color var(--transition);
+}
+.admin-toggle-btn:hover { color: var(--text-bright); background: var(--bg-surface); }
+.admin-toggle-btn.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent-dim); }
+.admin-download-btn { flex: 0; padding: 5px 10px; font-size: 13px; }
+
 .sidebar-empty {
     color: var(--text-muted);
     font-size: 12px;
@@ -1828,4 +1851,133 @@ footer {
 
 .debug-explanation p {
     margin-bottom: 10px;
+}
+
+/* ─── Skills panel (read-only view of GET /api/skills) ─── */
+.skills-panel {
+    border-top: 1px solid var(--border);
+    padding: 12px;
+    /* Fill the remaining sidebar height and scroll internally, rather than
+       overflowing the viewport when many/tall skill cards are present.
+       min-height:0 is required for a flex child to shrink below content size. */
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: scroll;
+    /* Keep a persistent, visible scrollbar. macOS uses auto-hiding overlay
+       scrollbars by default, which made a working scroll look like it was
+       broken. overflow-y:scroll + an explicit ::-webkit-scrollbar forces a
+       classic always-present scrollbar; scrollbar-gutter avoids layout shift. */
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: var(--text-muted) transparent;
+}
+
+.skills-panel::-webkit-scrollbar {
+    width: 10px;
+}
+
+.skills-panel::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.skills-panel::-webkit-scrollbar-thumb {
+    background: var(--text-muted);
+    border-radius: 5px;
+    border: 2px solid var(--bg-elevated);
+}
+
+.skills-panel::-webkit-scrollbar-thumb:hover {
+    background: var(--text-bright);
+}
+
+.skills-panel-intro {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin-bottom: 10px;
+}
+
+.skills-panel-intro code {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--accent);
+}
+
+.skills-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.skill-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 10px;
+}
+
+.skill-card-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+}
+
+.skill-name {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-bright);
+}
+
+.skill-badge {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    background: var(--bg-tool);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 1px 6px;
+}
+
+.skill-badge-native {
+    color: var(--accent-bright);
+    border-color: var(--accent-dim);
+}
+
+.skill-desc {
+    font-size: 11px;
+    color: var(--text);
+    line-height: 1.5;
+}
+
+.skill-meta {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 6px;
+}
+
+.skill-warning {
+    font-size: 10px;
+    color: var(--warning);
+    margin-top: 6px;
+    line-height: 1.4;
+}
+
+.skill-path {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border-subtle);
+    word-break: break-all;
+}
+
+.skills-empty {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.5;
 }

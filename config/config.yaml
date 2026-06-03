@@ -131,6 +131,8 @@ learnings:
   # Comma-separated list of users who can view/manage agent learnings
   # These users see the learnings panel in the sidebar
   admin_users: "prutledg@redhat.com,andrjone@redhat.com,yordangit@redhat.com"
+  # Comma-separated list of OpenShift groups that grant admin access
+  admin_groups: "ace-octo-team"
   # Set to true in config.local.yaml to allow anonymous (no OAuth) admin access
   # NEVER set this in production
   allow_anonymous_admin: false
@@ -155,11 +157,25 @@ agent:
     env: {}              # extra env vars merged into the subprocess (e.g. OTel)
     timeout: 300         # per-call wall-clock ceiling (seconds); null/0 disables
 
+skills:
+  # Discovery roots for agent skills (SKILL.md directories).
+  # See src/skills/loader.py and docs/migration/agent-sdk-plan.md.
+  #
+  # project_root: path (relative to cwd) for in-repo skills that ship with Parsec
+  project_root: "skills"
+  # plugin_paths: additional roots, typically mounted from external skill repos
+  # (e.g. rhdp-rca-plugin). Listed paths are scanned for SKILL.md directories.
+  plugin_paths: []
+  #   - "/opt/rhdp-rca-plugin/skills"
+  # user_root: per-user skill directory for local dev only.
+  # Leave empty in production deploys.
+  user_root: ""
+
 auth:
   # Comma-separated list of allowed OpenShift groups (from X-Forwarded-Groups)
   # When set, only users in these groups (or in allowed_users) can access Parsec
   # When empty, group check is skipped and allowed_users is used instead
-  allowed_groups: "rhpds-admins,parsec-local-users"
+  allowed_groups: "rhpds-admins,parsec-local-users,ace-octo-team"
   # Comma-separated list of allowed email addresses or usernames (fallback)
   # When empty and allowed_groups is also empty, all authenticated users are allowed
   allowed_users: ""

@@ -43,8 +43,20 @@ def _get_admin_users() -> set[str]:
     return {u.strip().lower() for u in admin_str.split(",") if u.strip()}
 
 
+def _get_admin_groups() -> set[str]:
+    """Get the set of OpenShift groups that grant admin access."""
+    cfg = get_config()
+    groups_str = cfg.get("learnings", {}).get("admin_groups", "")
+    if not groups_str:
+        return set()
+    return {g.strip().lower() for g in groups_str.split(",") if g.strip()}
+
+
 def is_admin_user(user: str | None) -> bool:
-    """Check if a user is an admin for the learnings feature."""
+    """Check if a user is an admin (email-based only, sync).
+
+    For group-based admin checks, use ``is_admin_user_async`` instead.
+    """
     cfg = get_config()
     allow_anon = cfg.get("learnings", {}).get("allow_anonymous_admin", False)
     if not user and allow_anon:
@@ -52,9 +64,22 @@ def is_admin_user(user: str | None) -> bool:
     if not user:
         return False
     admins = _get_admin_users()
-    if not admins:
+    return bool(admins and user.lower() in admins)
+
+
+async def is_admin_user_async(user: str | None) -> bool:
+    """Check if a user is an admin via email list or OpenShift group membership."""
+    if is_admin_user(user):
+        return True
+    if not user:
         return False
-    return user.lower() in admins
+    admin_groups = _get_admin_groups()
+    if not admin_groups:
+        return False
+    from src.routes.query import _get_user_groups
+
+    user_groups = await _get_user_groups(user)
+    return bool(admin_groups & user_groups)
 
 
 def _save_entries(entries: list[dict]) -> None:
