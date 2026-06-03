@@ -8,6 +8,8 @@ without the actual SDK.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import sys
 import types
 from dataclasses import dataclass, field
@@ -93,6 +95,7 @@ class _FakeSdk:
         self.captured_prompt: str | None = None
         self.stream: list = []
         self.raise_on_query: Exception | None = None
+        self.delay: float = 0.0  # seconds to sleep before streaming (simulate a slow/hung query)
 
     ClaudeAgentOptions = _ClaudeAgentOptions
     AssistantMessage = _AssistantMessage
@@ -109,6 +112,8 @@ class _FakeSdk:
         async def _gen():
             if self.raise_on_query is not None:
                 raise self.raise_on_query
+            if self.delay:
+                await asyncio.sleep(self.delay)
             for msg in self.stream:
                 yield msg
 
@@ -200,6 +205,22 @@ def test_from_config_falls_back_to_hardcoded_defaults_with_empty_config():
     client = AgentSdkClient.from_config({})
     assert client._cfg.model == "claude-sonnet-4-6"
     assert client._cfg.max_turns == 10
+
+
+def test_from_config_defaults_timeout_to_300():
+    client = AgentSdkClient.from_config({})
+    assert client._cfg.timeout == 300.0
+
+
+def test_from_config_reads_sdk_timeout_override():
+    client = AgentSdkClient.from_config({"agent": {"sdk": {"timeout": 45}}})
+    assert client._cfg.timeout == 45.0
+
+
+def test_from_config_timeout_zero_disables_limit():
+    """A 0/null timeout means no wall-clock ceiling (stored as None)."""
+    client = AgentSdkClient.from_config({"agent": {"sdk": {"timeout": 0}}})
+    assert client._cfg.timeout is None
 
 
 # ---------------------------------------------------------------- complete()
@@ -315,6 +336,56 @@ async def test_complete_catches_query_exception(fake_sdk):
     assert result.is_error is True
     assert result.error_message is not None
     assert "ConnectionError" in result.error_message
+
+
+async def test_complete_times_out_and_marks_error(fake_sdk):
+    """A query that runs past the timeout is cancelled and surfaced as an error,
+    not left hanging. The per-call timeout overrides the (large) config default."""
+    fake_sdk.delay = 30.0  # would hang far past the tiny per-call timeout below
+    fake_sdk.stream = [_ResultMessage(session_id="s", usage={})]
+    client = AgentSdkClient(AgentSdkConfig(model="m"))  # config timeout defaults to 300
+    result = await client.complete(prompt="hi", timeout=0.01)
+    assert result.is_error is True
+    assert result.error_message is not None
+    assert "timed out" in result.error_message.lower()
+
+
+async def test_complete_times_out_via_config_default(fake_sdk):
+    """When no per-call timeout is passed, the configured ceiling still applies."""
+    fake_sdk.delay = 30.0
+    fake_sdk.stream = [_ResultMessage(session_id="s", usage={})]
+    client = AgentSdkClient(AgentSdkConfig(model="m", timeout=0.01))
+    result = await client.complete(prompt="hi")
+    assert result.is_error is True
+    assert "timed out" in (result.error_message or "").lower()
+
+
+async def test_complete_warns_when_model_changes_mid_conversation(fake_sdk, caplog):
+    """Two AssistantMessages with different models: last wins, but we warn."""
+    fake_sdk.stream = [
+        _AssistantMessage(
+            content=[_TextBlock(text="a")], model="claude-sonnet-4-6", session_id="s"
+        ),
+        _AssistantMessage(content=[_TextBlock(text="b")], model="claude-opus-4-7", session_id="s"),
+        _ResultMessage(session_id="s", usage={}),
+    ]
+    client = AgentSdkClient(AgentSdkConfig(model="m"))
+    with caplog.at_level(logging.WARNING, logger="src.llm.agent_sdk_client"):
+        result = await client.complete(prompt="hi")
+    assert result.model == "claude-opus-4-7"  # last assistant message wins
+    assert any("Model changed mid-conversation" in r.message for r in caplog.records)
+
+
+async def test_complete_keeps_assistant_session_id_when_result_session_empty(fake_sdk):
+    """An empty ResultMessage.session_id must not clobber the id from the
+    AssistantMessage (the fallback the review flagged)."""
+    fake_sdk.stream = [
+        _AssistantMessage(content=[_TextBlock(text="ok")], model="m", session_id="sess-assistant"),
+        _ResultMessage(session_id=None, usage={}),
+    ]
+    client = AgentSdkClient(AgentSdkConfig(model="m"))
+    result = await client.complete(prompt="hi")
+    assert result.session_id == "sess-assistant"
 
 
 async def test_complete_passes_through_options(fake_sdk):

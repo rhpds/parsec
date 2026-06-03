@@ -153,6 +153,7 @@ agent:
     # cwd: ""            # working directory for the SDK subprocess (default: pwd)
     setting_sources: ["project"]   # where the SDK discovers SKILL.md files
     env: {}              # extra env vars merged into the subprocess (e.g. OTel)
+    timeout: 300         # per-call wall-clock ceiling (seconds); null/0 disables
 
 auth:
   # Comma-separated list of allowed OpenShift groups (from X-Forwarded-Groups)

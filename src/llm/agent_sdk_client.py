@@ -9,6 +9,7 @@ dependency, unit tests with a mocked sys.modules). Attempting to call
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import logging
 import os
@@ -37,6 +38,11 @@ class AgentSdkConfig:
     cwd: str | None = None
     setting_sources: tuple[str, ...] = ("project",)
     extra_env: dict[str, str] = field(default_factory=dict)
+    # Wall-clock ceiling for a single complete() call. ``sdk.query()`` runs an
+    # agentic loop (up to max_turns rounds of possibly-slow tools), so a hung
+    # query would otherwise leak the coroutine and child CLI process. ``None``
+    # disables the limit. Per-call ``complete(timeout=...)`` overrides this.
+    timeout: float | None = 300.0
 
 
 class AgentSdkClient:
@@ -69,6 +75,8 @@ class AgentSdkClient:
         - ``agent.sdk.cwd`` — working directory for the SDK subprocess
         - ``agent.sdk.setting_sources`` — defaults to ``["project"]`` so
           mounted skills under cwd are discovered
+        - ``agent.sdk.timeout`` — per-call wall-clock ceiling in seconds
+          (default 300; ``null``/``0`` disables it)
         """
         agent_section = _get_section(config, "agent")
         sdk_section = _get_section(agent_section, "sdk") if agent_section else {}
@@ -87,6 +95,8 @@ class AgentSdkClient:
         cwd = sdk_section.get("cwd") or os.getcwd()
         setting_sources_raw = sdk_section.get("setting_sources", ["project"]) or ["project"]
         extra_env = sdk_section.get("env", {}) or {}
+        timeout_raw = sdk_section.get("timeout", 300.0)
+        timeout = float(timeout_raw) if timeout_raw else None
 
         return cls(
             AgentSdkConfig(
@@ -95,6 +105,7 @@ class AgentSdkClient:
                 cwd=str(cwd) if cwd else None,
                 setting_sources=tuple(setting_sources_raw),
                 extra_env=dict(extra_env),
+                timeout=timeout,
             )
         )
 
@@ -109,6 +120,7 @@ class AgentSdkClient:
         allowed_tools: list[str] | None = None,
         mcp_servers: dict[str, Any] | None = None,
         max_turns: int | None = None,
+        timeout: float | None = None,
     ) -> SdkResult:
         """Run a single agentic task via ``claude_agent_sdk.query()``.
 
@@ -121,6 +133,10 @@ class AgentSdkClient:
             allowed_tools: Tool name whitelist passed to ``ClaudeAgentOptions``.
             mcp_servers: MCP server config dict, passed through.
             max_turns: Override the per-call turn cap (defaults to config).
+            timeout: Per-call wall-clock ceiling in seconds. Falls back to the
+                configured ``agent.sdk.timeout`` (default 300) when ``None``.
+                On expiry the query is cancelled and the result is marked an
+                error instead of hanging and leaking the child CLI process.
 
         Raises:
             AgentSdkUnavailableError: if ``claude_agent_sdk`` isn't installed.
@@ -164,14 +180,29 @@ class AgentSdkClient:
             "error_message": error_message,
         }
 
+        effective_timeout = timeout if timeout is not None else self._cfg.timeout
+
         try:
-            async for message in sdk.query(prompt=prompt, options=options):
-                if isinstance(message, sdk.AssistantMessage):
-                    _ingest_assistant(sdk, message, state)
-                elif isinstance(message, sdk.UserMessage):
-                    _ingest_user(sdk, message, state)
-                elif isinstance(message, sdk.ResultMessage):
-                    _ingest_result(message, state)
+            # asyncio.timeout(None) is a valid no-op, so this one path covers
+            # both the bounded and unbounded cases. On expiry it cancels the
+            # async-for, which closes the SDK's async generator and tears down
+            # the child CLI process instead of leaking it.
+            async with asyncio.timeout(effective_timeout):
+                async for message in sdk.query(prompt=prompt, options=options):
+                    if isinstance(message, sdk.AssistantMessage):
+                        _ingest_assistant(sdk, message, state)
+                    elif isinstance(message, sdk.UserMessage):
+                        _ingest_user(sdk, message, state)
+                    elif isinstance(message, sdk.ResultMessage):
+                        _ingest_result(message, state)
+        except TimeoutError:
+            logger.warning("Claude Agent SDK query timed out (limit=%ss)", effective_timeout)
+            state["is_error"] = True
+            state["error_message"] = (
+                f"SDK query timed out after {effective_timeout}s"
+                if effective_timeout is not None
+                else "SDK query timed out"
+            )
         except Exception as e:
             logger.exception("Claude Agent SDK query failed")
             state["is_error"] = True
@@ -208,16 +239,25 @@ def _import_sdk() -> Any:
         ) from e
 
 
-def _get_section(config: Any, key: str) -> dict[str, Any] | Any:
-    """Return a config sub-section as a dict-ish, or ``{}`` if missing.
+def _get_section(config: Any, key: str) -> dict[str, Any]:
+    """Return config sub-section ``key`` as a plain dict (``{}`` if missing).
 
-    Handles both Dynaconf objects (``.get`` returning Box) and plain dicts.
-    Returns the raw section without coercion so nested ``.get`` works.
+    ``from_config`` accepts both Dynaconf objects (sections are Boxes exposing
+    ``.get`` + ``.to_dict``) and plain dicts (used throughout the tests), so we
+    read via ``.get``/``getattr`` and coerce to a real dict. This mirrors
+    ``src.skills.loader._get_skills_section`` and yields a concrete return type
+    that type-checks. Attribute access (``cfg.agent``, as in
+    ``src/connections/aws.py``) is deliberately avoided here: it only works for
+    Dynaconf, not the plain-dict configs the tests pass.
     """
     if config is None:
         return {}
-    sub = config.get(key, {}) if hasattr(config, "get") else getattr(config, key, {})
-    return sub if sub is not None else {}
+    raw = config.get(key, {}) if hasattr(config, "get") else getattr(config, key, {})
+    if raw is None:
+        return {}
+    if hasattr(raw, "to_dict"):
+        return raw.to_dict()
+    return dict(raw)
 
 
 def _ingest_assistant(sdk: Any, message: Any, state: dict[str, Any]) -> None:
@@ -225,11 +265,13 @@ def _ingest_assistant(sdk: Any, message: Any, state: dict[str, Any]) -> None:
 
     ``AssistantMessage.model`` is the source of truth for the running model
     name — ``ResultMessage`` (per SDK 0.2.x) carries cost/usage but has no
-    ``model`` field. Last assistant message wins if the conversation
-    switches models mid-flight.
+    ``model`` field. Last assistant message wins if the conversation switches
+    models mid-flight; that's unexpected, so warn rather than silently overwrite.
     """
     msg_model = getattr(message, "model", None)
     if msg_model:
+        if state["model"] and state["model"] != msg_model:
+            logger.warning("Model changed mid-conversation: %s -> %s", state["model"], msg_model)
         state["model"] = msg_model
     msg_session = getattr(message, "session_id", None)
     if msg_session:
@@ -262,8 +304,15 @@ def _ingest_user(sdk: Any, message: Any, state: dict[str, Any]) -> None:
 
 
 def _ingest_result(message: Any, state: dict[str, Any]) -> None:
-    """Capture usage/cost from ResultMessage; session_id as a fallback."""
-    state["session_id"] = getattr(message, "session_id", None) or state["session_id"]
+    """Capture usage/cost from ResultMessage.
+
+    ``ResultMessage.session_id`` is a required ``str`` per the SDK spec, so take
+    it when present, but don't clobber a valid id already captured from an
+    AssistantMessage if it's somehow empty.
+    """
+    result_session = getattr(message, "session_id", None)
+    if result_session:
+        state["session_id"] = result_session
     raw_usage = getattr(message, "usage", None) or {}
     state["usage"] = _coerce_usage(
         raw_usage,
