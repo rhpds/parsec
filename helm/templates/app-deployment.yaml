@@ -1,0 +1,189 @@
+{{- if .Values.deploy -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "parsec.name" . }}
+  namespace: {{ include "parsec.namespaceName" . }}
+  labels:
+    {{- include "parsec.labels" . | nindent 4 }}
+    component: api
+  annotations:
+    reloader.stakater.com/auto: "true"
+    {{- if .Values.buildConfig.enabled }}
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"{{ include "parsec.name" . }}:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"parsec\")].image"},{"from":{"kind":"ImageStreamTag","name":"{{ include "parsec.name" . }}:latest"},"fieldPath":"spec.template.spec.initContainers[?(@.name==\"seed-pricing\")].image"},{"from":{"kind":"ImageStreamTag","name":"{{ include "parsec.name" . }}:latest"},"fieldPath":"spec.template.spec.initContainers[?(@.name==\"seed-azure-billing\")].image"}]'
+    {{- end }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: {{ include "parsec.name" . }}
+      component: api
+  template:
+    metadata:
+      labels:
+        app: {{ include "parsec.name" . }}
+        component: api
+    spec:
+      serviceAccountName: {{ include "parsec.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      initContainers:
+        - name: seed-pricing
+          image: {{ include "parsec.image" . }}
+          command: ["sh", "-c", "cp /app/data-seed/ec2_pricing.json /app/data/ec2_pricing.json"]
+          volumeMounts:
+            - name: pricing-cache
+              mountPath: /app/data
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+        - name: seed-azure-billing
+          image: {{ include "parsec.image" . }}
+          command: ["python3", "scripts/refresh_azure_billing.py", "--init-only"]
+          volumeMounts:
+            - name: pricing-cache
+              mountPath: /app/data
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+      containers:
+        - name: parsec
+          image: {{ include "parsec.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "parsec.name" . }}-env
+            - secretRef:
+                name: {{ include "parsec.name" . }}-cloud-credentials
+                optional: true
+            - secretRef:
+                name: {{ include "parsec.name" . }}-aap2-credentials
+                optional: true
+          env:
+            - name: PARSEC_ALERT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "parsec.name" . }}-secrets
+                  key: alert-api-key
+                  optional: true
+            - name: PARSEC_GITHUB__TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "parsec.name" . }}-secrets
+                  key: github-token
+                  optional: true
+            - name: PARSEC_REPORTING_MCP__TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "parsec.name" . }}-secrets
+                  key: reporting-mcp-token
+                  optional: true
+          volumeMounts:
+            - name: config
+              mountPath: /app/config/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            - name: vertex-credentials
+              mountPath: /app/gcp
+              readOnly: true
+            - name: gcp-billing-credentials
+              mountPath: /app/gcp-billing
+              readOnly: true
+            - name: pricing-cache
+              mountPath: /app/data
+            - name: babylon-kubeconfigs
+              mountPath: /app/babylon
+              readOnly: true
+            - name: ocpv-kubeconfigs
+              mountPath: /app/ocpv
+              readOnly: true
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/health/ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+        {{- if .Values.icinga.enabled }}
+        - name: icinga-mcp
+          image: {{ .Values.icinga.image.repository }}:{{ .Values.icinga.image.tag }}
+          args: ["--transport", "sse", "--host", "0.0.0.0", "--port", "{{ .Values.icinga.port }}"]
+          ports:
+            - containerPort: {{ .Values.icinga.port }}
+              name: icinga
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: icinga-credentials
+                optional: true
+          resources:
+            {{- toYaml .Values.icinga.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+        {{- end }}
+
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "parsec.name" . }}-config
+        - name: vertex-credentials
+          secret:
+            secretName: vertex-credentials
+            defaultMode: 0400
+            optional: true
+        - name: gcp-billing-credentials
+          secret:
+            secretName: gcp-billing-credentials
+            defaultMode: 0400
+            optional: true
+        - name: pricing-cache
+          persistentVolumeClaim:
+            claimName: {{ include "parsec.name" . }}-pricing-cache
+        - name: babylon-kubeconfigs
+          secret:
+            secretName: babylon-kubeconfigs
+            defaultMode: 0400
+            optional: true
+        - name: ocpv-kubeconfigs
+          secret:
+            secretName: ocpv-kubeconfigs
+            defaultMode: 0400
+            optional: true
+{{- end -}}

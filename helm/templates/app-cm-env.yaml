@@ -1,0 +1,43 @@
+{{- if .Values.deploy -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "parsec.name" . }}-env
+  namespace: {{ include "parsec.namespaceName" . }}
+  labels:
+    {{- include "parsec.labels" . | nindent 4 }}
+data:
+  PARSEC_ANTHROPIC__BACKEND: "vertex"
+  PARSEC_ANTHROPIC__VERTEX_PROJECT_ID: {{ .Values.config.vertex.project_id | quote }}
+  PARSEC_ANTHROPIC__VERTEX_REGION: {{ .Values.config.vertex.region | quote }}
+  PARSEC_ANTHROPIC__VERTEX_CREDENTIALS_PATH: "/app/gcp/service-account.json"
+  PARSEC_AWS__REGION: {{ .Values.config.aws.region | quote }}
+  PARSEC_GCP__CREDENTIALS_PATH: "/app/gcp-billing/service-account.json"
+  PARSEC_REPORTING_MCP__MCP_URL: {{ .Values.config.reporting_mcp.mcp_url | quote }}
+  PARSEC_AUTH__ALLOWED_GROUPS: {{ .Values.auth.allowedGroups | quote }}
+  {{- if .Values.auth.allowedUsers }}
+  PARSEC_AUTH__ALLOWED_USERS: {{ .Values.auth.allowedUsers | quote }}
+  {{- end }}
+  {{- if .Values.config.cost_monitor.api_url }}
+  PARSEC_COST_MONITOR__API_URL: {{ .Values.config.cost_monitor.api_url | quote }}
+  {{- end }}
+  {{- if .Values.config.cloudtrail.event_data_store_id }}
+  PARSEC_CLOUDTRAIL__EVENT_DATA_STORE_ID: {{ .Values.config.cloudtrail.event_data_store_id | quote }}
+  {{- end }}
+  {{- if .Values.config.github.mcp_url }}
+  PARSEC_GITHUB__MCP_URL: {{ .Values.config.github.mcp_url | quote }}
+  {{- end }}
+  {{- if .Values.config.mlflow.tracking_url }}
+  PARSEC_MLFLOW__TRACKING_URL: {{ .Values.config.mlflow.tracking_url | quote }}
+  PARSEC_MLFLOW__EXPERIMENT_NAME: {{ .Values.config.mlflow.experiment_name | quote }}
+  {{- end }}
+  {{- range $cluster, $_ := .Values.secrets.kubeconfigs.babylon }}
+  PARSEC_BABYLON__CLUSTERS__{{ $cluster | upper }}__KUBECONFIG: "/app/babylon/{{ $cluster }}.kubeconfig"
+  {{- end }}
+  {{- range $cluster, $_ := .Values.secrets.kubeconfigs.ocpv }}
+  PARSEC_OCPV__CLUSTERS__{{ $cluster | upper }}__KUBECONFIG: "/app/ocpv/{{ $cluster }}.kubeconfig"
+  {{- end }}
+  {{- if .Values.icinga.enabled }}
+  PARSEC_ICINGA__MCP_URL: "http://localhost:{{ .Values.icinga.port }}/sse"
+  {{- end }}
+{{- end -}}

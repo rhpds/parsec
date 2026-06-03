@@ -1,0 +1,43 @@
+{{- if .Values.deploy -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "parsec.name" . }}-config
+  namespace: {{ include "parsec.namespaceName" . }}
+  labels:
+    {{- include "parsec.labels" . | nindent 4 }}
+    component: api
+data:
+  config.yaml: |
+    app:
+      name: {{ .Values.config.app.name }}
+      port: {{ .Values.config.app.port }}
+      host: {{ .Values.config.app.host | quote }}
+      log_level: {{ .Values.config.app.log_level }}
+    anthropic:
+      model: {{ .Values.config.anthropic.model }}
+      max_tokens: {{ .Values.config.anthropic.max_tokens }}
+      max_tool_rounds: {{ .Values.config.anthropic.max_tool_rounds }}
+    provision_db:
+      max_rows: {{ .Values.config.provision_db.max_rows }}
+    aws:
+      region: {{ .Values.config.aws.region }}
+      batch_size: {{ .Values.config.aws.batch_size }}
+    cost_monitor:
+      api_url: {{ .Values.config.cost_monitor.api_url | quote }}
+      dashboard_url: {{ .Values.config.cost_monitor.dashboard_url | quote }}
+    cloudtrail:
+      event_data_store_id: {{ .Values.config.cloudtrail.event_data_store_id | quote }}
+    learnings:
+      admin_users:
+        {{- toYaml .Values.config.learnings.admin_users | nindent 8 }}
+    github:
+      mcp_url: {{ .Values.config.github.mcp_url | quote }}
+    mlflow:
+      tracking_url: {{ .Values.config.mlflow.tracking_url | quote }}
+      experiment_name: {{ .Values.config.mlflow.experiment_name | quote }}
+    reporting_mcp:
+      mcp_url: {{ .Values.config.reporting_mcp.mcp_url | quote }}
+    auth:
+      allowed_groups: {{ .Values.auth.allowedGroups | quote }}
+{{- end -}}

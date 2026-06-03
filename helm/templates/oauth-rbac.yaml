@@ -1,0 +1,73 @@
+{{- if and .Values.deploy .Values.oauth.enabled -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "parsec.name" . }}-app-access
+  namespace: {{ include "parsec.namespaceName" . }}
+  labels:
+    {{- include "parsec.labels" . | nindent 4 }}
+    component: oauth
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["{{ include "parsec.name" . }}-allowed-users", "{{ include "parsec.name" . }}-config"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["oauth-proxy-secret"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "parsec.name" . }}-app-access
+  namespace: {{ include "parsec.namespaceName" . }}
+  labels:
+    {{- include "parsec.labels" . | nindent 4 }}
+    component: oauth
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "parsec.name" . }}-app-access
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "parsec.serviceAccountName" . }}
+    namespace: {{ include "parsec.namespaceName" . }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "parsec.name" . }}-oauth
+  labels:
+    {{- include "parsec.labels" . | nindent 4 }}
+    component: oauth
+rules:
+  - apiGroups: ["oauth.openshift.io"]
+    resources: ["oauthclients"]
+    verbs: ["get", "list"]
+  - apiGroups: ["user.openshift.io"]
+    resources: ["users"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["users"]
+    verbs: ["get"]
+  - apiGroups: ["user.openshift.io"]
+    resources: ["groups"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "parsec.name" . }}-oauth-{{ include "parsec.namespaceName" . }}
+  labels:
+    {{- include "parsec.labels" . | nindent 4 }}
+    component: oauth
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "parsec.name" . }}-oauth
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "parsec.serviceAccountName" . }}
+    namespace: {{ include "parsec.namespaceName" . }}
+{{- end -}}

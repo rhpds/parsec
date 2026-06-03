@@ -1,0 +1,31 @@
+namespace:
+  create: true
+  name: parsec-dev-helm
+
+buildConfig:
+  gitBranch: main
+
+replicaCount: 1
+
+config:
+  vertex:
+    project_id: "itpc-gcp-product-all-claude"
+    region: us-east5
+
+pvc:
+  storageClass: ocs-storagecluster-cephfs
+  accessMode: ReadWriteMany
+
+oauth:
+  clientName: parsec-oauth-client-dev-helm
+
+ingressDomain: apps.ocpv-infra01.dal12.infra.demo.redhat.com
+
+mlflow:
+  deploy: true
+  namespace:
+    create: true
+    name: mlflow-dev-helm
+  oauth:
+    clientName: mlflow-dev-helm
+  ingressDomain: apps.ocpv-infra01.dal12.infra.demo.redhat.com

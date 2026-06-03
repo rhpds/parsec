@@ -1,0 +1,33 @@
+{{- if and .Values.deploy .Values.buildConfig.enabled -}}
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: {{ include "parsec.name" . }}
+  namespace: {{ include "parsec.namespaceName" . }}
+  labels:
+    {{- include "parsec.labels" . | nindent 4 }}
+    component: build
+spec:
+  source:
+    type: Git
+    git:
+      uri: https://github.com/{{ .Values.buildConfig.gitRepo }}.git
+      ref: {{ .Values.buildConfig.gitBranch }}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: dockerfiles/Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: {{ include "parsec.name" . }}:latest
+  runPolicy: Serial
+  successfulBuildsHistoryLimit: 5
+  failedBuildsHistoryLimit: 5
+  triggers:
+    - type: ConfigChange
+    - type: GitHub
+      github:
+        secretReference:
+          name: {{ .Values.buildConfig.webhookSecretName }}
+{{- end -}}

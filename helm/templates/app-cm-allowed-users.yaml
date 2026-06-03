@@ -1,0 +1,11 @@
+{{- if .Values.deploy -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "parsec.name" . }}-allowed-users
+  namespace: {{ include "parsec.namespaceName" . }}
+  labels:
+    {{- include "parsec.labels" . | nindent 4 }}
+data:
+  allowed-users: {{ .Values.auth.allowedUsers | quote }}
+{{- end -}}
