@@ -25,6 +25,11 @@ _FRONTMATTER_RE = re.compile(
 # Anthropic spec: name is "Lowercase + hyphens, matches folder"
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
+# Cap SKILL.md size before reading. Frontmatter + markdown is tiny, so 1 MiB is
+# very generous; the limit stops a giant file from an untrusted plugin_paths
+# mount being read whole into memory and OOMing the pod.
+MAX_SKILL_SIZE_BYTES = 1024 * 1024
+
 
 @dataclass(frozen=True)
 class SkillSource:
@@ -112,8 +117,25 @@ class SkillLoader:
                 logger.warning("Skill source %s is not a directory; skipping", source.root)
                 continue
             # Only check top-level children — skills are flat directories under root.
+            root_resolved = source.root.resolve()
             for child in sorted(source.root.iterdir()):
                 if not child.is_dir():
+                    continue
+                # iterdir() follows symlinks, so a symlinked child could point
+                # outside source.root (path traversal) — reject it. This is safe
+                # for ConfigMap-mounted skills: K8s symlinks the *files* inside a
+                # skill dir (SKILL.md -> ..data/SKILL.md), not the skill dir
+                # itself, and is_file() below follows those file symlinks.
+                if child.is_symlink():
+                    logger.warning("Skipping symlinked skill directory %s", child)
+                    continue
+                # Defense in depth: confirm the dir really resolves within the
+                # root, so loosening the symlink rule above can't reintroduce an
+                # escape.
+                try:
+                    child.resolve().relative_to(root_resolved)
+                except ValueError:
+                    logger.warning("Skipping skill directory outside source root: %s", child)
                     continue
                 if (child / "SKILL.md").is_file():
                     yield child, source
@@ -121,6 +143,12 @@ class SkillLoader:
     def _load_one(self, skill_dir: Path, source_label: str) -> SkillManifest:
         skill_md = skill_dir / "SKILL.md"
         try:
+            size = skill_md.stat().st_size
+            if size > MAX_SKILL_SIZE_BYTES:
+                raise SkillLoadError(
+                    skill_md,
+                    f"SKILL.md too large ({size} bytes, limit {MAX_SKILL_SIZE_BYTES} bytes)",
+                )
             raw = skill_md.read_text(encoding="utf-8")
         except OSError as e:
             raise SkillLoadError(skill_md, f"cannot read file: {e}") from e

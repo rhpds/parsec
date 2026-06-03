@@ -71,6 +71,28 @@ def test_load_all_skips_when_source_root_is_a_file(tmp_path: Path):
     assert loader.load_all() == []
 
 
+def test_symlinked_skill_directory_is_skipped(tmp_path: Path):
+    """A symlinked child dir is skipped — iterdir() follows symlinks, so this
+    guards against path traversal out of source.root."""
+    # A real, valid skill living outside the source root...
+    external = tmp_path / "external" / "escapee"
+    external.mkdir(parents=True)
+    (external / "SKILL.md").write_text(
+        "---\nname: escapee\ndescription: only reachable through a symlink escape out of root\n---\n"
+    )
+    root = tmp_path / "root"
+    root.mkdir()
+    # ...reachable from inside the root only via a symlink.
+    link = root / "escapee"
+    try:
+        link.symlink_to(external, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("platform does not support directory symlinks")
+
+    loader = SkillLoader([SkillSource(label="plugin", root=root)])
+    assert loader.load_all() == []
+
+
 # ----- parsing & validation ---------------------------------------------
 
 
@@ -192,6 +214,25 @@ def test_name_folder_mismatch_warns(tmp_path: Path):
     manifests = loader.load_all()
     assert len(manifests) == 1
     assert any("does not match folder name" in w for w in manifests[0].warnings)
+
+
+def test_oversized_skill_md_is_rejected(tmp_path: Path):
+    """A SKILL.md above the size cap is rejected rather than read whole into memory."""
+    from src.skills.loader import MAX_SKILL_SIZE_BYTES
+
+    skill_dir = tmp_path / "huge"
+    skill_dir.mkdir()
+    padding = "x" * (MAX_SKILL_SIZE_BYTES + 1)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: huge\ndescription: an enormous skill file that exceeds the size limit\n---\n{padding}"
+    )
+
+    loader = SkillLoader([SkillSource(label="project", root=tmp_path)])
+    # Forgiving mode drops it...
+    assert loader.load_all() == []
+    # ...strict mode surfaces it loudly.
+    with pytest.raises(SkillLoadError):
+        loader.load_strict()
 
 
 def test_short_description_warns(tmp_path: Path):
