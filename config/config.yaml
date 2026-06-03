@@ -142,6 +142,20 @@ debug:
   # data/debug/ as JSON before each API call. Useful for prompt inspection.
   dump_prompts: false
 
+skills:
+  # Discovery roots for agent skills (SKILL.md directories).
+  # See src/skills/loader.py and docs/migration/agent-sdk-plan.md.
+  #
+  # project_root: path (relative to cwd) for in-repo skills that ship with Parsec
+  project_root: "skills"
+  # plugin_paths: additional roots, typically mounted from external skill repos
+  # (e.g. rhdp-rca-plugin). Listed paths are scanned for SKILL.md directories.
+  plugin_paths: []
+  #   - "/opt/rhdp-rca-plugin/skills"
+  # user_root: per-user skill directory for local dev only.
+  # Leave empty in production deploys.
+  user_root: ""
+
 auth:
   # Comma-separated list of allowed OpenShift groups (from X-Forwarded-Groups)
   # When set, only users in these groups (or in allowed_users) can access Parsec

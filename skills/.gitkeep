@@ -1,0 +1,2 @@
+# Project-level skills root. Drop SKILL.md directories here and they'll be
+# discovered automatically by src.skills.loader.SkillLoader.
