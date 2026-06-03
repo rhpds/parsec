@@ -1,0 +1,65 @@
+deploy: false
+
+namespace:
+  create: true
+  name: mlflow
+
+nameOverride: ""
+fullnameOverride: ""
+
+mlflow:
+  image:
+    repository: ghcr.io/mlflow/mlflow
+    tag: v2.12.2
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+postgres:
+  image:
+    repository: registry.redhat.io/rhel9/postgresql-15
+    tag: latest
+  storage:
+    class: ocs-storagecluster-ceph-rbd
+    size: 10Gi
+  database: mlflow
+  username: mlflow
+
+s3:
+  storageClass: openshift-storage.noobaa.io
+  bucketName: mlflow-artifacts
+
+secrets:
+  oauthProxy: mlflow-oauth-proxy
+
+oauth:
+  enabled: true
+  clientName: mlflow-mlflow
+  clientSecret: "UynCQaEMPbN6ZoltqSpVQD2vItEDuRpg"
+  image:
+    repository: registry.redhat.io/openshift4/ose-oauth-proxy-rhel9
+    tag: latest
+  groups:
+    - rhpds-admins
+    - ace-octo-team
+
+api:
+  enabled: true
+  image:
+    repository: nginxinc/nginx-unprivileged
+    tag: 1.27-alpine
+  username: mlflow-api
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+ingressDomain: ""

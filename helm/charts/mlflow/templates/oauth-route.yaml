@@ -1,0 +1,20 @@
+{{- if and .Values.deploy .Values.oauth.enabled .Values.ingressDomain -}}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: mlflow-route
+  namespace: {{ include "mlflow.namespaceName" . }}
+  labels:
+    {{- include "mlflow.labels" . | nindent 4 }}
+    component: frontend
+spec:
+  host: {{ include "mlflow.externalHostname" . }}
+  to:
+    kind: Service
+    name: mlflow-oauth-proxy
+    weight: 100
+  port:
+    targetPort: https
+  tls:
+    termination: reencrypt
+{{- end -}}

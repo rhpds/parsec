@@ -1,0 +1,22 @@
+{{- if and .Values.deploy .Values.oauth.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow-oauth-proxy
+  namespace: {{ include "mlflow.namespaceName" . }}
+  labels:
+    {{- include "mlflow.labels" . | nindent 4 }}
+    component: oauth-proxy
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: mlflow-serving-cert
+spec:
+  type: ClusterIP
+  selector:
+    app: mlflow
+    component: oauth-proxy
+  ports:
+    - name: https
+      port: 8443
+      targetPort: 8443
+      protocol: TCP
+{{- end -}}

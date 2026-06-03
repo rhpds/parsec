@@ -1,0 +1,27 @@
+MLflow Tracking Server has been deployed to namespace: {{ include "mlflow.namespaceName" . }}
+
+Components:
+  - PostgreSQL database (mlflow-postgres)
+  - MLflow tracking server (mlflow-tracking:5000)
+  - S3 artifact storage via ObjectBucketClaim ({{ .Values.s3.bucketName }})
+{{- if .Values.oauth.enabled }}
+  - OAuth proxy (mlflow-oauth-proxy:8443)
+{{- end }}
+{{- if .Values.api.enabled }}
+  - API proxy with basic auth (mlflow-api-proxy:8080)
+{{- end }}
+
+{{- if and .Values.oauth.enabled .Values.ingressDomain }}
+
+Web UI (OAuth):
+  https://mlflow.{{ .Values.ingressDomain }}
+{{- end }}
+
+{{- if and .Values.api.enabled .Values.ingressDomain }}
+
+API endpoint (basic auth):
+  https://mlflow-api.{{ .Values.ingressDomain }}
+{{- end }}
+
+Internal access from other namespaces:
+  http://mlflow-tracking.{{ include "mlflow.namespaceName" . }}.svc:5000
