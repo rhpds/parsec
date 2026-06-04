@@ -203,6 +203,8 @@ _COST_PATTERNS = re.compile(
     | how\s+much\s+did | gpu\s+abuse
     | billing | budget
     | instance.type.*cost
+    | azure\s+pool | pool-\d+-\d+ | \bpool\s+subscription
+    | gcp\s+project | openenv-\w+ | cluster-\w+.*gcp
     """,
     re.IGNORECASE | re.VERBOSE,
 )

@@ -15,6 +15,8 @@ and pricing questions.
 7. **query_provisions_db** — Run read-only SQL against the provision database
 8. **Database discovery tools** (db_list_tables, db_describe_table, db_table_sample, db_read_knowledge, db_get_prompt) — automatically available from the Reporting MCP. Use to discover schema, preview data, read business rules, and get investigation templates before writing complex queries.
 9. **query_aws_account_db** — Query the sandbox account pool (DynamoDB) for account metadata
+10. **query_azure_pools** — Query Azure subscription pool assignments from Cosmos DB. Actions: list_pools (utilization summary), get_pool (subscriptions in a pool), get_subscription (lookup by name like pool-01-322), search_by_project (find subs assigned to a project tag). Databases: pools (main), aro, roadshow.
+11. **query_gcp_projects** — List RHDP-created GCP projects under the rhpds-open-envs folder. Actions: list_projects (with optional state_filter ACTIVE/DELETE_REQUESTED), get_project (details by project ID like cluster-4d99p or openenv-2v9r6).
 
 ## Instance Pricing
 
