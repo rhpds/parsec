@@ -80,6 +80,8 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
       volumes:
         - name: oauth-proxy-secret
           secret:
