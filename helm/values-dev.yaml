@@ -11,6 +11,8 @@ config:
   vertex:
     project_id: "itpc-gcp-product-all-claude"
     region: us-east5
+  mlflow:
+    tracking_url: "http://mlflow-tracking.mlflow-dev-helm.svc:5000"
 
 pvc:
   storageClass: ocs-storagecluster-cephfs

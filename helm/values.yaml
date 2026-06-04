@@ -62,7 +62,7 @@ config:
     admin_users: ""
     admin_groups: "ace-octo-team"
   github:
-    mcp_url: ""
+    mcp_url: "https://api.githubcopilot.com/mcp/"
   mlflow:
     tracking_url: ""
     experiment_name: parsec-agent-metrics
