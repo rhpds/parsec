@@ -59,7 +59,8 @@ config:
   cloudtrail:
     event_data_store_id: ""
   learnings:
-    admin_users: []
+    admin_users: ""
+    admin_groups: "ace-octo-team"
   github:
     mcp_url: ""
   mlflow:

@@ -28,4 +28,6 @@ mlflow:
     name: mlflow-dev-helm
   oauth:
     clientName: mlflow-dev-helm
+  parsecNamespaces:
+    - parsec-dev-helm
   ingressDomain: apps.ocpv-infra01.dal12.infra.demo.redhat.com

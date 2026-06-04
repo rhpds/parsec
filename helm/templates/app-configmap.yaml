@@ -29,8 +29,8 @@ data:
     cloudtrail:
       event_data_store_id: {{ .Values.config.cloudtrail.event_data_store_id | quote }}
     learnings:
-      admin_users:
-        {{- toYaml .Values.config.learnings.admin_users | nindent 8 }}
+      admin_users: {{ .Values.config.learnings.admin_users | quote }}
+      admin_groups: {{ .Values.config.learnings.admin_groups | quote }}
     github:
       mcp_url: {{ .Values.config.github.mcp_url | quote }}
     mlflow:

@@ -10,7 +10,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["configmaps"]
-    resourceNames: ["{{ include "parsec.name" . }}-allowed-users", "{{ include "parsec.name" . }}-config"]
+    resourceNames: ["{{ include "parsec.name" . }}-config"]
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["secrets"]
