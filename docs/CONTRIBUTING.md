@@ -120,7 +120,13 @@ helm template parsec helm/ \
   | oc delete -f -
 ```
 
-Environment overrides go in `helm/values-dev.yaml` (only values that differ from `helm/values.yaml` defaults). Secrets are managed via BitwardenSyncSecret — create them in the Bitwarden `parsec` project before deploying.
+Environment overrides go in `helm/values-dev.yaml` (only values that differ from `helm/values.yaml` defaults).
+
+**Prerequisites:**
+
+- Secrets are managed via BitwardenSyncSecret — create them in the Bitwarden `parsec` project before deploying
+- The `oauth.clientSecret` in `helm/values.yaml` must match the `client_secret` field in the `parsec-oauth-proxy` Bitwarden secret
+- For a new environment, generate a new OAuth client secret and store it in both Bitwarden and `values.yaml` (or pass via `--set oauth.clientSecret=...`)
 
 **Method 2: Ansible (legacy)**
 

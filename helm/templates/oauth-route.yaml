@@ -1,4 +1,4 @@
-{{- if and .Values.deploy .Values.oauth.enabled .Values.route.enabled -}}
+{{- if and .Values.deploy .Values.oauth.enabled .Values.route.enabled .Values.ingressDomain -}}
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:

@@ -62,4 +62,8 @@ api:
       cpu: 100m
       memory: 128Mi
 
+parsecNamespaces:
+  - parsec
+  - parsec-dev
+
 ingressDomain: ""

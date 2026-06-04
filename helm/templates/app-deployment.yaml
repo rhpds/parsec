@@ -46,6 +46,8 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
 
         - name: seed-azure-billing
           image: {{ include "parsec.image" . }}
@@ -57,6 +59,8 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
 
       containers:
         - name: parsec
@@ -138,6 +142,8 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
 
         {{- if .Values.icinga.enabled }}
         - name: icinga-mcp
@@ -157,6 +163,8 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
         {{- end }}
 
       volumes:

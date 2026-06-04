@@ -11,7 +11,7 @@ spec:
   source:
     type: Git
     git:
-      uri: https://github.com/{{ .Values.buildConfig.gitRepo }}.git
+      uri: https://github.com/{{ required "buildConfig.gitRepo is required" .Values.buildConfig.gitRepo }}.git
       ref: {{ .Values.buildConfig.gitBranch }}
   strategy:
     type: Docker

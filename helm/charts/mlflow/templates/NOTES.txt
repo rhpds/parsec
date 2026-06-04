@@ -14,13 +14,13 @@ Components:
 {{- if and .Values.oauth.enabled .Values.ingressDomain }}
 
 Web UI (OAuth):
-  https://mlflow.{{ .Values.ingressDomain }}
+  https://{{ include "mlflow.externalHostname" . }}
 {{- end }}
 
 {{- if and .Values.api.enabled .Values.ingressDomain }}
 
 API endpoint (basic auth):
-  https://mlflow-api.{{ .Values.ingressDomain }}
+  https://{{ include "mlflow.externalApiHostname" . }}
 {{- end }}
 
 Internal access from other namespaces:

@@ -16,12 +16,11 @@ spec:
     - Ingress
   ingress:
     - from:
+        {{- range .Values.parsecNamespaces }}
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: parsec-dev
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: parsec
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
       ports:
         - protocol: TCP
           port: 5000

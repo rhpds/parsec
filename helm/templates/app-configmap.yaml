@@ -38,6 +38,8 @@ data:
       experiment_name: {{ .Values.config.mlflow.experiment_name | quote }}
     reporting_mcp:
       mcp_url: {{ .Values.config.reporting_mcp.mcp_url | quote }}
+    alert_api_key: ""
     auth:
       allowed_groups: {{ .Values.auth.allowedGroups | quote }}
+      allowed_users: {{ .Values.auth.allowedUsers | quote }}
 {{- end -}}

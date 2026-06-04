@@ -1,4 +1,4 @@
-{{- if and .Values.deploy .Values.oauth.enabled .Values.oauth.clientSecret -}}
+{{- if and .Values.deploy .Values.oauth.enabled .Values.oauth.clientSecret .Values.ingressDomain -}}
 apiVersion: oauth.openshift.io/v1
 kind: OAuthClient
 metadata:

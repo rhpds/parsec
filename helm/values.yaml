@@ -41,17 +41,18 @@ config:
     host: "0.0.0.0"
     log_level: INFO
   anthropic:
+    backend: vertex
     model: "claude-sonnet-4@20250514"
-    max_tokens: 8192
-    max_tool_rounds: 30
+    max_tokens: 4096
+    max_tool_rounds: 10
   vertex:
     project_id: ""
-    region: us-east4
+    region: us-east5
   provision_db:
     max_rows: 500
   aws:
     region: us-east-1
-    batch_size: 50
+    batch_size: 100
   cost_monitor:
     api_url: "http://cost-data-service.cost-monitor.svc:8000"
     dashboard_url: ""
@@ -63,9 +64,9 @@ config:
     mcp_url: ""
   mlflow:
     tracking_url: ""
-    experiment_name: parsec
+    experiment_name: parsec-agent-metrics
   reporting_mcp:
-    mcp_url: "http://reporting-mcp.demo-reporting.svc:8080/mcp"
+    mcp_url: "http://reporting-mcp.demo-reporting.svc:8080/mcp/"
 
 # === Auth ===
 auth:
@@ -154,7 +155,7 @@ secrets:
 # === Storage ===
 pvc:
   storageClass: ""
-  accessMode: ReadWriteOnce
+  accessMode: ReadWriteMany
   size: 10Gi
 
 # === CronJobs ===
