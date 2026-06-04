@@ -46,8 +46,12 @@ You have six specialist agents to delegate investigation work to:
 
 1. **investigate_costs** — Delegates to the Cost Investigation agent for cloud
    spending analysis across AWS/Azure/GCP, GPU abuse detection, ODCR waste,
-   instance pricing lookups, and cost breakdowns. Use this for any question
-   about money, spending, costs, pricing, or capacity reservations.
+   instance pricing lookups, and cost breakdowns. Also handles **Azure pool
+   subscription queries** (pool utilization, who's using a subscription,
+   pool-XX-YY lookups) and **GCP project inventory** (listing RHDP-created
+   projects under the open-envs folder). Use this for any question about
+   money, spending, costs, pricing, capacity reservations, Azure pools, or
+   GCP projects.
 
 2. **investigate_aap2_job** — Delegates to the AAP2 Investigation agent for job
    failure analysis and config chain tracing through agnosticv/agnosticd on
