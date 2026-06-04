@@ -49,10 +49,12 @@ from src.tools.aws_capacity_manager import query_aws_capacity_manager
 from src.tools.aws_costs import query_aws_costs
 from src.tools.aws_pricing import query_aws_pricing
 from src.tools.azure_costs import query_azure_costs
+from src.tools.azure_pools import query_azure_pools
 from src.tools.babylon import query_babylon_catalog
 from src.tools.cloudtrail import query_cloudtrail
 from src.tools.cost_monitor import query_cost_monitor
 from src.tools.gcp_costs import query_gcp_costs
+from src.tools.gcp_projects import query_gcp_projects
 from src.tools.github_files import (
     fetch_github_file,
     lookup_catalog_item,
@@ -139,6 +141,24 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:  # noqa: C901
             end_date=tool_input["end_date"],
             subscription_names=tool_input.get("subscription_names"),
             meter_filter=tool_input.get("meter_filter"),
+        )
+
+    elif tool_name == "query_azure_pools":
+        return await query_azure_pools(
+            action=tool_input["action"],
+            pool_id=tool_input.get("pool_id"),
+            subscription_name=tool_input.get("subscription_name"),
+            project_tag=tool_input.get("project_tag"),
+            database=tool_input.get("database", "pools"),
+            max_results=tool_input.get("max_results", 100),
+        )
+
+    elif tool_name == "query_gcp_projects":
+        return await query_gcp_projects(
+            action=tool_input["action"],
+            project_id=tool_input.get("project_id"),
+            state_filter=tool_input.get("state_filter"),
+            max_results=tool_input.get("max_results", 100),
         )
 
     elif tool_name == "query_gcp_costs":
@@ -416,6 +436,46 @@ def _build_client(cfg) -> anthropic.Anthropic | AnthropicVertex | AnthropicBedro
 def _estimate_tokens(obj) -> int:
     """Rough token estimate: ~4 chars per token."""
     return len(json.dumps(obj, default=str)) // 4
+
+
+MAX_TOOL_RESULT_CHARS = 100_000
+
+
+def _cap_tool_result(result_str: str) -> str:
+    """Cap a JSON tool result string to prevent blowing the context window.
+
+    Tries to intelligently truncate list fields first; falls back to hard
+    truncation if the result is still too large.
+    """
+    if len(result_str) <= MAX_TOOL_RESULT_CHARS:
+        return result_str
+
+    try:
+        data = json.loads(result_str)
+    except (json.JSONDecodeError, TypeError):
+        return result_str[:MAX_TOOL_RESULT_CHARS] + "\n... [truncated — result too large]"
+
+    if isinstance(data, dict):
+        for key in ("rows", "results", "items", "subscriptions", "projects", "events"):
+            if key in data and isinstance(data[key], list) and len(data[key]) > 20:
+                original_len = len(data[key])
+                data[key] = data[key][:20]
+                data["_truncated"] = f"{key} capped from {original_len} to 20 items"
+                capped = json.dumps(data, default=str)
+                if len(capped) <= MAX_TOOL_RESULT_CHARS:
+                    return capped
+
+        if "result" in data and isinstance(data["result"], str) and len(data["result"]) > 10_000:
+            data["result"] = data["result"][:10_000] + "\n... [truncated]"
+            data["_truncated"] = "result field capped at 10000 chars"
+            capped = json.dumps(data, default=str)
+            if len(capped) <= MAX_TOOL_RESULT_CHARS:
+                return capped
+
+    return (
+        json.dumps(data, default=str)[:MAX_TOOL_RESULT_CHARS]
+        + "\n... [truncated — result too large]"
+    )
 
 
 def _trim_history(history: list, max_tokens: int = 150000) -> list:
@@ -836,7 +896,7 @@ async def _handle_direct_tool(
         {
             "type": "tool_result",
             "tool_use_id": tool_block.id,
-            "content": json.dumps(result),
+            "content": _cap_tool_result(json.dumps(result)),
         },
     )
 
@@ -1321,7 +1381,7 @@ async def run_alert_investigation(
                     {
                         "type": "tool_result",
                         "tool_use_id": tool_block.id,
-                        "content": json.dumps(result, default=str),
+                        "content": _cap_tool_result(json.dumps(result, default=str)),
                     }
                 )
 

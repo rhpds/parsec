@@ -18,6 +18,12 @@ vertex_region: "us-east5"
 # AWS
 aws_region: "us-east-1"
 
+# Azure Cosmos DB (pool management)
+azure_cosmos_endpoint: "https://appreglist.documents.azure.com:443/"
+
+# GCP
+gcp_open_envs_folder_id: "178296823511"
+
 # OAuth
 oauth_allowed_groups: "rhpds-admins,parsec-local-users,ace-octo-team"
 

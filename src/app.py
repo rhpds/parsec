@@ -11,6 +11,7 @@ from src.config import get_config
 from src.connections.aap2 import init_aap2
 from src.connections.aws import init_aws
 from src.connections.azure import init_azure
+from src.connections.azure_cosmos import init_azure_cosmos
 from src.connections.babylon import init_babylon
 from src.connections.gcp import init_gcp
 from src.connections.github_mcp import init_github_mcp
@@ -46,6 +47,7 @@ async def lifespan(app: FastAPI):
     for name, init_fn in [
         ("AWS", init_aws),
         ("Azure", init_azure),
+        ("Azure Cosmos", init_azure_cosmos),
         ("GCP", init_gcp),
         ("Babylon", init_babylon),
         ("OCPV", init_ocpv),

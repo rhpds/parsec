@@ -34,10 +34,15 @@ azure:
   storage_account: ""
   container: ""
 
+azure_cosmos:
+  endpoint: ""
+  key: ""
+
 gcp:
   project_id: ""
   billing_dataset: ""
   billing_account_id: ""
+  open_envs_folder_id: ""
 
 cost_monitor:
   # Internal API URL (cross-namespace within OpenShift cluster)

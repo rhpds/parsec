@@ -372,7 +372,7 @@ async def run_sub_agent(  # noqa: C901
     Returns:
         Structured result dict with summary, findings, and metadata.
     """
-    from src.agent.orchestrator import _build_client, _trim_history
+    from src.agent.orchestrator import _build_client, _cap_tool_result, _trim_history
 
     start = _time.monotonic()
     agent_cfg = AGENTS.get(agent_type)
@@ -606,7 +606,7 @@ async def run_sub_agent(  # noqa: C901
                 {
                     "type": "tool_result",
                     "tool_use_id": tool_block.id,
-                    "content": json.dumps(result, default=str),
+                    "content": _cap_tool_result(json.dumps(result, default=str)),
                 }
             )
 
@@ -665,6 +665,7 @@ async def run_sub_agent_streaming(  # noqa: C901
         _UNCACHEABLE_TOOLS,
         _build_client,
         _cache_key,
+        _cap_tool_result,
         _execute_tool,
         _tool_cache,
         _trim_history,
@@ -958,7 +959,7 @@ async def run_sub_agent_streaming(  # noqa: C901
                     {
                         "type": "tool_result",
                         "tool_use_id": tool_block.id,
-                        "content": json.dumps(result),
+                        "content": _cap_tool_result(json.dumps(result)),
                     }
                 )
 
