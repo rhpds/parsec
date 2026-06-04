@@ -1,0 +1,118 @@
+---
+# Create and configure a dedicated GCP service account for Parsec.
+#
+# Grants:
+#   - BigQuery Job User (run billing queries)
+#   - BigQuery Data Viewer on billing dataset
+#   - Billing Viewer (billing account access)
+#   - Browser on rhpds-open-envs folder (list RHDP-created projects)
+#
+# Idempotent — safe to run repeatedly. Skips key creation if key file exists.
+#
+# Prerequisites:
+#   - gcloud CLI authenticated with sufficient IAM permissions
+#   - GCP project rhpds-345620 access
+#
+# Usage:
+#   ansible-playbook playbooks/deploy.yaml -e env=dev --tags gcp-sa
+
+- name: Set GCP SA variables
+  ansible.builtin.set_fact:
+    _gcp_project: "rhpds-345620"
+    _gcp_sa_name: "parsec"
+    _gcp_sa_email: "parsec@rhpds-345620.iam.gserviceaccount.com"
+    _gcp_billing_account: "018E14-C10C66-5F7BC2"
+    _gcp_open_envs_folder: "178296823511"
+    _gcp_billing_dataset: "billing_export"
+    _gcp_sa_key_path: "{{ lookup('env', 'HOME') }}/secrets/parsec-gcp-sa.json"
+
+- name: Create Parsec GCP service account
+  ansible.builtin.command:
+    cmd: >
+      gcloud iam service-accounts create {{ _gcp_sa_name }}
+      --display-name="Parsec Service Account"
+      --description="Service account for Parsec cost investigation tool"
+      --project={{ _gcp_project }}
+  register: _sa_create
+  changed_when: _sa_create.rc == 0
+  failed_when: _sa_create.rc != 0 and 'already exists' not in _sa_create.stderr
+  ignore_errors: true
+
+- name: Grant BigQuery Job User on project
+  ansible.builtin.command:
+    cmd: >
+      gcloud projects add-iam-policy-binding {{ _gcp_project }}
+      --member=serviceAccount:{{ _gcp_sa_email }}
+      --role=roles/bigquery.jobUser
+      --condition=None
+      --quiet
+  changed_when: true
+
+- name: Grant BigQuery Data Viewer on project
+  ansible.builtin.command:
+    cmd: >
+      gcloud projects add-iam-policy-binding {{ _gcp_project }}
+      --member=serviceAccount:{{ _gcp_sa_email }}
+      --role=roles/bigquery.dataViewer
+      --condition=None
+      --quiet
+  changed_when: true
+
+- name: Grant Billing Viewer on billing account
+  ansible.builtin.command:
+    cmd: >
+      gcloud billing accounts add-iam-policy-binding {{ _gcp_billing_account }}
+      --member=serviceAccount:{{ _gcp_sa_email }}
+      --role=roles/billing.viewer
+      --quiet
+  changed_when: true
+
+- name: Grant Browser on rhpds-open-envs folder
+  ansible.builtin.command:
+    cmd: >
+      gcloud resource-manager folders add-iam-policy-binding {{ _gcp_open_envs_folder }}
+      --member=serviceAccount:{{ _gcp_sa_email }}
+      --role=roles/browser
+      --quiet
+  changed_when: true
+
+- name: Check if SA key already exists
+  ansible.builtin.stat:
+    path: "{{ _gcp_sa_key_path }}"
+  register: _sa_key_file
+
+- name: Create SA key
+  ansible.builtin.command:
+    cmd: >
+      gcloud iam service-accounts keys create {{ _gcp_sa_key_path }}
+      --iam-account={{ _gcp_sa_email }}
+  when: not _sa_key_file.stat.exists
+  changed_when: true
+
+- name: Set key file permissions
+  ansible.builtin.file:
+    path: "{{ _gcp_sa_key_path }}"
+    mode: "0600"
+  when: not _sa_key_file.stat.exists
+
+- name: Create gcp-billing-credentials secret from Parsec SA key
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    context: "{{ kubeconfig_context | default(omit) }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: gcp-billing-credentials
+        namespace: "{{ target_namespace }}"
+      type: Opaque
+      data:
+        service-account.json: "{{ lookup('file', _gcp_sa_key_path) | b64encode }}"
+
+- name: Display GCP SA info
+  ansible.builtin.debug:
+    msg: |
+      GCP Service Account: {{ _gcp_sa_email }}
+      Key file: {{ _gcp_sa_key_path }}
+      Roles: bigquery.jobUser, bigquery.dataViewer, billing.viewer, browser (folder {{ _gcp_open_envs_folder }})

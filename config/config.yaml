@@ -34,10 +34,15 @@ azure:
   storage_account: ""
   container: ""
 
+azure_cosmos:
+  endpoint: ""
+  key: ""
+
 gcp:
   project_id: ""
   billing_dataset: ""
   billing_account_id: ""
+  open_envs_folder_id: ""
 
 cost_monitor:
   # Internal API URL (cross-namespace within OpenShift cluster)
@@ -141,6 +146,35 @@ debug:
   # Write the full LLM request payload (system prompt, messages, tools) to
   # data/debug/ as JSON before each API call. Useful for prompt inspection.
   dump_prompts: false
+
+agent:
+  # Which LLM runtime drives the orchestrator + sub-agents.
+  #   legacy — direct anthropic SDK (today's default, unchanged behavior)
+  #   sdk    — Claude Agent SDK (experimental; requires `pip install claude-agent-sdk`)
+  # See artifacts/parsec-agent-sdk-migration-plan.md for the migration plan.
+  runtime: "legacy"
+  # SDK-specific overrides (only honored when runtime: sdk)
+  sdk:
+    # model: ""          # falls back to anthropic.model
+    # max_turns: 10      # falls back to anthropic.max_tool_rounds
+    # cwd: ""            # working directory for the SDK subprocess (default: pwd)
+    setting_sources: ["project"]   # where the SDK discovers SKILL.md files
+    env: {}              # extra env vars merged into the subprocess (e.g. OTel)
+    timeout: 300         # per-call wall-clock ceiling (seconds); null/0 disables
+
+skills:
+  # Discovery roots for agent skills (SKILL.md directories).
+  # See src/skills/loader.py and docs/migration/agent-sdk-plan.md.
+  #
+  # project_root: path (relative to cwd) for in-repo skills that ship with Parsec
+  project_root: "skills"
+  # plugin_paths: additional roots, typically mounted from external skill repos
+  # (e.g. rhdp-rca-plugin). Listed paths are scanned for SKILL.md directories.
+  plugin_paths: []
+  #   - "/opt/rhdp-rca-plugin/skills"
+  # user_root: per-user skill directory for local dev only.
+  # Leave empty in production deploys.
+  user_root: ""
 
 auth:
   # Comma-separated list of allowed OpenShift groups (from X-Forwarded-Groups)

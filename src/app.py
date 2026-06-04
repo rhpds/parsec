@@ -11,6 +11,7 @@ from src.config import get_config
 from src.connections.aap2 import init_aap2
 from src.connections.aws import init_aws
 from src.connections.azure import init_azure
+from src.connections.azure_cosmos import init_azure_cosmos
 from src.connections.babylon import init_babylon
 from src.connections.gcp import init_gcp
 from src.connections.github_mcp import init_github_mcp
@@ -28,6 +29,7 @@ from src.routes.learnings import router as learnings_router
 from src.routes.query import router as query_router
 from src.routes.share import ensure_shares_dir
 from src.routes.share import router as share_router
+from src.routes.skills import router as skills_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,6 +47,7 @@ async def lifespan(app: FastAPI):
     for name, init_fn in [
         ("AWS", init_aws),
         ("Azure", init_azure),
+        ("Azure Cosmos", init_azure_cosmos),
         ("GCP", init_gcp),
         ("Babylon", init_babylon),
         ("OCPV", init_ocpv),
@@ -101,6 +104,7 @@ app.include_router(share_router)
 app.include_router(conversations_router)
 app.include_router(learnings_router)
 app.include_router(debug_router)
+app.include_router(skills_router)
 
 # Serve static frontend files
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

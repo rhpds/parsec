@@ -190,6 +190,94 @@ TOOLS = [
         },
     },
     {
+        "name": "query_azure_pools",
+        "description": (
+            "Query Azure subscription pool assignments from the pool management "
+            "database (Cosmos DB). Use this to check pool utilization, find which "
+            "subscriptions are in use, look up a specific subscription's assignment, "
+            "or find all subscriptions assigned to a project. Pools contain Azure "
+            "subscriptions that are allocated to RHDP provisioning projects. "
+            "Databases: 'pools' (main pool), 'aro' (ARO clusters), 'roadshow' (events)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list_pools", "get_pool", "get_subscription", "search_by_project"],
+                    "description": (
+                        "list_pools: Summary of all pools with total/in-use/available counts. "
+                        "get_pool: All subscriptions in a specific pool with status. "
+                        "get_subscription: Look up a specific subscription by name. "
+                        "search_by_project: Find all subscriptions assigned to a project tag."
+                    ),
+                },
+                "pool_id": {
+                    "type": "string",
+                    "description": "Pool ID for get_pool (e.g. '00', '01', '03').",
+                },
+                "subscription_name": {
+                    "type": "string",
+                    "description": "Subscription name for get_subscription (e.g. 'pool-01-273').",
+                },
+                "project_tag": {
+                    "type": "string",
+                    "description": (
+                        "Project tag for search_by_project (e.g. 'sandbox-api', "
+                        "'open-environment-azure-subscription-kqtqz')."
+                    ),
+                },
+                "database": {
+                    "type": "string",
+                    "enum": ["pools", "aro", "roadshow"],
+                    "description": "Cosmos DB database to query. Default: 'pools'.",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Max results to return. Default: 100, max: 500.",
+                },
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "query_gcp_projects",
+        "description": (
+            "List GCP projects created by RHDP under the rhpds-open-envs folder. "
+            "These are dynamically created projects for open environments and "
+            "OCP clusters (e.g. 'openenv-2v9r6', 'cluster-4d99p'). Use this to "
+            "check what GCP projects exist, their state (ACTIVE vs DELETE_REQUESTED), "
+            "and labels."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list_projects", "get_project"],
+                    "description": (
+                        "list_projects: List all projects in the folder with state and labels. "
+                        "get_project: Get details for a specific project by ID."
+                    ),
+                },
+                "project_id": {
+                    "type": "string",
+                    "description": "GCP project ID for get_project (e.g. 'cluster-4d99p').",
+                },
+                "state_filter": {
+                    "type": "string",
+                    "enum": ["ACTIVE", "DELETE_REQUESTED"],
+                    "description": "Filter projects by state. Default: all states.",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Max results to return. Default: 100, max: 500.",
+                },
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "query_aws_pricing",
         "description": (
             "Look up on-demand pricing for an AWS EC2 instance type. "
@@ -1327,7 +1415,9 @@ def get_cost_tools() -> list[dict]:
     return _tools_by_name(
         "query_aws_costs",
         "query_azure_costs",
+        "query_azure_pools",
         "query_gcp_costs",
+        "query_gcp_projects",
         "query_aws_pricing",
         "query_cost_monitor",
         "query_aws_capacity_manager",

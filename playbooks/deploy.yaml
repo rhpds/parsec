@@ -70,6 +70,13 @@
           tags: [mgmt-rbac, apply]
       tags: [mgmt-rbac, apply]
 
+    - name: Configure GCP service account
+      ansible.builtin.include_tasks:
+        file: tasks/gcp-sa.yml
+        apply:
+          tags: [gcp-sa]
+      tags: [gcp-sa]
+
     - name: Create secrets
       ansible.builtin.include_tasks:
         file: tasks/secrets.yml
