@@ -77,14 +77,17 @@ Otherwise, build the image URI from repository + version/tag.
 {{- define "parsec.image" -}}
 {{- if and .Values.buildConfig.enabled (not .Values.image.repository) -}}
 {{- printf "%s:latest" (include "parsec.name" .) -}}
-{{- else if eq .Values.version "main" -}}
-{{- printf "%s:latest" .Values.image.repository -}}
-{{- else if eq (default "" .Values.image.tagOverride) "-" -}}
-{{- .Values.image.repository -}}
-{{- else if .Values.image.tagOverride -}}
-{{- printf "%s:%s" .Values.image.repository .Values.image.tagOverride -}}
 {{- else -}}
-{{- printf "%s:%s" .Values.image.repository .Values.version -}}
+{{- $repo := required "image.repository is required when buildConfig.enabled is false" .Values.image.repository -}}
+{{- if eq .Values.version "main" -}}
+{{- printf "%s:latest" $repo -}}
+{{- else if eq (default "" .Values.image.tagOverride) "-" -}}
+{{- $repo -}}
+{{- else if .Values.image.tagOverride -}}
+{{- printf "%s:%s" $repo .Values.image.tagOverride -}}
+{{- else -}}
+{{- printf "%s:%s" $repo .Values.version -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 

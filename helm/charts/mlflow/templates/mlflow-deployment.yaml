@@ -1,4 +1,7 @@
 {{- if .Values.deploy -}}
+{{/* NOTE: On fresh install, this Deployment will show CreateContainerConfigError for 10-30s
+     while the NooBaa OBC controller provisions the S3 bucket and creates the mlflow-artifacts
+     ConfigMap/Secret. This is expected and self-healing. */}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
