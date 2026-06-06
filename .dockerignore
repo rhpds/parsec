@@ -1,0 +1,24 @@
+.git/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+playbooks/
+helm/
+docs/
+tests/
+.github/
+.cursor/
+logs/
+plans/
+# Exclude docs but keep agent system prompts (loaded at runtime)
+*.md
+!config/prompts/*.md
+!config/prompts/**/*.md
+data/reports/
+data/debug/
+config/config.local.yaml
+.env
+**/*.kubeconfig
