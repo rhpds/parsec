@@ -16,6 +16,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.llm.sdk_tracing import build_tracing_env
 from src.llm.types import SdkResult, SdkUsage
 
 logger = logging.getLogger(__name__)
@@ -94,7 +95,11 @@ class AgentSdkClient:
         )
         cwd = sdk_section.get("cwd") or os.getcwd()
         setting_sources_raw = sdk_section.get("setting_sources", ["project"]) or ["project"]
-        extra_env = sdk_section.get("env", {}) or {}
+        # MLflow tracing env is derived from mlflow.* so the SDK subprocess
+        # exports its own claude_code.* spans when tracking is enabled. An
+        # explicit agent.sdk.env wins on conflict (operator override).
+        explicit_env = sdk_section.get("env", {}) or {}
+        extra_env = {**build_tracing_env(config), **explicit_env}
         timeout_raw = sdk_section.get("timeout", 300.0)
         timeout = float(timeout_raw) if timeout_raw else None
 
