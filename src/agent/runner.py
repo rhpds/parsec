@@ -116,20 +116,24 @@ class AgentRunner:
     async def _run_via_sdk(self, *, agent_type: str, task: str, context: dict | None) -> dict:
         """Run the task through the Claude Agent SDK adapter and normalize it.
 
-        Minimal by design (see module docstring): no per-agent skill/tool wiring
-        yet. The agent's system prompt is loaded the same way the legacy loop
-        loads it, so the two paths share prompt content for a fair benchmark.
+        The agent's system prompt is loaded the same way the legacy loop loads
+        it, so the two paths share prompt content for a fair benchmark. Per-agent
+        skill + MCP-tool specialization comes from :func:`sdk_profile_for`
+        (Icinga loads ``icinga-triage`` + the monitoring-mcp/GitHub servers;
+        other agents get an empty profile).
         """
+        from src.agent.icinga_sdk import sdk_profile_for
         from src.agent.system_prompt import get_agent_prompt
         from src.llm import AgentSdkClient, AgentSdkUnavailableError
 
         start = time.monotonic()
         system = get_agent_prompt(agent_type) or None
         prompt = _with_context(task, context)
+        profile = sdk_profile_for(agent_type, self._config)
 
         try:
             sdk_client = AgentSdkClient.from_config(self._config)
-            result = await sdk_client.complete(prompt=prompt, system=system)
+            result = await sdk_client.complete(prompt=prompt, system=system, **profile)
         except AgentSdkUnavailableError as exc:
             logger.warning("SDK runtime requested but unavailable: %s", exc)
             return _error_result(agent_type, str(exc), round(time.monotonic() - start, 1))
