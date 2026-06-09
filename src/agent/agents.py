@@ -390,6 +390,17 @@ async def run_sub_agent(  # noqa: C901
         }
 
     cfg = get_config()
+
+    # Phase-2: route Icinga through the Agent SDK when agent.runtime=sdk.
+    from src.llm import RUNTIME_SDK, get_runtime
+
+    if agent_type == "icinga" and get_runtime(cfg) == RUNTIME_SDK:
+        from src.agent.runner import AgentRunner
+
+        return await AgentRunner(cfg, runtime=RUNTIME_SDK).run_sub_agent(
+            agent_type, task, context=context, conversation_history=conversation_history
+        )
+
     model = cfg.anthropic.get("model", "claude-sonnet-4-20250514")
     max_tokens = cfg.anthropic.get("max_tokens", 4096)
 
@@ -673,10 +684,13 @@ async def run_sub_agent_streaming(  # noqa: C901
         _trim_history,
     )
     from src.agent.streaming import (
+        sse_agent_done,
+        sse_agent_start,
         sse_done,
         sse_error,
         sse_event,
         sse_report,
+        sse_status,
         sse_text,
     )
 
@@ -691,6 +705,23 @@ async def run_sub_agent_streaming(  # noqa: C901
         _tool_cache.set({})
 
     cfg = get_config()
+
+    # Phase-2: route Icinga through the Agent SDK when agent.runtime=sdk.
+    from src.llm import RUNTIME_SDK, get_runtime
+
+    if agent_type == "icinga" and get_runtime(cfg) == RUNTIME_SDK:
+        from src.agent.runner import AgentRunner
+
+        yield sse_agent_start(agent_type, agent_cfg.name)
+        yield sse_status("Running via Claude Agent SDK (icinga-triage skill)…")
+        sdk_result = await AgentRunner(cfg, runtime=RUNTIME_SDK).run_sub_agent(
+            agent_type, task, context=context, conversation_history=conversation_history
+        )
+        yield sse_text(sdk_result.get("summary") or sdk_result.get("error") or "(no output)")
+        yield sse_agent_done(agent_type)
+        yield sse_done()
+        return
+
     model = cfg.anthropic.get("model", "claude-sonnet-4-20250514")
     max_tokens = cfg.anthropic.get("max_tokens", 4096)
 
