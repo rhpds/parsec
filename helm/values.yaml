@@ -66,6 +66,10 @@ config:
   mlflow:
     tracking_url: ""
     experiment_name: parsec-agent-metrics
+  splunk:
+    host: "https://splunk-api.corp.redhat.com"
+    token: ""
+    verify_ssl: false
   reporting_mcp:
     mcp_url: "http://reporting-mcp.demo-reporting.svc:8080/mcp/"
 
@@ -89,7 +93,7 @@ oauth:
     limits:
       cpu: 200m
       memory: 128Mi
-  clientSecret: "i7td2aZux3xXQPweSDhVF8/AA"
+  clientSecret: ""
   skipAuthRegex: "^/api/(health|alert/)"
   upstreamTimeout: 180s
 

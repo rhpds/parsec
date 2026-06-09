@@ -104,7 +104,7 @@ The frontend is plain HTML/CSS/JS in `static/` — no build step. Charts use Cha
 
 ### OpenShift / Deployment
 
-**Method 1: Helm (recommended)**
+**Method 1: Helm**
 
 The Helm chart in `helm/` generates all OpenShift manifests. Deploy with:
 
@@ -112,6 +112,14 @@ The Helm chart in `helm/` generates all OpenShift manifests. Deploy with:
 # Dev environment
 helm template parsec helm/ \
   -f helm/values-dev.yaml \
+  --set oauth.clientSecret="<from-bitwarden>" \
+  | oc apply -f -
+
+# With MLflow subchart
+helm template parsec helm/ \
+  -f helm/values-dev.yaml \
+  --set oauth.clientSecret="<from-bitwarden>" \
+  --set mlflow.oauth.clientSecret="<from-bitwarden>" \
   | oc apply -f -
 
 # Cleanup
@@ -125,10 +133,10 @@ Environment overrides go in `helm/values-dev.yaml` (only values that differ from
 **Prerequisites:**
 
 - Secrets are managed via BitwardenSyncSecret — create them in the Bitwarden `parsec` project before deploying
-- The `oauth.clientSecret` in `helm/values.yaml` must match the `client_secret` field in the `parsec-oauth-proxy` Bitwarden secret
-- For a new environment, generate a new OAuth client secret and store it in both Bitwarden and `values.yaml` (or pass via `--set oauth.clientSecret=...`)
+- OAuth client secrets must be passed via `--set` at deploy time (not committed to git)
+- The `oauth.clientSecret` value must match the `client-secret` field in the `parsec-oauth-proxy` Bitwarden secret
 
-**Method 2: Ansible (legacy)**
+**Method 2: Ansible**
 
 The Ansible playbook in `playbooks/` is still available:
 

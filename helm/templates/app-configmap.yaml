@@ -36,6 +36,9 @@ data:
     mlflow:
       tracking_url: {{ .Values.config.mlflow.tracking_url | quote }}
       experiment_name: {{ .Values.config.mlflow.experiment_name | quote }}
+    splunk:
+      host: {{ .Values.config.splunk.host | quote }}
+      verify_ssl: {{ .Values.config.splunk.verify_ssl }}
     reporting_mcp:
       mcp_url: {{ .Values.config.reporting_mcp.mcp_url | quote }}
     alert_api_key: ""

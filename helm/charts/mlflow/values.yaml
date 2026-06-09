@@ -40,7 +40,7 @@ secrets:
 oauth:
   enabled: true
   clientName: mlflow-mlflow
-  clientSecret: "UynCQaEMPbN6ZoltqSpVQD2vItEDuRpg"
+  clientSecret: ""
   image:
     repository: registry.redhat.io/openshift4/ose-oauth-proxy-rhel9
     tag: latest
