@@ -37,7 +37,7 @@ COPY scripts/refresh_azure_billing.py scripts/refresh_azure_billing.py
 
 RUN mkdir -p /app/data/reports /app/data/debug && \
     chown -R 1001:0 /app && \
-    chmod -R g+rw /app
+    chmod -R g+rwX /app
 
 ENV PYTHONPATH="/app" \
     PYTHONUNBUFFERED=1

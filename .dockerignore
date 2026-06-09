@@ -17,6 +17,7 @@ plans/
 *.md
 !config/prompts/*.md
 !config/prompts/**/*.md
+!skills/*/SKILL.md
 data/reports/
 data/debug/
 config/config.local.yaml
