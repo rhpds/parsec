@@ -715,7 +715,11 @@ async def run_sub_agent_streaming(  # noqa: C901
         yield sse_agent_start(agent_type, agent_cfg.name)
         yield sse_status("Running via Claude Agent SDK (icinga-triage skill)…")
         sdk_result = await AgentRunner(cfg, runtime=RUNTIME_SDK).run_sub_agent(
-            agent_type, task, context=context, conversation_history=conversation_history
+            agent_type,
+            task,
+            context=context,
+            conversation_history=conversation_history,
+            metrics=metrics,
         )
         yield sse_text(sdk_result.get("summary") or sdk_result.get("error") or "(no output)")
         yield sse_agent_done(agent_type)
@@ -815,6 +819,12 @@ async def run_sub_agent_streaming(  # noqa: C901
                         metrics.record_tokens(
                             input_tokens=response.usage.input_tokens,
                             output_tokens=response.usage.output_tokens,
+                            cache_creation_tokens=getattr(
+                                response.usage, "cache_creation_input_tokens", 0
+                            )
+                            or 0,
+                            cache_read_tokens=getattr(response.usage, "cache_read_input_tokens", 0)
+                            or 0,
                         )
                         if not metrics.model:
                             metrics.record_model(response.model)
