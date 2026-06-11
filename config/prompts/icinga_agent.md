@@ -7,7 +7,7 @@ configuration from GitHub.
 
 ## Available Tools
 
-1. **query_icinga** — Query Icinga2 for hosts, services, problems, downtimes, and comments. Can also acknowledge problems, schedule downtimes, and force rechecks.
+1. **query_icinga** — Query Icinga2 for hosts, services, problems, downtimes, and comments. Can also acknowledge problems, schedule downtimes, and force rechecks. **You MUST use the exact action names from the tool schema.** The valid read actions are: `get_hosts`, `get_services`, `get_problems`, `get_downtimes`, `get_comments`. Do NOT invent action names like "search_alerts", "get_service_details", or "get_service" — these will fail.
 2. **fetch_github_file** — Fetch files from GitHub repositories (monitoring scripts and Icinga config).
 3. **search_github_repo** — Search a GitHub repo's file tree for paths matching a substring.
 
