@@ -42,6 +42,25 @@ _WRITE_ACTIONS_REQUIRING_COMMENT: set[str] = {
     "send_custom_notification",
 }
 
+# Map commonly hallucinated action names to valid actions
+_ACTION_ALIASES: dict[str, str] = {
+    "search_alerts": "get_problems",
+    "get_alerts": "get_problems",
+    "get_service": "get_services",
+    "get_service_details": "get_services",
+    "get_service_status": "get_services",
+    "get_host": "get_hosts",
+    "get_host_details": "get_hosts",
+    "get_host_status": "get_hosts",
+    "list_hosts": "get_hosts",
+    "list_services": "get_services",
+    "list_problems": "get_problems",
+    "list_downtimes": "get_downtimes",
+    "list_comments": "get_comments",
+    "check_host": "get_hosts",
+    "check_service": "get_services",
+}
+
 
 async def query_icinga(
     action: str,
@@ -67,6 +86,14 @@ async def query_icinga(
     add_comment, remove_comment, remove_downtime, remove_acknowledgement,
     send_custom_notification.
     """
+    original_action = action
+    resolved = _ACTION_ALIASES.get(action)
+    if resolved:
+        logger.warning("Icinga action alias: %s -> %s", action, resolved)
+        action = resolved
+        if "detail" in original_action:
+            detailed = True
+
     if action in ("get_hosts", "get_services"):
         args = _build_read_args(search, host, service, filter_expr, detailed)
         return await call_tool(action, args)
