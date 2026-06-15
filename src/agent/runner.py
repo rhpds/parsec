@@ -6,11 +6,11 @@ directly. This module introduces a single dispatch seam that reads ``agent.runti
 runtime, returning the **same structured result dict** either way so callers don't care
 which runtime answered.
 
-It is intentionally *additive and dormant*: nothing in the request path imports it yet
-(mirroring how the #24 adapter shipped behind the flag). A later PR wires a specific
-sub-agent (Icinga) to dispatch through it. With the default ``legacy`` runtime,
-:meth:`AgentRunner.run_sub_agent` is a transparent pass-through to the existing loop —
-zero behavior change.
+With the default ``legacy`` runtime, :meth:`AgentRunner.run_sub_agent` is a transparent
+pass-through to the existing loop — **zero behavior change at the shipped default**. The
+Icinga sub-agent dispatches through this seam when ``agent.runtime: sdk`` is set:
+:func:`src.agent.agents.run_sub_agent` and ``run_sub_agent_streaming`` route
+``agent_type == "icinga"`` here under that flag (every other agent stays legacy).
 
 The SDK branch here is deliberately minimal: it runs the agent's system prompt through
 :meth:`AgentSdkClient.complete` and normalizes the outcome. Per-agent *skill + tool*
@@ -177,6 +177,15 @@ class AgentRunner:
                 logger.warning("SDK runtime requested but unavailable: %s", exc)
                 _mark_sdk_unavailable(metrics)
                 return _error_result(agent_type, str(exc), round(time.monotonic() - start, 1))
+            except (ValueError, TypeError) as exc:
+                # Malformed agent.sdk.* config (e.g. a non-numeric timeout/max_turns
+                # coerced in from_config) must still yield the normalized,
+                # legacy-shaped error dict — not raise out of the SDK arm and abort
+                # the SSE stream. Mirrors the legacy fast-path, which converts a
+                # ValueError from _build_client into an sse_error.
+                logger.warning("SDK runtime setup failed (bad config?): %s", exc)
+                _mark_sdk_unavailable(metrics)
+                return _error_result(agent_type, str(exc), round(time.monotonic() - start, 1))
 
             duration = round(time.monotonic() - start, 1)
             # Observability is a non-fatal side effect: a tracing/metrics failure
@@ -211,7 +220,7 @@ def _sdk_result_to_dict(agent_type: str, result: Any, duration_seconds: float) -
     fields the Phase-2 cost benchmark compares against the legacy path.
     """
     usage = result.usage
-    return {
+    out = {
         "agent": agent_type,
         "status": "success" if result.succeeded else "error",
         "summary": result.text or (result.error_message or ""),
@@ -233,8 +242,12 @@ def _sdk_result_to_dict(agent_type: str, result: Any, duration_seconds: float) -
         "tool_errors": sum(1 for inv in result.tool_invocations if inv.get("is_error")),
         "rounds_used": result.usage.num_turns,
         "duration_seconds": duration_seconds,
-        "error": result.error_message,
     }
+    # Match the legacy success dict, which omits "error" entirely on success
+    # (only present on failure) — keep the result-dict shapes congruent.
+    if result.error_message:
+        out["error"] = result.error_message
+    return out
 
 
 def _error_result(agent_type: str, message: str, duration_seconds: float = 0.0) -> dict:

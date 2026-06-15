@@ -73,6 +73,15 @@ def test_icinga_triage_skill_loads_strict() -> None:
     assert skill.warnings == ()
     assert skill.parsec is not None
     assert skill.parsec.domain == "icinga"
-    assert set(skill.allowed_tools) == {"query_icinga", "fetch_github_file", "search_github_repo"}
+    # Under the SDK runtime the icinga/github backends are MCP tools, so the skill's
+    # allowed-tools list the real mcp__ names (not the legacy query_icinga wrappers).
+    assert set(skill.allowed_tools) == {
+        "mcp__icinga__get_hosts",
+        "mcp__icinga__get_services",
+        "mcp__icinga__get_problems",
+        "mcp__icinga__get_downtimes",
+        "mcp__icinga__get_comments",
+        "mcp__github__get_file_contents",
+    }
     # description drives SDK auto-discovery — must mention the trigger
     assert "alert" in (skill.description or "").lower()

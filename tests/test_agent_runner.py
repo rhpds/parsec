@@ -164,6 +164,28 @@ async def test_sdk_unavailable_returns_error_not_raises(monkeypatch: pytest.Monk
     assert out["data"]["runtime"] == "sdk"
 
 
+async def test_sdk_malformed_config_returns_error_not_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bad agent.sdk.* value (e.g. non-numeric timeout) coerced in from_config must
+    yield the normalized error dict, not raise out of the SDK arm and abort the stream."""
+    _inject_prompt_loader(monkeypatch)
+
+    class _BadConfig:
+        @classmethod
+        def from_config(cls, config: Any) -> Any:
+            raise ValueError("could not convert string to float: 'abc'")
+
+    monkeypatch.setattr("src.llm.AgentSdkClient", _BadConfig)
+
+    runner = AgentRunner({"agent": {"runtime": "sdk"}})
+    out = await runner.run_sub_agent("icinga", "triage")
+
+    assert out["status"] == "error"
+    assert "abc" in out["summary"]
+    assert out["data"]["runtime"] == "sdk"
+
+
 # ------------------------------------------------------------------- helpers
 
 
