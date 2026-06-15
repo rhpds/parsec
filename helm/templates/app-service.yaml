@@ -1,0 +1,20 @@
+{{- if .Values.deploy -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "parsec.name" . }}-service
+  namespace: {{ include "parsec.namespaceName" . }}
+  labels:
+    {{- include "parsec.labels" . | nindent 4 }}
+    component: api
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8000
+      protocol: TCP
+      targetPort: http
+  selector:
+    app: {{ include "parsec.name" . }}
+    component: api
+{{- end -}}

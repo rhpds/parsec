@@ -1,0 +1,117 @@
+{{- if .Values.deploy -}}
+# NetworkPolicy: allow Parsec namespaces to reach MLflow tracking server
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-parsec-ingress
+  namespace: {{ include "mlflow.namespaceName" . }}
+  labels:
+    {{- include "mlflow.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: mlflow
+      component: tracking
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        {{- range .Values.parsecNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 5000
+---
+# NetworkPolicy: allow OAuth proxy to reach tracking server
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-oauth-to-tracking
+  namespace: {{ include "mlflow.namespaceName" . }}
+  labels:
+    {{- include "mlflow.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: mlflow
+      component: tracking
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: mlflow
+              component: oauth-proxy
+      ports:
+        - protocol: TCP
+          port: 5000
+---
+# NetworkPolicy: allow external traffic to OAuth proxy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-to-oauth
+  namespace: {{ include "mlflow.namespaceName" . }}
+  labels:
+    {{- include "mlflow.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: mlflow
+      component: oauth-proxy
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8443
+---
+# NetworkPolicy: allow API proxy to reach tracking server
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-proxy-to-tracking
+  namespace: {{ include "mlflow.namespaceName" . }}
+  labels:
+    {{- include "mlflow.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: mlflow
+      component: tracking
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: mlflow
+              component: api-proxy
+      ports:
+        - protocol: TCP
+          port: 5000
+---
+# NetworkPolicy: allow external traffic to API proxy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-to-api-proxy
+  namespace: {{ include "mlflow.namespaceName" . }}
+  labels:
+    {{- include "mlflow.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: mlflow
+      component: api-proxy
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8080
+{{- end -}}

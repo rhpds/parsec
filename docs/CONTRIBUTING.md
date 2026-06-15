@@ -104,7 +104,37 @@ The frontend is plain HTML/CSS/JS in `static/` — no build step. Charts use Cha
 
 ### OpenShift / Deployment
 
-Manifests are in `openshift/base/` with Kustomize overlays in `openshift/overlays/`. The deploy script is `deploy.sh`.
+**Method 1: Helm (recommended)**
+
+The Helm chart in `helm/` generates all OpenShift manifests. Deploy with:
+
+```bash
+# Dev environment
+helm template parsec helm/ \
+  -f helm/values-dev.yaml \
+  | oc apply -f -
+
+# Cleanup
+helm template parsec helm/ \
+  -f helm/values-dev.yaml \
+  | oc delete -f -
+```
+
+Environment overrides go in `helm/values-dev.yaml` (only values that differ from `helm/values.yaml` defaults).
+
+**Prerequisites:**
+
+- Secrets are managed via BitwardenSyncSecret — create them in the Bitwarden `parsec` project before deploying
+- The `oauth.clientSecret` in `helm/values.yaml` must match the `client_secret` field in the `parsec-oauth-proxy` Bitwarden secret
+- For a new environment, generate a new OAuth client secret and store it in both Bitwarden and `values.yaml` (or pass via `--set oauth.clientSecret=...`)
+
+**Method 2: Ansible (legacy)**
+
+The Ansible playbook in `playbooks/` is still available:
+
+```bash
+ansible-playbook playbooks/deploy.yaml -e env=dev
+```
 
 ## Project Structure
 

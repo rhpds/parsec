@@ -1,0 +1,50 @@
+{{- if .Values.deploy -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "parsec.name" . }}-pricing-refresh
+  namespace: {{ include "parsec.namespaceName" . }}
+  labels:
+    {{- include "parsec.labels" . | nindent 4 }}
+    component: pricing-refresh
+spec:
+  schedule: {{ .Values.cronjobs.pricingRefresh.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 7200
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: {{ include "parsec.name" . }}
+            component: pricing-refresh
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: refresh
+              image: {{ include "parsec.image" . }}
+              command: ["python3", "scripts/refresh_pricing.py"]
+              volumeMounts:
+                - name: pricing-cache
+                  mountPath: /app/data
+              resources:
+                {{- toYaml .Values.cronjobs.pricingRefresh.resources | nindent 16 }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
+          volumes:
+            - name: pricing-cache
+              persistentVolumeClaim:
+                claimName: {{ include "parsec.name" . }}-pricing-cache
+{{- end -}}

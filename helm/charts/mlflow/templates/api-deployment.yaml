@@ -1,0 +1,68 @@
+{{- if and .Values.deploy .Values.api.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow-api-proxy
+  namespace: {{ include "mlflow.namespaceName" . }}
+  labels:
+    {{- include "mlflow.labels" . | nindent 4 }}
+    component: api-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mlflow
+      component: api-proxy
+  template:
+    metadata:
+      labels:
+        app: mlflow
+        component: api-proxy
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nginx
+          image: {{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+            - name: htpasswd
+              mountPath: /etc/nginx/htpasswd
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 30
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: mlflow-api-nginx-config
+        - name: htpasswd
+          secret:
+            secretName: mlflow-api-htpasswd
+{{- end -}}
