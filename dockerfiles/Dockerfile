@@ -25,6 +25,7 @@ COPY src/ src/
 COPY static/ static/
 COPY config/config.yaml config/config.yaml
 COPY config/prompts/ config/prompts/
+COPY skills/ skills/
 COPY data/ec2_pricing.json data-seed/ec2_pricing.json
 COPY scripts/refresh_pricing.py scripts/refresh_pricing.py
 COPY scripts/refresh_azure_billing.py scripts/refresh_azure_billing.py
