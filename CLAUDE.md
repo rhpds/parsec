@@ -12,7 +12,7 @@ src/
   config.py                 # Dynaconf settings
   agent/
     orchestrator.py          # Claude tool-use loop (orchestrator + sub-agent dispatch)
-    agents.py                # Sub-agent runner (cost, aap2, babylon, security, ocpv)
+    agents.py                # Sub-agent runner (cost, aap2, babylon, security, ocpv, icinga)
     tool_definitions.py      # Tool schemas for Claude API (per-agent tool groups)
     system_prompt.py         # Per-agent prompt loading with shared context
     streaming.py             # SSE helpers
@@ -34,6 +34,7 @@ src/
     aap2.py                  # AAP2 controller job queries (REST API)
     ocpv.py                  # OCPV cluster inspection (VMs, nodes, pods, PVCs)
     splunk.py                # Splunk log queries (Babylon pods, AAP2 logs)
+    icinga.py                # Icinga2 monitoring queries via MCP sidecar
     github_files.py          # GitHub file/directory fetching via remote MCP server
   connections/
     reporting_mcp.py         # Reporting MCP client (Streamable HTTP)
@@ -44,6 +45,7 @@ src/
     aap2.py                  # AAP2 controller REST API clients (httpx-based)
     ocpv.py                  # OCPV cluster K8s API clients (httpx-based)
     splunk.py                # Splunk REST API client
+    icinga_mcp.py            # Icinga MCP client (SSE, monitoring sidecar)
     github_mcp.py            # GitHub remote MCP server client (streamable HTTP)
     mlflow_tracking.py       # MLflow tracking server client (conditional, no-op if disabled)
   routes/
@@ -65,6 +67,7 @@ config/
     babylon_agent.md         # Babylon catalog/deployment agent
     security_agent.md        # Security investigation agent
     ocpv_agent.md            # OCPV cluster inspection agent
+    icinga_agent.md          # Icinga monitoring investigation agent
     shared_context.md        # Shared context prepended to all agent prompts
 data/
   ec2_pricing.json           # Static EC2 pricing cache (checked into git)
@@ -186,7 +189,7 @@ with the same message — do NOT amend the previous commit (the failed commit ne
 
 - **Dockerfile**: Do NOT use `ENTRYPOINT []` — CRI-O on OpenShift requires the S2I base image's `container-entrypoint`. Do NOT hardcode PATH — use `$PATH` to inherit base image paths.
 - **Claude backend**: Supports direct API, Vertex AI, and AWS Bedrock. Production uses Vertex AI (`claude-sonnet-4@20250514`).
-- **Sub-agent architecture**: Orchestrator classifies queries and dispatches to domain sub-agents (cost, aap2, babylon, security, ocpv). Fast-path classifier skips LLM call for obvious single-domain queries. Per-agent prompts in `config/prompts/`.
+- **Sub-agent architecture**: Orchestrator classifies queries and dispatches to domain sub-agents (cost, aap2, babylon, security, ocpv, icinga). Fast-path classifier skips LLM call for obvious single-domain queries. Per-agent prompts in `config/prompts/`.
 - **Reporting MCP**: Provision DB access goes through a Reporting MCP server via Streamable HTTP (`src/connections/reporting_mcp.py`). Tool schemas are dynamically discovered at startup and prefixed with `db_`. The `reporting_mcp.mcp_url` config is required. Health readiness probe checks cached init state — does NOT make live MCP calls.
 - **GitHub auth**: Push access to `rhpds/parsec` requires a GitHub account with write permissions. Use `gh auth status` to check the current profile.
 - **AWS IAM**: All AWS tools use the `cost-monitor` IAM user with `CostMonitorPolicy`. Cross-account access uses STS AssumeRole with inline session policy for read-only enforcement. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full policy details.
