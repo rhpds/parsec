@@ -275,6 +275,19 @@ def classify_fast(question: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _should_use_sdk(agent_type: str, cfg: Any) -> bool:
+    """Whether this sub-agent task should run on the Agent SDK (Phase-2 pilot).
+
+    Single source of truth for the SDK dispatch rule, shared by both sub-agent
+    entry points (``run_sub_agent`` and ``run_sub_agent_streaming``): only Icinga
+    has an SDK profile today, and only when ``agent.runtime: sdk`` (default
+    ``legacy``). Add agents here as they gain SDK profiles.
+    """
+    from src.llm import RUNTIME_SDK, get_runtime
+
+    return agent_type == "icinga" and get_runtime(cfg) == RUNTIME_SDK
+
+
 def _extract_user_context(history: list) -> str:
     """Extract user text messages from conversation history for sub-agent context.
 
@@ -392,10 +405,9 @@ async def run_sub_agent(  # noqa: C901
     cfg = get_config()
 
     # Phase-2: route Icinga through the Agent SDK when agent.runtime=sdk.
-    from src.llm import RUNTIME_SDK, get_runtime
-
-    if agent_type == "icinga" and get_runtime(cfg) == RUNTIME_SDK:
+    if _should_use_sdk(agent_type, cfg):
         from src.agent.runner import AgentRunner
+        from src.llm import RUNTIME_SDK
 
         return await AgentRunner(cfg, runtime=RUNTIME_SDK).run_sub_agent(
             agent_type, task, context=context, conversation_history=conversation_history
@@ -707,13 +719,17 @@ async def run_sub_agent_streaming(  # noqa: C901
     cfg = get_config()
 
     # Phase-2: route Icinga through the Agent SDK when agent.runtime=sdk.
-    from src.llm import RUNTIME_SDK, get_runtime
-
-    if agent_type == "icinga" and get_runtime(cfg) == RUNTIME_SDK:
+    if _should_use_sdk(agent_type, cfg):
         from src.agent.runner import AgentRunner
+        from src.llm import RUNTIME_SDK
 
         yield sse_agent_start(agent_type, agent_cfg.name)
         yield sse_status("Running via Claude Agent SDK (icinga-triage skill)…")
+        # Phase-2 limitation: the SDK runs its own loop and we await the full
+        # result, so the answer arrives as a single SSE chunk rather than streamed
+        # token-by-token like the legacy path (the user sees a spinner, then the
+        # whole answer). Acceptable for the pilot; smoother streaming (heartbeat /
+        # partial messages onto the queue) is a tracked follow-up.
         sdk_result = await AgentRunner(cfg, runtime=RUNTIME_SDK).run_sub_agent(
             agent_type,
             task,

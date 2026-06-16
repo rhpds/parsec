@@ -21,8 +21,10 @@ _ERROR_BACKOFF_SECONDS = 60.0
 
 # Approximate list pricing in USD/token, used ONLY to *estimate* the legacy
 # arm's cost so it is comparable to the SDK arm (which reports an authoritative
-# ``total_cost_usd``). Keyed by a substring of the model id. Cache-write is
-# billed at 1.25x the input rate and cache-read at 0.1x (5-minute TTL).
+# ``total_cost_usd``). Keyed by a substring of the model id (intentional — model
+# ids vary by backend, e.g. ``claude-sonnet-4@20250514`` on Vertex). Cache-write
+# is billed at 1.25x the input rate and cache-read at 0.1x (5-minute TTL).
+# Anthropic list pricing, last verified 2026-06 — update when prices change.
 _PRICING_USD_PER_TOKEN: dict[str, tuple[float, float]] = {
     # model-id substring: (input $/token, output $/token)
     "haiku": (1e-6, 5e-6),

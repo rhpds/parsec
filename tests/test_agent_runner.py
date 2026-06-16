@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sys
 import types
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -110,6 +111,14 @@ class _FakeSdkClient:
     async def complete(self, *, prompt: str, system: str | None = None, **kwargs: Any) -> SdkResult:
         _FakeSdkClient.calls.append({"prompt": prompt, "system": system})
         return self._result
+
+
+@pytest.fixture(autouse=True)
+def _reset_fake_sdk_calls() -> Iterator[None]:
+    """Reset the shared call log before every test so state can't leak between tests
+    (a forgotten manual reset in a new test would otherwise see prior calls)."""
+    _FakeSdkClient.calls = []
+    yield
 
 
 def _inject_prompt_loader(

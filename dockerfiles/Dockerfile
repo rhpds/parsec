@@ -20,8 +20,10 @@ RUN dnf install -y --nodocs libpq && dnf clean all
 # Claude Agent SDK runtime: Node.js + the `claude` CLI that the SDK drives as a
 # subprocess (the Python claude-agent-sdk wrapper comes via requirements.txt).
 # Required for agent.runtime=sdk; harmless for the default legacy runtime.
+# Pin the CLI to the version verified against the bundled claude-agent-sdk so an
+# image rebuild can't silently pull a breaking release.
 RUN dnf install -y --nodocs nodejs npm && dnf clean all && \
-    npm install -g @anthropic-ai/claude-code && npm cache clean --force
+    npm install -g @anthropic-ai/claude-code@2.1.169 && npm cache clean --force
 
 COPY --from=builder /opt/app-root /opt/app-root
 
@@ -46,7 +48,10 @@ RUN mkdir -p /app/data/reports /app/data/debug /home/claude && \
     chmod -R g=u /app /home/claude
 
 # HOME must be writable for the claude CLI's state (~/.claude); /home/claude is
-# group-0 writable for the arbitrary OpenShift UID.
+# group-0 writable for the arbitrary OpenShift UID. NOTE: this sets HOME globally
+# for the container — it points at an empty, group-writable dir so the blast radius
+# is benign, but scoping HOME to only the SDK subprocess env is a follow-up to
+# revisit when this Dockerfile is reconciled with the ubi9-minimal hardening (#29).
 ENV PYTHONPATH="/app" \
     PYTHONUNBUFFERED=1 \
     HOME=/home/claude \
