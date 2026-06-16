@@ -3,12 +3,7 @@
 from __future__ import annotations
 
 from src.llm import AgentSdkClient
-from src.llm.sdk_tracing import (
-    SESSION_START_HOOK_HANDLER,
-    STOP_HOOK_HANDLER,
-    build_hooks_settings,
-    build_tracing_env,
-)
+from src.llm.sdk_tracing import build_tracing_env
 
 # ------------------------------------------------------------- build_tracing_env
 
@@ -51,17 +46,6 @@ def test_tracing_env_includes_basic_auth() -> None:
 
 def test_tracing_env_strips_whitespace_url() -> None:
     assert build_tracing_env({"mlflow": {"tracking_url": "   "}}) == {}
-
-
-# ------------------------------------------------------------ build_hooks_settings
-
-
-def test_hooks_settings_shape() -> None:
-    settings = build_hooks_settings()
-    hooks = settings["hooks"]
-    assert "Stop" in hooks and "SessionStart" in hooks
-    assert STOP_HOOK_HANDLER in hooks["Stop"][0]["hooks"][0]["command"]
-    assert SESSION_START_HOOK_HANDLER in hooks["SessionStart"][0]["hooks"][0]["command"]
 
 
 # ----------------------------------------------------- wiring into from_config

@@ -16,6 +16,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.llm.config_section import section
 from src.llm.sdk_tracing import build_tracing_env
 from src.llm.types import SdkResult, SdkUsage
 
@@ -79,9 +80,9 @@ class AgentSdkClient:
         - ``agent.sdk.timeout`` — per-call wall-clock ceiling in seconds
           (default 300; ``null``/``0`` disables it)
         """
-        agent_section = _get_section(config, "agent")
-        sdk_section = _get_section(agent_section, "sdk") if agent_section else {}
-        anthropic_section = _get_section(config, "anthropic")
+        agent_section = section(config, "agent")
+        sdk_section = section(agent_section, "sdk") if agent_section else {}
+        anthropic_section = section(config, "anthropic")
 
         model = (
             sdk_section.get("model")
@@ -242,27 +243,6 @@ def _import_sdk() -> Any:
             "claude_agent_sdk is not installed. Install with "
             "'pip install claude-agent-sdk' to enable the SDK runtime."
         ) from e
-
-
-def _get_section(config: Any, key: str) -> dict[str, Any]:
-    """Return config sub-section ``key`` as a plain dict (``{}`` if missing).
-
-    ``from_config`` accepts both Dynaconf objects (sections are Boxes exposing
-    ``.get`` + ``.to_dict``) and plain dicts (used throughout the tests), so we
-    read via ``.get``/``getattr`` and coerce to a real dict. This mirrors
-    ``src.skills.loader._get_skills_section`` and yields a concrete return type
-    that type-checks. Attribute access (``cfg.agent``, as in
-    ``src/connections/aws.py``) is deliberately avoided here: it only works for
-    Dynaconf, not the plain-dict configs the tests pass.
-    """
-    if config is None:
-        return {}
-    raw = config.get(key, {}) if hasattr(config, "get") else getattr(config, key, {})
-    if raw is None:
-        return {}
-    if hasattr(raw, "to_dict"):
-        return raw.to_dict()
-    return dict(raw)
 
 
 def _ingest_assistant(sdk: Any, message: Any, state: dict[str, Any]) -> None:
