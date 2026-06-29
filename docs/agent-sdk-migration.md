@@ -68,10 +68,9 @@ The six dimensions below each zoom into one part of this picture.
 **What changed:** a second runtime, selected by one flag, returning the same result shape.
 
 - The flag lives in `src/llm/runtime.py`: `get_runtime(config)` reads `agent.runtime`, returns `RUNTIME_LEGACY`/`RUNTIME_SDK` (`runtime.py:12-13`), **defaults to legacy** and **coerces unknown values back to legacy with a warning** (`runtime.py:33-43`) — "so a typo never silently routes traffic to the new untested path." *( #24 )*
-- `src/llm` is a **package** (`src/llm/__init__.py` re-exports `AgentSdkClient`, `get_runtime`, `RUNTIME_*`, `SdkResult`, `SdkUsage`) — `from src.llm import …` resolves via the package, which is why CI is green even though there is no `src/llm.py` file.
 - The legacy backend, for contrast, is `_build_client()` (`orchestrator.py:379`): it returns an `anthropic.Anthropic | AnthropicVertex | AnthropicBedrock` and **Parsec drives the loop itself** (`client.messages.create` at `orchestrator.py:1028`, wrapped in `asyncio.to_thread`). Production = Vertex.
 - The adapter `src/llm/agent_sdk_client.py` *(#24)* is "a thin async adapter around `claude_agent_sdk.query`." The SDK is imported **lazily** (`importlib.import_module("claude_agent_sdk")`, `agent_sdk_client.py:230`) so the module stays importable without the optional dependency, raising `AgentSdkUnavailableError` only when actually used. Config is resolved once into a frozen `AgentSdkConfig` (`agent_sdk_client.py:28`): `model`, `max_turns` (mapped from `anthropic.max_tool_rounds`), `cwd`, `setting_sources=("project",)`, `timeout=300`.
-- `complete()` (`agent_sdk_client.py:114`) is short because **the loop isn't here** — it's a single `async for message in sdk.query(...)` (`agent_sdk_client.py:190`) consuming a stream the SDK drives in the subprocess; it aggregates into an `SdkResult` (tokens, cache, `total_cost_usd`, `num_turns`). Failures are captured into the result, never raised, so the SSE stream is never aborted.
+- `complete()` (`agent_sdk_client.py:114`) is short because **the loop isn't here** — a single `async for` over `sdk.query()` (`:190`) aggregated into an `SdkResult` (tokens, cache, `total_cost_usd`, `num_turns`); failures are captured into the result, never raised, so the SSE stream never aborts.
 - The dispatch seam is `AgentRunner` (`src/agent/runner.py`, **#30 → folded into #34**): it resolves the runtime once and routes `_run_via_sdk` vs `_run_via_legacy`, normalizing both to the **identical result dict** (`runner.py:216`) so callers can't tell which ran.
 
 **Default behavior is unchanged.** At `agent.runtime: legacy`, none of this activates.
@@ -83,7 +82,7 @@ The six dimensions below each zoom into one part of this picture.
 - A skill is a folder with a `SKILL.md` = YAML frontmatter (`name`, `description`, `allowed-tools`, a Parsec `parsec:` block) + a Markdown workflow body. Canonical example: `skills/icinga-triage/SKILL.md` *( #32/#34 )*.
 - **Two independent discovery mechanisms** (conflating them is the #1 newcomer mistake):
   - **The SDK** (what runs in production) discovers via `agent.sdk.setting_sources: ["project"]` → `<cwd>/.claude/skills/`. Parsec ships skills under `skills/`, so the Dockerfile bridges it: `ln -sfn /app/skills /app/.claude/skills` with a build-time assertion that `icinga-triage/SKILL.md` resolves *( #27 lineage; #34 )*.
-  - **Parsec's own `SkillLoader`** (`src/skills/loader.py`, #23) powers `GET /api/skills` + CI validation — it does **not** feed the SDK. Strict mode rejects symlinked skill dirs (path-traversal defense), caps `SKILL.md` at 1 MiB, and treats schema issues as warnings vs errors. Healthy skills load with **0 warnings**.
+  - **Parsec's own `SkillLoader`** (`src/skills/loader.py`, #23) powers `GET /api/skills` + CI validation — it does **not** feed the SDK (strict mode rejects symlinked dirs for path-traversal safety, caps `SKILL.md` at 1 MiB).
 - **Activation** is separate from discovery: `build_icinga_sdk_profile()` (`src/agent/icinga_sdk.py`) returns `{"skills": ["icinga-triage"], ...}`; `sdk_profile_for(agent_type)` returns that **only for icinga** and `{}` for every other agent. `complete()` passes `skills=[…]` into `ClaudeAgentOptions`. That's the entire pilot surface: one agent, one skill.
 - **Subtlety:** the SKILL.md's `allowed-tools` frontmatter is **declarative/inert** in Parsec's loader; the *enforced* whitelist is the profile's `allowed_tools` (server-prefixes `mcp__icinga`, `mcp__github`) computed in `icinga_sdk.py`. Editing the frontmatter alone won't change what the agent can call.
 
@@ -99,9 +98,9 @@ The six dimensions below each zoom into one part of this picture.
 - `scripts/parity_eval.py` — **accuracy**: runs the same Icinga queries through *both* runtimes, an **independent LLM judge** (anonymized A/B, deterministic per-id flip) scores each, and it computes four gates: `success_all`, `quality_parity ≥ 0.90`, `latency ≤ 1.5×`, `cost ≤ 1.3×` (`parity_eval.py:54-57, 270-290`). `--selftest` exercises the math with no cluster.
 - `scripts/ab_mlflow.py` + `parsec-dependencies/pr2-test/test_icinga_ab.py` — **cost**: a controlled legacy-vs-SDK A/B that breaks out cache tokens.
 
-**Cost result (reproduced 2026-06-09):** legacy bare call $0.0106; SDK cold $0.135 (cache-write 28,665 tok), **SDK warm $0.037 (cache-read 28,665)** → warm/legacy **3.45×**. The **"≈270×" headline is debunked** — it was a one-time cold cache-write vs a hello-world call. Against *real* legacy Icinga work (≈$1.38/query, ~452K uncached tokens × 10 rounds) the SDK's caching projects **cheaper, not costlier**.
+**Cost result (reproduced 2026-06-09):** SDK **warm $0.037** vs a legacy bare call $0.0106 → warm/legacy **3.45×** — a fixed 28,665-token *cached* prefix, not the "≈270×" headline (that was a cold cache-write vs a hello-world call). Against *real* legacy Icinga work (≈$1.38/query, ~452K uncached tokens × 10 rounds) the SDK's caching projects **cheaper, not costlier**.
 
-> **Honest frontier:** the parity/accuracy gate is **built but not yet run on real data** (needs `parsec-dev` cluster access + SME-validated references), and the cost A/B's "legacy" arm is a single bare call, not the production multi-round path. Both are blocked on the same maintainer access request drafted in `parsec-dependencies/pr2-test/PARITY-RUNBOOK.md`.
+> **Frontier update (2026-06-29):** the accuracy/parity gate has now **run** — a blinded human-labeling A/B on the Icinga agent puts the SDK **on par or better** (preliminary). See §9. Remaining caveats: the cost A/B's "legacy" arm is still a single bare call (not the production multi-round path), and the in-cluster `parity_eval.py` run still wants `parsec-dev` access (`parsec-dependencies/pr2-test/PARITY-RUNBOOK.md`).
 
 ## 6. Injected system prompts
 
@@ -111,7 +110,7 @@ Both runtimes assemble the system prompt the **same way**, via `get_agent_prompt
 - **Legacy injection:** `system = f"{get_agent_prompt(agent_type)}\n\nToday's date is {today}."` → `messages.create(system=…)` (`agents.py:423-426, 464`).
 - **SDK injection:** `_run_via_sdk` loads the **same** `get_agent_prompt(agent_type)` (`runner.py:175`) "so the two paths share prompt content for a fair benchmark," passed as `ClaudeAgentOptions.system_prompt`. Two differences: (a) **no "Today's date" suffix** on the SDK path (a small asymmetry), and (b) it **additionally loads the SKILL.md**.
 - **The Icinga overlap to know about:** on the SDK path the triage workflow is injected *twice* — once in the system prompt (`icinga_agent.md`, talking about `query_icinga`) and once in the skill (`SKILL.md`, talking about `mcp__icinga__*`). The skill is meant to be the authoritative procedural layer for the SDK; the prompt is still injected for benchmark parity. Known redundancy to reconcile before they drift.
-- **The learnings layer** (`src/agent/learnings.py`, from #6) is a data-driven feedback loop *orthogonal to routing*: after a conversation, Claude extracts 1–3 conversation-specific learnings into `data/agent_learnings.md` (fuzzy-deduped, capped at 50), which `get_agent_prompt` appends to *every* prompt — a staging ground for prompt refinements that humans later promote into the curated `.md` files.
+- **The learnings layer** (`src/agent/learnings.py`, from #6) is *orthogonal to routing*: after a conversation Claude extracts 1–3 learnings into `data/agent_learnings.md` (capped at 50), which `get_agent_prompt` appends to every prompt — data-driven *tuning*, not routing or agent definition.
 
 ## 7. Connectors with other services
 
@@ -152,11 +151,26 @@ These are **not** created by the migration, **not** derived from usage, **not** 
 
 ---
 
-## 9. The frontier (what's done vs. not)
+## 9. The parity result — does the SDK pass the gate?
+
+**Yes, preliminarily.** The Phase-2 gate is one question: is the SDK at least as good as legacy before flipping `agent.runtime`? We answer it two ways on the migrated Icinga agent, on the same 10 fresh Icinga pairs — a blinded **human-labeling** gate (the verdict of record) and a cheaper **LLM-as-judge** screen.
+
+- **Human gate** — the maintainer (Patrick) labeled all 10: verdict **`preliminary on-par`** — accuracy tied (legacy 4.8 = SDK 4.8 / 5), actionability +0.5 SDK, preference **SDK 6 · tie 3 · legacy 1**. (Not yet "powered" — a firm verdict wants ≥ 15 decisive labels / a 2nd rater.)
+- **LLM-judge** (Opus 4.6) agrees on direction (SDK ≥ legacy on every pair) but **systematically under-scores legacy** — it flags legacy's specific operational numbers as "fabrication" (mean legacy accuracy 2.95 vs the human's 4.8). 60% exact agreement, 5/6 decisive.
+
+![Confusion matrix — LLM-judge vs human ground truth](img/parity-confusion-matrix.png)
+
+**Calibrating the judge against the human.** We versioned the judge rubric (`judge_v1 → v2 → v3`) and re-ran the whole judge against the human truth at each step. Tuning **fixes the per-axis scores** (legacy-accuracy bias −1.85 → −1.25) but **no rubric matches the human's per-pair preference better than the original** — because v1's blanket pro-SDK bias *accidentally* aligned with the human's own SDK lean (fix the reason, lose the lucky alignment). At n = 10 / one rater you can calibrate the judge's scores, not reliably its preference — so the LLM-judge stays a directional **screen**, the human gate the **verdict of record**.
+
+![Judge tuning v1→v2→v3 vs human ground truth](img/parity-judge-tuning.png)
+
+> **Method + data:** [redhat-et/rhdp-parsec-integration#3](https://github.com/redhat-et/rhdp-parsec-integration/pull/3) — `benchmark/` (vote dump, confusion-matrix analysis, the three judge rubrics, scrubbed results). **Live, interactive:** the [plan-site parity section](https://parsec-plan-production.up.railway.app/#parity-results). The labeling pages (`/ab-eval`, `/ab-label`) are login-gated and sanitized.
+
+### Frontier — what's done vs. not
 
 | Built & verified | Built, NOT yet run | Open / coordinate |
 |---|---|---|
-| SDK adapter + flag (#24), runner + icinga skill/profile + MLflow run-metrics (#34); live in-cluster on NERC; cost A/B ("270× debunked") | **Accuracy/parity gate** — needs `parsec-dev` access + SME-validated references; **production multi-round cost A/B** — needs Icinga MCP reachable | #31 subprocess tracing (land as additive follow-up); #29 Dockerfile order; GitHub secret-redaction parity on the SDK path |
+| SDK adapter + flag (#24); runner + icinga skill/profile + MLflow run-metrics (#34); live in-cluster on NERC; cost A/B ("270× debunked"); **accuracy/parity gate run via human labeling → SDK on-par-or-better (preliminary)** | **Powered** human verdict (≥ 15 decisive labels / 2nd rater); in-cluster `parity_eval.py` (needs `parsec-dev` access); production multi-round cost A/B | #31 subprocess tracing (additive follow-up); #29 Dockerfile order; GitHub secret-redaction parity on the SDK path |
 
 ## 10. File map (where to look first)
 
