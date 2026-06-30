@@ -1,0 +1,11 @@
+{{- if .Values.deploy -}}
+Parsec deployed to namespace {{ include "parsec.namespaceName" . }}
+
+{{- if and .Values.oauth.enabled .Values.ingressDomain }}
+  URL: https://{{ include "parsec.externalHostname" . }}
+{{- end }}
+
+{{- if .Values.buildConfig.enabled }}
+  Build: BuildConfig watches branch '{{ .Values.buildConfig.gitBranch }}'
+{{- end }}
+{{- end -}}

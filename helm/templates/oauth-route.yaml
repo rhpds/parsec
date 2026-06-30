@@ -1,0 +1,26 @@
+{{- if and .Values.deploy .Values.oauth.enabled .Values.route.enabled .Values.ingressDomain -}}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "parsec.name" . }}-route
+  namespace: {{ include "parsec.namespaceName" . }}
+  labels:
+    {{- include "parsec.labels" . | nindent 4 }}
+    component: frontend
+  annotations:
+    haproxy.router.openshift.io/timeout: {{ .Values.route.timeout | quote }}
+    haproxy.router.openshift.io/balance: "roundrobin"
+    haproxy.router.openshift.io/rate-limit-connections: "50"
+spec:
+  host: {{ include "parsec.externalHostname" . }}
+  to:
+    kind: Service
+    name: oauth-proxy-service
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: {{ .Values.route.tls.termination }}
+    insecureEdgeTerminationPolicy: {{ .Values.route.tls.insecureEdgeTerminationPolicy }}
+  wildcardPolicy: None
+{{- end -}}

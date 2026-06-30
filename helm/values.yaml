@@ -1,0 +1,222 @@
+# === Master switches ===
+deploy: true
+version: main
+
+# === Infrastructure ===
+namespace:
+  create: false
+  name: parsec-dev
+
+image:
+  repository: ""
+  pullPolicy: Always
+  tagOverride: ""
+
+nameOverride: ""
+fullnameOverride: ""
+
+# === Build (OpenShift) ===
+buildConfig:
+  enabled: true
+  gitRepo: rhpds/parsec
+  gitBranch: main
+  webhookSecretName: parsec-webhook-secret
+
+# === Application ===
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# === Application Config ===
+config:
+  app:
+    name: parsec
+    port: 8000
+    host: "0.0.0.0"
+    log_level: INFO
+  anthropic:
+    backend: vertex
+    model: "claude-sonnet-4@20250514"
+    max_tokens: 4096
+    max_tool_rounds: 10
+  vertex:
+    project_id: ""
+    region: us-east5
+  provision_db:
+    max_rows: 500
+  aws:
+    region: us-east-1
+    batch_size: 100
+  cost_monitor:
+    api_url: "http://cost-data-service.cost-monitor.svc:8000"
+    dashboard_url: ""
+  cloudtrail:
+    event_data_store_id: ""
+  learnings:
+    admin_users: ""
+    admin_groups: "ace-octo-team"
+  github:
+    mcp_url: "https://api.githubcopilot.com/mcp/"
+  mlflow:
+    tracking_url: ""
+    experiment_name: parsec-agent-metrics
+  splunk:
+    host: "https://splunk-api.corp.redhat.com"
+    token: ""
+    verify_ssl: false
+  reporting_mcp:
+    mcp_url: "http://reporting-mcp.demo-reporting.svc:8080/mcp/"
+
+# === Auth ===
+auth:
+  allowedGroups: "rhpds-admins,parsec-local-users,ace-octo-team"
+  allowedUsers: ""
+
+# === OAuth Proxy ===
+oauth:
+  enabled: true
+  clientName: parsec-oauth-client
+  image:
+    repository: registry.redhat.io/openshift4/ose-oauth-proxy-rhel9
+    tag: latest
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  clientSecret: ""
+  skipAuthRegex: "^/api/(health|alert/)"
+  upstreamTimeout: 180s
+
+# === Sidecar: Icinga MCP ===
+icinga:
+  enabled: true
+  image:
+    repository: quay.io/rhpds/monitoring-mcp
+    tag: v0.3.1
+  port: 3000
+  transport: sse
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# === Secrets (Bitwarden vault secret names) ===
+secrets:
+  oauthProxy: parsec-oauth-proxy
+  apiTokens:
+    alertApiKey: parsec-alert-api-key
+    githubToken: parsec-github-token
+    reportingMcpToken: parsec-reporting-mcp-token
+  cloudCredentials:
+    aws: parsec-aws-credentials
+    azure: parsec-azure-credentials
+    gcp: parsec-gcp-credentials
+  vertex:
+    enabled: true
+    serviceAccount: parsec-vertex-sa-json
+  gcpBilling:
+    enabled: true
+    serviceAccount: parsec-gcp-billing-sa-json
+  kubeconfigs:
+    babylon:
+      east: parsec-babylon-east-kubeconfig
+      west: parsec-babylon-west-kubeconfig
+      partner0: parsec-babylon-partner0-kubeconfig
+      partner1: parsec-babylon-partner1-kubeconfig
+      integration: parsec-babylon-integration-kubeconfig
+      babydev: parsec-babylon-babydev-kubeconfig
+    ocpv:
+      ocpv05: parsec-ocpv-05-kubeconfig
+      ocpv06: parsec-ocpv-06-kubeconfig
+      ocpv07: parsec-ocpv-07-kubeconfig
+      ocpv08: parsec-ocpv-08-kubeconfig
+      ocpv09: parsec-ocpv-09-kubeconfig
+      ocpv10: parsec-ocpv-10-kubeconfig
+  aap2:
+    east: parsec-aap2-east
+    west: parsec-aap2-west
+    event0: parsec-aap2-event0
+    prod0: parsec-aap2-prod0
+    event1: parsec-aap2-event1
+    prod1: parsec-aap2-prod1
+    partner0: parsec-aap2-partner0
+  icinga:
+    enabled: true
+    credentials: parsec-icinga-credentials
+
+# === Storage ===
+pvc:
+  storageClass: ""
+  accessMode: ReadWriteMany
+  size: 10Gi
+
+# === CronJobs ===
+cronjobs:
+  pricingRefresh:
+    schedule: "0 3 * * 1"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 3Gi
+  azureBillingRefresh:
+    schedule: "0 4 * * *"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
+# === HPA ===
+hpa:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 4
+  targetMemoryUtilization: 80
+  targetCPUUtilization: 70
+
+# === Routes ===
+route:
+  enabled: true
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  timeout: 300s
+
+healthRoute:
+  ipWhitelist: "10.0.0.0/8 172.16.0.0/12"
+  timeout: "10s"
+
+ingressDomain: ""
+
+# === Monitoring ===
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  path: /metrics
+
+# === ServiceAccount ===
+serviceAccount:
+  create: true
+  name: ""
+
+# === MLflow Subchart ===
+mlflow:
+  deploy: false

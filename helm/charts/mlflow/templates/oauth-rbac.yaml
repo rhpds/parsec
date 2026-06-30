@@ -1,0 +1,33 @@
+{{- if and .Values.deploy .Values.oauth.enabled -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mlflow-oauth-viewer
+  namespace: {{ include "mlflow.namespaceName" . }}
+  labels:
+    {{- include "mlflow.labels" . | nindent 4 }}
+    component: oauth
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get"]
+{{- range .Values.oauth.groups }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mlflow-oauth-{{ . }}
+  namespace: {{ include "mlflow.namespaceName" $ }}
+  labels:
+    {{- include "mlflow.labels" $ | nindent 4 }}
+    component: oauth
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mlflow-oauth-viewer
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: {{ . }}
+{{- end }}
+{{- end -}}
