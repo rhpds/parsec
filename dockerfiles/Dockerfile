@@ -17,6 +17,14 @@ FROM registry.access.redhat.com/ubi9/python-311:latest
 USER 0
 RUN dnf install -y --nodocs libpq && dnf clean all
 
+# Claude Agent SDK runtime: Node.js + the `claude` CLI that the SDK drives as a
+# subprocess (the Python claude-agent-sdk wrapper comes via requirements.txt).
+# Required for agent.runtime=sdk; harmless for the default legacy runtime.
+# Pin the CLI to the version verified against the bundled claude-agent-sdk so an
+# image rebuild can't silently pull a breaking release.
+RUN dnf install -y --nodocs nodejs npm && dnf clean all && \
+    npm install -g @anthropic-ai/claude-code@2.1.169 && npm cache clean --force
+
 COPY --from=builder /opt/app-root /opt/app-root
 
 WORKDIR /app
@@ -29,21 +37,37 @@ COPY skills/ skills/
 COPY data/ec2_pricing.json data-seed/ec2_pricing.json
 COPY scripts/refresh_pricing.py scripts/refresh_pricing.py
 COPY scripts/refresh_azure_billing.py scripts/refresh_azure_billing.py
+COPY skills/ skills/
 
-RUN mkdir -p /app/data/reports /app/data/debug && \
-    chgrp -R 0 /app && \
-    chmod -R g=u /app
+# Skills-layout bridge: the SDK's "project" setting source discovers skills at
+# <cwd>/.claude/skills/, but Parsec ships them under skills/. Symlink so the
+# baked icinga-triage skill is discoverable by the SDK runtime.
+RUN mkdir -p /app/.claude && ln -sfn /app/skills /app/.claude/skills
 
+RUN mkdir -p /app/data/reports /app/data/debug /home/claude && \
+    chgrp -R 0 /app /home/claude && \
+    chmod -R g=u /app /home/claude
+
+# HOME must be writable for the claude CLI's state (~/.claude); /home/claude is
+# group-0 writable for the arbitrary OpenShift UID. NOTE: this sets HOME globally
+# for the container — it points at an empty, group-writable dir so the blast radius
+# is benign, but scoping HOME to only the SDK subprocess env is a follow-up to
+# revisit when this Dockerfile is reconciled with the ubi9-minimal hardening (#29).
 ENV PYTHONPATH="/app" \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    HOME=/home/claude \
+    CLAUDE_CODE_ACCEPT_TOS=true
 
 USER 1001
 
-RUN python -c "import dynaconf, fastapi, uvicorn; print('Dependencies OK')"
+RUN python3 -c "import dynaconf, fastapi, uvicorn; print('Dependencies OK')" && \
+    node --version && claude --version && \
+    python3 -c "import claude_agent_sdk; print('claude-agent-sdk OK')" && \
+    test -f /app/.claude/skills/icinga-triage/SKILL.md && echo "icinga-triage skill baked"
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"
 
 CMD ["uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "8000"]

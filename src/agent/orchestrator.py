@@ -1052,6 +1052,12 @@ async def run_agent(  # noqa: C901
                         collector.record_tokens(
                             input_tokens=response.usage.input_tokens,
                             output_tokens=response.usage.output_tokens,
+                            cache_creation_tokens=getattr(
+                                response.usage, "cache_creation_input_tokens", 0
+                            )
+                            or 0,
+                            cache_read_tokens=getattr(response.usage, "cache_read_input_tokens", 0)
+                            or 0,
                         )
                         if not collector.model:
                             collector.record_model(response.model)

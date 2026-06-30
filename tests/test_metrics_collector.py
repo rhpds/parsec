@@ -105,12 +105,128 @@ def test_collector_to_mlflow_metrics():
     assert metrics["output_tokens"] == 200
 
 
+def test_collector_records_cache_tokens():
+    """Cache-creation/read tokens accumulate alongside input/output."""
+    c = MetricsCollector(conversation_id="conv-123")
+    c.record_tokens(
+        input_tokens=10,
+        output_tokens=1588,
+        cache_creation_tokens=28665,
+        cache_read_tokens=0,
+    )
+    c.record_tokens(input_tokens=10, output_tokens=20, cache_read_tokens=28665)
+    assert c.input_tokens == 20
+    assert c.output_tokens == 1608
+    assert c.cache_creation_tokens == 28665
+    assert c.cache_read_tokens == 28665
+
+
+def test_collector_defaults_to_legacy_runtime():
+    """Runtime defaults to legacy and can be flipped to sdk."""
+    c = MetricsCollector(conversation_id="conv-123")
+    assert c.runtime == "legacy"
+    c.record_runtime("sdk")
+    assert c.runtime == "sdk"
+    assert c.to_params()["runtime"] == "sdk"
+
+
+def test_collector_estimates_legacy_cost_from_tokens():
+    """With no authoritative cost, cost is estimated from tokens + model pricing."""
+    c = MetricsCollector(conversation_id="conv-123")
+    c.record_model("claude-sonnet-4-6")
+    c.record_tokens(input_tokens=1000, output_tokens=500)
+    # 1000*3e-6 + 500*15e-6 = 0.003 + 0.0075
+    assert c.resolved_cost_usd() == pytest.approx(0.0105)
+    assert c.to_metrics()["cost_usd"] == pytest.approx(0.0105)
+
+
+def test_collector_cost_includes_cache_pricing():
+    """Cache-write is billed 1.25x input, cache-read 0.1x input."""
+    c = MetricsCollector(conversation_id="conv-123")
+    c.record_model("claude-sonnet-4-6")
+    c.record_tokens(
+        input_tokens=0, output_tokens=0, cache_creation_tokens=1000, cache_read_tokens=2000
+    )
+    # 1000*3e-6*1.25 + 2000*3e-6*0.1 = 0.00375 + 0.0006
+    assert c.resolved_cost_usd() == pytest.approx(0.00435)
+
+
+def test_collector_authoritative_cost_wins():
+    """An explicit (SDK) cost is used verbatim, ignoring the token estimate."""
+    c = MetricsCollector(conversation_id="conv-123")
+    c.record_model("claude-sonnet-4-6")
+    c.record_tokens(input_tokens=10, output_tokens=1588)
+    c.record_cost(0.140644)
+    assert c.cost_usd == pytest.approx(0.140644)
+    assert c.resolved_cost_usd() == pytest.approx(0.140644)
+
+
+def test_collector_record_cost_keeps_largest():
+    """A later zero cannot wipe a recorded cost."""
+    c = MetricsCollector(conversation_id="conv-123")
+    c.record_cost(0.05)
+    c.record_cost(0.0)
+    assert c.cost_usd == pytest.approx(0.05)
+
+
+def test_collector_unknown_model_assumes_sonnet_pricing():
+    """An unrecognized model falls back to Sonnet-class pricing, not zero."""
+    c = MetricsCollector(conversation_id="conv-123")
+    c.record_model("some-future-model")
+    c.record_tokens(input_tokens=1000, output_tokens=0)
+    assert c.resolved_cost_usd() == pytest.approx(0.003)
+
+
+def test_collector_to_metrics_includes_new_fields():
+    """New cache + cost metrics are present in the MLflow metrics dict."""
+    c = MetricsCollector(conversation_id="conv-123")
+    c.record_runtime("sdk")
+    c.record_tokens(input_tokens=10, output_tokens=20, cache_read_tokens=28665)
+    c.record_cost(0.037)
+    metrics = c.to_metrics()
+    assert metrics["cache_read_tokens"] == 28665
+    assert metrics["cache_creation_tokens"] == 0
+    assert metrics["cost_usd"] == pytest.approx(0.037)
+
+
 @pytest.mark.asyncio
 async def test_flush_noop_when_disabled():
     """Flush does nothing when MLflow client is None."""
     c = MetricsCollector(conversation_id="conv-123")
     with patch("src.metrics.collector.get_mlflow_client", return_value=None):
         await c.flush_to_mlflow()
+
+
+@pytest.mark.asyncio
+async def test_flush_tags_run_with_runtime():
+    """The flushed run is tagged with the runtime so legacy/SDK can be pivoted."""
+    c = MetricsCollector(conversation_id="conv-123")
+    c.record_runtime("sdk")
+    c.record_cost(0.037)
+
+    mock_client = MagicMock()
+    mock_experiment = MagicMock()
+    mock_experiment.experiment_id = "exp-1"
+    mock_client.get_experiment_by_name.return_value = mock_experiment
+    mock_run = MagicMock()
+    mock_run.info.run_id = "run-1"
+    mock_client.create_run.return_value = mock_run
+
+    with (
+        patch("src.metrics.collector.get_mlflow_client", return_value=mock_client),
+        patch(
+            "src.metrics.collector.get_experiment_name",
+            return_value="test-exp",
+        ),
+    ):
+        await c.flush_to_mlflow()
+
+    _, kwargs = mock_client.create_run.call_args
+    assert kwargs["tags"]["runtime"] == "sdk"
+    assert kwargs["tags"]["conversation_id"] == "conv-123"
+    logged_metrics = {call.args[1] for call in mock_client.log_metric.call_args_list}
+    assert "cost_usd" in logged_metrics
+    assert "cache_read_tokens" in logged_metrics
 
 
 @pytest.mark.asyncio
@@ -140,9 +256,12 @@ async def test_flush_logs_to_mlflow():
     mock_run.info.run_id = "run-1"
     mock_client.create_run.return_value = mock_run
 
-    with patch("src.metrics.collector.get_mlflow_client", return_value=mock_client), patch(
-        "src.metrics.collector.get_experiment_name",
-        return_value="test-exp",
+    with (
+        patch("src.metrics.collector.get_mlflow_client", return_value=mock_client),
+        patch(
+            "src.metrics.collector.get_experiment_name",
+            return_value="test-exp",
+        ),
     ):
         await c.flush_to_mlflow()
 

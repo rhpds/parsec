@@ -1,0 +1,91 @@
+{
+  "_meta": {
+    "purpose": "Phase-2 accuracy/parity eval set for the Icinga sub-agent (legacy vs Agent SDK).",
+    "provenance": "Alert shapes are drawn from the REAL RHDP monitoring surface encoded in config/prompts/icinga_agent.md + skills/icinga-triage/SKILL.md (authored by the Parsec maintainers from production Icinga2). Case ocp-cluster-operators is the exact alert already used by parsec-dependencies/pr2-test. References are curated from the skill's domain logic and are PENDING SME validation by yvarbev@redhat.com (RHDP Icinga SME) and Eoghan's sign-off before they count as ground truth.",
+    "how_to_replace_with_real_history": "Set source=mlflow (pull recent icinga runs from the parsec-agent-metrics experiment) or source=conversations (data/conversations/*.json on parsec-dev) once cluster/MLflow access is available; see scripts/parity_eval.py.",
+    "scoring_axes": ["root-cause accuracy vs reference", "platform inference", "legacy-vs-SDK pairwise parity"]
+  },
+  "queries": [
+    {
+      "id": "ocp-cluster-operators",
+      "query": "Icinga alert: service 'OCP Cluster Operators' on host 'cnv-us-east-ocp-3' is CRITICAL (HARD). last_check_result.output: 'authentication operator Degraded=True (OAuthServerDeploymentDegraded); 1/33 operators degraded'. command: ['/home/icinga/monitoring-scripts/monitoring/check_ocp_cluster_operators.sh', '--degraded-crit', '1']. Not acknowledged, not in downtime. Triage it.",
+      "reference": {
+        "platform": "NaaS — nested OCP running as VMs on CNV (the cnv-* host name) on IBM Cloud bare metal",
+        "root_cause": "The authentication cluster operator is Degraded (OAuthServerDeploymentDegraded); 1 of 33 operators degraded crossed the check's --degraded-crit 1 threshold.",
+        "key_points": [
+          "Identifies the degraded operator as authentication / OAuth server deployment",
+          "Names check_ocp_cluster_operators.sh and locates it in rhpds/monitoring-scripts",
+          "Notes cluster-operator config lives in the openshift group of rhpds/monitoring-config",
+          "Gives a 3-tier action plan (immediate / investigation / long-term)"
+        ]
+      }
+    },
+    {
+      "id": "babylon-schema-diff",
+      "query": "Dashboard alert: 'Babylon Schema YAML Diff on RHDP API Aggregator is critical'. Triage it.",
+      "reference": {
+        "platform": "RHDP API Aggregator / Babylon control plane",
+        "root_cause": "The deployed Babylon catalog schema YAML differs from the version in git (schema drift) — the diff check went CRITICAL.",
+        "key_points": [
+          "Bridges the dashboard DISPLAY name to the internal check using match() with wildcards from keywords",
+          "Reports whether the alert is already acknowledged or in downtime first",
+          "Locates the check/config in the babylon-related group of rhpds/monitoring-config",
+          "Action plan addresses reconciling the schema diff"
+        ]
+      }
+    },
+    {
+      "id": "ocp-nodes-ready",
+      "query": "Icinga: service 'OCP Nodes Ready' on host 'ocpv07-mgmt' is WARNING (HARD). Output: check_ocp_nodes_ready.sh reports 2/12 nodes NotReady. Triage it.",
+      "reference": {
+        "platform": "OCPV cluster (ocpv07)",
+        "root_cause": "2 of 12 nodes are NotReady, which crossed the WARNING (not yet CRITICAL) threshold in check_ocp_nodes_ready.sh.",
+        "key_points": [
+          "Fetches check_ocp_nodes_ready.sh early because its threshold logic decides WARNING vs CRITICAL",
+          "Distinguishes WARNING from CRITICAL and notes the NotReady-node percentage drives severity",
+          "Gives node-level investigation commands (which nodes, why NotReady)"
+        ]
+      }
+    },
+    {
+      "id": "host-down-cnv",
+      "query": "Icinga: host 'cnv-us-west-ocp-2' is DOWN (HARD, state=1). Not acknowledged, not in downtime. Triage it.",
+      "reference": {
+        "platform": "NaaS — nested OCP on CNV (cnv-* host)",
+        "root_cause": "Host-level DOWN (reachability of the bare-metal/VM host), distinct from a single service going CRITICAL.",
+        "key_points": [
+          "Treats host state 1=DOWN as a host-level (not service) problem",
+          "Considers parent-host / UNREACHABLE cascade",
+          "Checks whether it is in downtime before escalating",
+          "Uses the platform-appropriate bastion/access path"
+        ]
+      }
+    },
+    {
+      "id": "db-disk-full",
+      "query": "Icinga: service 'Disk /var' on host 'rhpds-db-1' is CRITICAL (HARD). Output: 'DISK CRITICAL - free space: /var 2% (1.2 GiB)'. Triage it.",
+      "reference": {
+        "platform": "RHDP database host",
+        "root_cause": "The /var filesystem is nearly full (2% free) — a resource/capacity alert.",
+        "key_points": [
+          "Recognizes this is a RESOURCE alert where the service output is sufficient — does NOT need to search GitHub for config",
+          "Immediate mitigation: free space / rotate or clear logs",
+          "Long-term: capacity or log-retention fix"
+        ]
+      }
+    },
+    {
+      "id": "acked-in-downtime",
+      "query": "Icinga: service 'Exam Scheduler Heartbeat' on host 'exams-prod-1' is CRITICAL (HARD), but it has an existing acknowledgement and an active scheduled downtime. Triage it.",
+      "reference": {
+        "platform": "RHDP Exams platform",
+        "root_cause": "Service is CRITICAL but already acknowledged AND in an active downtime window — most likely already being handled.",
+        "key_points": [
+          "Reports the existing downtime/acknowledgement FIRST so engineers don't chase an already-handled issue",
+          "Pulls get_comments to surface notes from other engineers",
+          "Does NOT take write actions (ack/downtime/recheck) unless explicitly asked"
+        ]
+      }
+    }
+  ]
+}

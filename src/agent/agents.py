@@ -275,6 +275,19 @@ def classify_fast(question: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _should_use_sdk(agent_type: str, cfg: Any) -> bool:
+    """Whether this sub-agent task should run on the Agent SDK (Phase-2 pilot).
+
+    Single source of truth for the SDK dispatch rule, shared by both sub-agent
+    entry points (``run_sub_agent`` and ``run_sub_agent_streaming``): only Icinga
+    has an SDK profile today, and only when ``agent.runtime: sdk`` (default
+    ``legacy``). Add agents here as they gain SDK profiles.
+    """
+    from src.llm import RUNTIME_SDK, get_runtime
+
+    return agent_type == "icinga" and get_runtime(cfg) == RUNTIME_SDK
+
+
 def _extract_user_context(history: list) -> str:
     """Extract user text messages from conversation history for sub-agent context.
 
@@ -390,6 +403,16 @@ async def run_sub_agent(  # noqa: C901
         }
 
     cfg = get_config()
+
+    # Phase-2: route Icinga through the Agent SDK when agent.runtime=sdk.
+    if _should_use_sdk(agent_type, cfg):
+        from src.agent.runner import AgentRunner
+        from src.llm import RUNTIME_SDK
+
+        return await AgentRunner(cfg, runtime=RUNTIME_SDK).run_sub_agent(
+            agent_type, task, context=context, conversation_history=conversation_history
+        )
+
     model = cfg.anthropic.get("model", "claude-sonnet-4-20250514")
     max_tokens = cfg.anthropic.get("max_tokens", 4096)
 
@@ -673,10 +696,13 @@ async def run_sub_agent_streaming(  # noqa: C901
         _trim_history,
     )
     from src.agent.streaming import (
+        sse_agent_done,
+        sse_agent_start,
         sse_done,
         sse_error,
         sse_event,
         sse_report,
+        sse_status,
         sse_text,
     )
 
@@ -691,6 +717,41 @@ async def run_sub_agent_streaming(  # noqa: C901
         _tool_cache.set({})
 
     cfg = get_config()
+
+    # Phase-2: route Icinga through the Agent SDK when agent.runtime=sdk.
+    if _should_use_sdk(agent_type, cfg):
+        from src.agent.runner import AgentRunner
+        from src.llm import RUNTIME_SDK
+
+        yield sse_agent_start(agent_type, agent_cfg.name)
+        yield sse_status("Running via Claude Agent SDK (icinga-triage skill)…")
+        # Phase-2 limitation: the SDK runs its own loop and we await the full
+        # result, so the answer arrives as a single SSE chunk rather than streamed
+        # token-by-token like the legacy path (the user sees a spinner, then the
+        # whole answer). Acceptable for the pilot; smoother streaming (heartbeat /
+        # partial messages onto the queue) is a tracked follow-up.
+        sdk_result = await AgentRunner(cfg, runtime=RUNTIME_SDK).run_sub_agent(
+            agent_type,
+            task,
+            context=context,
+            conversation_history=conversation_history,
+            metrics=metrics,
+        )
+        answer = sdk_result.get("summary") or sdk_result.get("error") or "(no output)"
+        yield sse_text(answer)
+        yield sse_agent_done(agent_type)
+        # Emit the same `history` SSE event the legacy exit points yield (line ~926)
+        # so the frontend's saveConversation() runs and the Icinga answer survives a
+        # page refresh — without it the SDK answer is lost. [PR #34 review]
+        from src.agent.orchestrator import _serialize_messages as _serialize_history
+
+        sdk_history = _serialize_history(_trim_history(conversation_history or []))
+        sdk_history.append({"role": "user", "content": task})
+        sdk_history.append({"role": "assistant", "content": answer})
+        yield sse_event("history", {"messages": sdk_history})
+        yield sse_done()
+        return
+
     model = cfg.anthropic.get("model", "claude-sonnet-4-20250514")
     max_tokens = cfg.anthropic.get("max_tokens", 4096)
 
@@ -784,6 +845,12 @@ async def run_sub_agent_streaming(  # noqa: C901
                         metrics.record_tokens(
                             input_tokens=response.usage.input_tokens,
                             output_tokens=response.usage.output_tokens,
+                            cache_creation_tokens=getattr(
+                                response.usage, "cache_creation_input_tokens", 0
+                            )
+                            or 0,
+                            cache_read_tokens=getattr(response.usage, "cache_read_input_tokens", 0)
+                            or 0,
                         )
                         if not metrics.model:
                             metrics.record_model(response.model)
