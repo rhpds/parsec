@@ -69,10 +69,21 @@ def build_icinga_sdk_profile(config: Any) -> dict[str, Any]:
 
 
 def _allowed_tools(mcp_servers: dict[str, Any]) -> list[str]:
-    """Whitelist the configured MCP servers' tools (server-level prefixes)."""
+    """Whitelist all tools from the configured MCP servers.
+
+    Per the Claude Code permission rules, a bare ``mcp__<server>`` entry matches
+    *any* tool provided by that server — it is the canonical "all tools from this
+    server" form, equivalent to the wildcard ``mcp__<server>__*``. So
+    ``["mcp__icinga", "mcp__github"]`` admits every ``mcp__icinga__*`` /
+    ``mcp__github__*`` call the SKILL.md uses, without listing each tool.
+    See https://code.claude.com/docs/en/permissions (section "MCP").
+    """
     return [f"mcp__{name}" for name in mcp_servers]
 
 
+# NOTE: `_section` duplicates `_get_section` in `agent_sdk_client.py`. PR #31
+# extracts a shared `src/llm/config_section.py`; once #31 merges, rebase and
+# import `section()` from there instead of keeping this copy.  [PR #34 review]
 def _section(config: Any, key: str) -> dict[str, Any]:
     """Return config sub-section ``key`` as a plain dict (``{}`` if missing)."""
     if config is None:

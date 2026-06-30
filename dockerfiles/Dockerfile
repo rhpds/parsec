@@ -59,14 +59,14 @@ ENV PYTHONPATH="/app" \
 
 USER 1001
 
-RUN python -c "import dynaconf, fastapi, uvicorn; print('Dependencies OK')" && \
+RUN python3 -c "import dynaconf, fastapi, uvicorn; print('Dependencies OK')" && \
     node --version && claude --version && \
-    python -c "import claude_agent_sdk; print('claude-agent-sdk OK')" && \
+    python3 -c "import claude_agent_sdk; print('claude-agent-sdk OK')" && \
     test -f /app/.claude/skills/icinga-triage/SKILL.md && echo "icinga-triage skill baked"
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"
 
 CMD ["uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "8000"]

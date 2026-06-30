@@ -37,9 +37,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
 import hashlib
 import json
+import logging
 import os
 import statistics
 import sys
@@ -49,6 +49,8 @@ from typing import Any
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_SET = HERE / "icinga_eval_set.json"
+
+logger = logging.getLogger("parity_eval")
 
 # Phase-2 acceptance gates (Version-A thresholds; Version-B treats latency as
 # non-blocking and expects cost to pass with margin — both reported either way).
@@ -156,8 +158,12 @@ async def run_legacy(query: dict) -> tuple[str, Any, bool]:
     errored = False
     async for ev in run_sub_agent_streaming(agent_type="icinga", task=query["query"], metrics=c):
         if ev.startswith("event: text\n"):
-            with contextlib.suppress(IndexError, json.JSONDecodeError, AttributeError):
+            try:
                 parts.append(json.loads(ev.split("data: ", 1)[1].strip()).get("content", ""))
+            except (IndexError, json.JSONDecodeError, AttributeError) as exc:
+                # Don't drop silently: a truncated legacy answer would bias the
+                # parity comparison toward the SDK. Surface it at debug. [PR #34 review]
+                logger.debug("dropped unparseable SSE text chunk (%s): %r", exc, ev[:200])
         elif ev.startswith("event: error\n"):
             errored = True
     c.stop_timer()

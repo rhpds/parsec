@@ -737,8 +737,18 @@ async def run_sub_agent_streaming(  # noqa: C901
             conversation_history=conversation_history,
             metrics=metrics,
         )
-        yield sse_text(sdk_result.get("summary") or sdk_result.get("error") or "(no output)")
+        answer = sdk_result.get("summary") or sdk_result.get("error") or "(no output)"
+        yield sse_text(answer)
         yield sse_agent_done(agent_type)
+        # Emit the same `history` SSE event the legacy exit points yield (line ~926)
+        # so the frontend's saveConversation() runs and the Icinga answer survives a
+        # page refresh — without it the SDK answer is lost. [PR #34 review]
+        from src.agent.orchestrator import _serialize_messages as _serialize_history
+
+        sdk_history = _serialize_history(_trim_history(conversation_history or []))
+        sdk_history.append({"role": "user", "content": task})
+        sdk_history.append({"role": "assistant", "content": answer})
+        yield sse_event("history", {"messages": sdk_history})
         yield sse_done()
         return
 
