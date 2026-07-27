@@ -117,6 +117,36 @@ class AgentSdkClient:
 
     # ------------------------------------------------------------------ api
 
+    def _build_options(
+        self,
+        sdk: Any,
+        *,
+        prompt: str,
+        system: str | None,
+        skills: list[str] | None,
+        allowed_tools: list[str] | None,
+        mcp_servers: dict[str, Any] | None,
+        max_turns: int | None,
+    ) -> Any:
+        """Build ClaudeAgentOptions from call parameters and config."""
+        options_kwargs: dict[str, Any] = {
+            "model": self._cfg.model,
+            "max_turns": max_turns or self._cfg.max_turns,
+            "setting_sources": list(self._cfg.setting_sources),
+            "env": {**os.environ, **self._cfg.extra_env},
+        }
+        if self._cfg.cwd:
+            options_kwargs["cwd"] = self._cfg.cwd
+        if system:
+            options_kwargs["system_prompt"] = system
+        if skills is not None:
+            options_kwargs["skills"] = skills
+        if allowed_tools is not None:
+            options_kwargs["allowed_tools"] = allowed_tools
+        if mcp_servers:
+            options_kwargs["mcp_servers"] = mcp_servers
+        return sdk.ClaudeAgentOptions(**options_kwargs)
+
     async def complete(
         self,
         *,
@@ -150,51 +180,20 @@ class AgentSdkClient:
             AgentSdkUnavailableError: if ``claude_agent_sdk`` isn't installed.
         """
         sdk = _import_sdk()
+        options = self._build_options(
+            sdk,
+            prompt=prompt,
+            system=system,
+            skills=skills,
+            allowed_tools=allowed_tools,
+            mcp_servers=mcp_servers,
+            max_turns=max_turns,
+        )
 
-        options_kwargs: dict[str, Any] = {
-            "model": self._cfg.model,
-            "max_turns": max_turns or self._cfg.max_turns,
-            "setting_sources": list(self._cfg.setting_sources),
-            "env": {**os.environ, **self._cfg.extra_env},
-        }
-        if self._cfg.cwd:
-            options_kwargs["cwd"] = self._cfg.cwd
-        if system:
-            options_kwargs["system_prompt"] = system
-        if skills is not None:
-            options_kwargs["skills"] = skills
-        if allowed_tools is not None:
-            options_kwargs["allowed_tools"] = allowed_tools
-        if mcp_servers:
-            options_kwargs["mcp_servers"] = mcp_servers
-
-        options = sdk.ClaudeAgentOptions(**options_kwargs)
-
-        text_parts: list[str] = []
-        tool_invocations: list[dict[str, Any]] = []
-        model: str | None = None
-        session_id: str | None = None
-        usage = SdkUsage()
-        is_error = False
-        error_message: str | None = None
-
-        state: dict[str, Any] = {
-            "text_parts": text_parts,
-            "tool_invocations": tool_invocations,
-            "model": model,
-            "session_id": session_id,
-            "usage": usage,
-            "is_error": is_error,
-            "error_message": error_message,
-        }
-
+        state = _new_ingest_state()
         effective_timeout = timeout if timeout is not None else self._cfg.timeout
 
         try:
-            # asyncio.timeout(None) is a valid no-op, so this one path covers
-            # both the bounded and unbounded cases. On expiry it cancels the
-            # async-for, which closes the SDK's async generator and tears down
-            # the child CLI process instead of leaking it.
             async with asyncio.timeout(effective_timeout):
                 async for message in sdk.query(prompt=prompt, options=options):
                     if isinstance(message, sdk.AssistantMessage):
@@ -216,24 +215,31 @@ class AgentSdkClient:
             state["is_error"] = True
             state["error_message"] = f"{type(e).__name__}: {e}"
 
-        model = state["model"]
-        session_id = state["session_id"]
-        usage = state["usage"]
-        is_error = state["is_error"]
-        error_message = state["error_message"]
-
         return SdkResult(
-            text="".join(text_parts),
-            tool_invocations=tuple(tool_invocations),
-            model=model,
-            session_id=session_id,
-            usage=usage,
-            is_error=is_error,
-            error_message=error_message,
+            text="".join(state["text_parts"]),
+            tool_invocations=tuple(state["tool_invocations"]),
+            model=state["model"],
+            session_id=state["session_id"],
+            usage=state["usage"],
+            is_error=state["is_error"],
+            error_message=state["error_message"],
         )
 
 
 # ---------------------------------------------------------------------- helpers
+
+
+def _new_ingest_state() -> dict[str, Any]:
+    """Create a fresh state dict for message ingestion."""
+    return {
+        "text_parts": [],
+        "tool_invocations": [],
+        "model": None,
+        "session_id": None,
+        "usage": SdkUsage(),
+        "is_error": False,
+        "error_message": None,
+    }
 
 
 def _import_sdk() -> Any:

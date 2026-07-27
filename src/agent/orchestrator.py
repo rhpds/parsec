@@ -105,18 +105,18 @@ def _is_reporting_mcp_tool(name: str) -> bool:
     return is_mcp_tool(name)
 
 
-async def _execute_tool(tool_name: str, tool_input: dict) -> dict:  # noqa: C901
-    """Dispatch a tool call to the appropriate handler."""
+async def _execute_db_tool(tool_name: str, tool_input: dict) -> dict | None:
+    """Dispatch database and Reporting MCP tools. Returns None if not handled."""
     if tool_name == "query_provisions_db":
         return await execute_query(tool_input["sql"])
 
-    elif tool_name == "db_read_knowledge":
+    if tool_name == "db_read_knowledge":
         from src.connections import reporting_mcp
 
         domain = tool_input["domain"]
         return await reporting_mcp.read_resource(f"database://knowledge/{domain}")
 
-    elif tool_name == "db_get_prompt":
+    if tool_name == "db_get_prompt":
         from src.connections import reporting_mcp
 
         return await reporting_mcp.get_prompt(
@@ -124,13 +124,18 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:  # noqa: C901
             tool_input.get("arguments", {}),
         )
 
-    elif _is_reporting_mcp_tool(tool_name):
+    if _is_reporting_mcp_tool(tool_name):
         from src.connections import reporting_mcp
 
         original_name = reporting_mcp.get_mcp_tool_original(tool_name)
         return await reporting_mcp.call_tool(original_name, tool_input)
 
-    elif tool_name == "query_aws_costs":
+    return None
+
+
+async def _execute_cost_tool(tool_name: str, tool_input: dict) -> dict:
+    """Dispatch cost, pricing, and capacity tools."""
+    if tool_name == "query_aws_costs":
         return await query_aws_costs(
             account_ids=tool_input["account_ids"],
             start_date=tool_input["start_date"],
@@ -138,7 +143,7 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:  # noqa: C901
             group_by=tool_input.get("group_by", "SERVICE"),
         )
 
-    elif tool_name == "query_azure_costs":
+    if tool_name == "query_azure_costs":
         return await asyncio.to_thread(
             query_azure_costs,
             start_date=tool_input["start_date"],
@@ -147,25 +152,7 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:  # noqa: C901
             meter_filter=tool_input.get("meter_filter"),
         )
 
-    elif tool_name == "query_azure_pools":
-        return await query_azure_pools(
-            action=tool_input["action"],
-            pool_id=tool_input.get("pool_id"),
-            subscription_name=tool_input.get("subscription_name"),
-            project_tag=tool_input.get("project_tag"),
-            database=tool_input.get("database", "pools"),
-            max_results=tool_input.get("max_results", 100),
-        )
-
-    elif tool_name == "query_gcp_projects":
-        return await query_gcp_projects(
-            action=tool_input["action"],
-            project_id=tool_input.get("project_id"),
-            state_filter=tool_input.get("state_filter"),
-            max_results=tool_input.get("max_results", 100),
-        )
-
-    elif tool_name == "query_gcp_costs":
+    if tool_name == "query_gcp_costs":
         return await query_gcp_costs(
             start_date=tool_input["start_date"],
             end_date=tool_input["end_date"],
@@ -174,14 +161,14 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:  # noqa: C901
             filter_projects=tool_input.get("filter_projects"),
         )
 
-    elif tool_name == "query_aws_pricing":
+    if tool_name == "query_aws_pricing":
         return await query_aws_pricing(
             instance_type=tool_input["instance_type"],
             region=tool_input.get("region", "us-east-1"),
             os_type=tool_input.get("os_type", "Linux"),
         )
 
-    elif tool_name == "query_cost_monitor":
+    if tool_name == "query_cost_monitor":
         return await query_cost_monitor(
             endpoint=tool_input["endpoint"],
             start_date=tool_input["start_date"],
@@ -193,23 +180,44 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:  # noqa: C901
             selected_key=tool_input.get("selected_key", ""),
         )
 
-    elif tool_name == "query_aws_capacity_manager":
-        return await query_aws_capacity_manager(
-            metric=tool_input.get("metric", "utilization"),
-            group_by=tool_input.get("group_by"),
-            instance_type=tool_input.get("instance_type"),
-            account_id=tool_input.get("account_id"),
-            reservation_state=tool_input.get("reservation_state", "active"),
-            hours=tool_input.get("hours", 168),
+    # query_aws_capacity_manager
+    return await query_aws_capacity_manager(
+        metric=tool_input.get("metric", "utilization"),
+        group_by=tool_input.get("group_by"),
+        instance_type=tool_input.get("instance_type"),
+        account_id=tool_input.get("account_id"),
+        reservation_state=tool_input.get("reservation_state", "active"),
+        hours=tool_input.get("hours", 168),
+    )
+
+
+async def _execute_cloud_tool(tool_name: str, tool_input: dict) -> dict:
+    """Dispatch cloud account and resource query tools."""
+    if tool_name == "query_azure_pools":
+        return await query_azure_pools(
+            action=tool_input["action"],
+            pool_id=tool_input.get("pool_id"),
+            subscription_name=tool_input.get("subscription_name"),
+            project_tag=tool_input.get("project_tag"),
+            database=tool_input.get("database", "pools"),
+            max_results=tool_input.get("max_results", 100),
         )
 
-    elif tool_name == "query_cloudtrail":
+    if tool_name == "query_gcp_projects":
+        return await query_gcp_projects(
+            action=tool_input["action"],
+            project_id=tool_input.get("project_id"),
+            state_filter=tool_input.get("state_filter"),
+            max_results=tool_input.get("max_results", 100),
+        )
+
+    if tool_name == "query_cloudtrail":
         return await query_cloudtrail(
             query=tool_input["query"],
             max_results=tool_input.get("max_results", 100),
         )
 
-    elif tool_name == "query_aws_account":
+    if tool_name == "query_aws_account":
         return await query_aws_account(
             account_id=tool_input["account_id"],
             action=tool_input["action"],
@@ -217,7 +225,7 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:  # noqa: C901
             filters=tool_input.get("filters"),
         )
 
-    elif tool_name == "query_aws_account_db":
+    if tool_name == "query_aws_account_db":
         return await query_aws_account_db(
             name=tool_input.get("name"),
             account_id=tool_input.get("account_id"),
@@ -229,19 +237,22 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:  # noqa: C901
             max_results=tool_input.get("max_results", 100),
         )
 
-    elif tool_name == "query_marketplace_agreements":
-        return await query_marketplace_agreements(
-            account_id=tool_input.get("account_id"),
-            account_name=tool_input.get("account_name"),
-            status=tool_input.get("status"),
-            classification=tool_input.get("classification"),
-            min_cost=tool_input.get("min_cost"),
-            product_name=tool_input.get("product_name"),
-            vendor_name=tool_input.get("vendor_name"),
-            max_results=tool_input.get("max_results", 100),
-        )
+    # query_marketplace_agreements
+    return await query_marketplace_agreements(
+        account_id=tool_input.get("account_id"),
+        account_name=tool_input.get("account_name"),
+        status=tool_input.get("status"),
+        classification=tool_input.get("classification"),
+        min_cost=tool_input.get("min_cost"),
+        product_name=tool_input.get("product_name"),
+        vendor_name=tool_input.get("vendor_name"),
+        max_results=tool_input.get("max_results", 100),
+    )
 
-    elif tool_name == "query_babylon_catalog":
+
+async def _execute_infra_tool(tool_name: str, tool_input: dict) -> dict:
+    """Dispatch infrastructure platform tools (Babylon, OCPV, AAP2, Splunk, Icinga)."""
+    if tool_name == "query_babylon_catalog":
         return await query_babylon_catalog(
             action=tool_input["action"],
             cluster=tool_input.get("cluster", ""),
@@ -255,7 +266,7 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:  # noqa: C901
             max_results=tool_input.get("max_results", 50),
         )
 
-    elif tool_name == "query_ocpv_cluster":
+    if tool_name == "query_ocpv_cluster":
         return await query_ocpv_cluster(
             action=tool_input["action"],
             cluster=tool_input.get("cluster", ""),
@@ -266,7 +277,7 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:  # noqa: C901
             max_results=tool_input.get("max_results", 50),
         )
 
-    elif tool_name == "query_aap2":
+    if tool_name == "query_aap2":
         return await query_aap2(
             action=tool_input["action"],
             controller=tool_input.get("controller", ""),
@@ -280,35 +291,7 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:  # noqa: C901
             max_results=tool_input.get("max_results", 50),
         )
 
-    elif tool_name == "fetch_github_file":
-        return await fetch_github_file(
-            owner=tool_input["owner"],
-            repo=tool_input["repo"],
-            path=tool_input["path"],
-            ref=tool_input.get("ref", ""),
-        )
-
-    elif tool_name == "lookup_catalog_item":
-        return await lookup_catalog_item(
-            search=tool_input["search"],
-        )
-
-    elif tool_name == "search_github_repo":
-        return await search_github_repo(
-            owner=tool_input["owner"],
-            repo=tool_input["repo"],
-            search=tool_input["search"],
-            ref=tool_input.get("ref", ""),
-        )
-
-    elif tool_name == "search_agnosticv_prs":
-        return await search_agnosticv_prs(
-            search=tool_input["search"],
-            state=tool_input.get("state", "open"),
-            max_results=tool_input.get("max_results", 10),
-        )
-
-    elif tool_name == "query_splunk":
+    if tool_name == "query_splunk":
         return await query_splunk(
             action=tool_input["action"],
             guid=tool_input.get("guid", ""),
@@ -323,32 +306,125 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:  # noqa: C901
             max_results=tool_input.get("max_results", 200),
         )
 
-    elif tool_name == "query_icinga":
-        return await query_icinga(
-            action=tool_input["action"],
-            search=tool_input.get("search", ""),
-            host=tool_input.get("host", ""),
-            service=tool_input.get("service", ""),
-            filter_expr=tool_input.get("filter_expr", ""),
-            detailed=tool_input.get("detailed", False),
-            object_type=tool_input.get("object_type", ""),
-            name=tool_input.get("name", ""),
-            author=tool_input.get("author", "parsec"),
-            comment=tool_input.get("comment", ""),
-            comment_name=tool_input.get("comment_name", ""),
-            start_time=tool_input.get("start_time"),
-            end_time=tool_input.get("end_time"),
+    # query_icinga
+    return await query_icinga(
+        action=tool_input["action"],
+        search=tool_input.get("search", ""),
+        host=tool_input.get("host", ""),
+        service=tool_input.get("service", ""),
+        filter_expr=tool_input.get("filter_expr", ""),
+        detailed=tool_input.get("detailed", False),
+        object_type=tool_input.get("object_type", ""),
+        name=tool_input.get("name", ""),
+        author=tool_input.get("author", "parsec"),
+        comment=tool_input.get("comment", ""),
+        comment_name=tool_input.get("comment_name", ""),
+        start_time=tool_input.get("start_time"),
+        end_time=tool_input.get("end_time"),
+    )
+
+
+async def _execute_github_tool(tool_name: str, tool_input: dict) -> dict:
+    """Dispatch GitHub and source code tools."""
+    if tool_name == "fetch_github_file":
+        return await fetch_github_file(
+            owner=tool_input["owner"],
+            repo=tool_input["repo"],
+            path=tool_input["path"],
+            ref=tool_input.get("ref", ""),
         )
 
-    elif tool_name == "render_chart":
+    if tool_name == "lookup_catalog_item":
+        return await lookup_catalog_item(
+            search=tool_input["search"],
+        )
+
+    if tool_name == "search_github_repo":
+        return await search_github_repo(
+            owner=tool_input["owner"],
+            repo=tool_input["repo"],
+            search=tool_input["search"],
+            ref=tool_input.get("ref", ""),
+        )
+
+    # search_agnosticv_prs
+    return await search_agnosticv_prs(
+        search=tool_input["search"],
+        state=tool_input.get("state", "open"),
+        max_results=tool_input.get("max_results", 10),
+    )
+
+
+# Tool name sets for dispatcher routing
+_COST_TOOLS = frozenset(
+    {
+        "query_aws_costs",
+        "query_azure_costs",
+        "query_gcp_costs",
+        "query_aws_pricing",
+        "query_cost_monitor",
+        "query_aws_capacity_manager",
+    }
+)
+
+_CLOUD_TOOLS = frozenset(
+    {
+        "query_azure_pools",
+        "query_gcp_projects",
+        "query_cloudtrail",
+        "query_aws_account",
+        "query_aws_account_db",
+        "query_marketplace_agreements",
+    }
+)
+
+_INFRA_TOOLS = frozenset(
+    {
+        "query_babylon_catalog",
+        "query_ocpv_cluster",
+        "query_aap2",
+        "query_splunk",
+        "query_icinga",
+    }
+)
+
+_GITHUB_TOOLS = frozenset(
+    {
+        "fetch_github_file",
+        "lookup_catalog_item",
+        "search_github_repo",
+        "search_agnosticv_prs",
+    }
+)
+
+
+async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
+    """Dispatch a tool call to the appropriate domain handler."""
+    # DB and MCP tools (checked first due to dynamic name matching)
+    db_result = await _execute_db_tool(tool_name, tool_input)
+    if db_result is not None:
+        return db_result
+
+    if tool_name in _COST_TOOLS:
+        return await _execute_cost_tool(tool_name, tool_input)
+
+    if tool_name in _CLOUD_TOOLS:
+        return await _execute_cloud_tool(tool_name, tool_input)
+
+    if tool_name in _INFRA_TOOLS:
+        return await _execute_infra_tool(tool_name, tool_input)
+
+    if tool_name in _GITHUB_TOOLS:
+        return await _execute_github_tool(tool_name, tool_input)
+
+    if tool_name == "render_chart":
         # Charts are rendered client-side — just return the input as-is
         return tool_input
 
-    elif tool_name == "generate_report":
+    if tool_name == "generate_report":
         return _save_report(tool_input)
 
-    else:
-        return {"error": f"Unknown tool: {tool_name}"}
+    return {"error": f"Unknown tool: {tool_name}"}
 
 
 def _save_report(tool_input: dict) -> dict:
@@ -445,6 +521,30 @@ def _estimate_tokens(obj) -> int:
 MAX_TOOL_RESULT_CHARS = 100_000
 
 
+def _try_smart_truncation(data: dict) -> str | None:
+    """Try to intelligently truncate a dict result by capping list fields.
+
+    Returns truncated JSON string if successful, or None if still too large.
+    """
+    for key in ("rows", "results", "items", "subscriptions", "projects", "events"):
+        if key in data and isinstance(data[key], list) and len(data[key]) > 20:
+            original_len = len(data[key])
+            data[key] = data[key][:20]
+            data["_truncated"] = f"{key} capped from {original_len} to 20 items"
+            capped = json.dumps(data, default=str)
+            if len(capped) <= MAX_TOOL_RESULT_CHARS:
+                return capped
+
+    if "result" in data and isinstance(data["result"], str) and len(data["result"]) > 10_000:
+        data["result"] = data["result"][:10_000] + "\n... [truncated]"
+        data["_truncated"] = "result field capped at 10000 chars"
+        capped = json.dumps(data, default=str)
+        if len(capped) <= MAX_TOOL_RESULT_CHARS:
+            return capped
+
+    return None
+
+
 def _cap_tool_result(result_str: str) -> str:
     """Cap a JSON tool result string to prevent blowing the context window.
 
@@ -460,26 +560,91 @@ def _cap_tool_result(result_str: str) -> str:
         return result_str[:MAX_TOOL_RESULT_CHARS] + "\n... [truncated — result too large]"
 
     if isinstance(data, dict):
-        for key in ("rows", "results", "items", "subscriptions", "projects", "events"):
-            if key in data and isinstance(data[key], list) and len(data[key]) > 20:
-                original_len = len(data[key])
-                data[key] = data[key][:20]
-                data["_truncated"] = f"{key} capped from {original_len} to 20 items"
-                capped = json.dumps(data, default=str)
-                if len(capped) <= MAX_TOOL_RESULT_CHARS:
-                    return capped
-
-        if "result" in data and isinstance(data["result"], str) and len(data["result"]) > 10_000:
-            data["result"] = data["result"][:10_000] + "\n... [truncated]"
-            data["_truncated"] = "result field capped at 10000 chars"
-            capped = json.dumps(data, default=str)
-            if len(capped) <= MAX_TOOL_RESULT_CHARS:
-                return capped
+        smart = _try_smart_truncation(data)
+        if smart is not None:
+            return smart
 
     return (
         json.dumps(data, default=str)[:MAX_TOOL_RESULT_CHARS]
         + "\n... [truncated — result too large]"
     )
+
+
+def _truncate_tool_result_content(block: dict) -> None:
+    """Truncate a large tool_result content block in-place for context management."""
+    result_str = block.get("content", "")
+    if not isinstance(result_str, str) or len(result_str) <= 2000:
+        return
+
+    try:
+        result_data = json.loads(result_str)
+    except (json.JSONDecodeError, TypeError):
+        block["content"] = result_str[:2000] + "... [truncated]"
+        return
+
+    if not isinstance(result_data, dict):
+        block["content"] = result_str[:2000] + "... [truncated]"
+        return
+
+    if "rows" in result_data:
+        result_data["rows"] = result_data["rows"][:5]
+        result_data["_truncated_for_context"] = True
+    if "results" in result_data and isinstance(result_data["results"], list):
+        result_data["results"] = result_data["results"][:5]
+        result_data["_truncated_for_context"] = True
+    if (
+        "result" in result_data
+        and isinstance(result_data["result"], str)
+        and len(result_data["result"]) > 2000
+    ):
+        result_data["result"] = result_data["result"][:2000] + "\n... [truncated]"
+        result_data["_truncated_for_context"] = True
+    block["content"] = json.dumps(result_data)
+
+
+_TRUNCATION_SUFFIX = "\n\n[Earlier analysis truncated — use current tool results only]"
+
+
+def _truncate_old_content_block(block: dict) -> None:
+    """Truncate a single content block in an older history turn (in-place)."""
+    btype = block.get("type")
+    if btype == "tool_result":
+        _truncate_tool_result_content(block)
+    elif btype == "text":
+        text = block.get("text", "")
+        if isinstance(text, str) and len(text) > 3000:
+            block["text"] = text[:3000] + _TRUNCATION_SUFFIX
+
+
+def _truncate_old_message(msg: dict) -> None:
+    """Truncate large content in an older history message in-place.
+
+    Truncates both tool results and assistant text symmetrically to prevent
+    the model from anchoring on stale analysis when supporting data is gone.
+    """
+    content = msg.get("content")
+
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict):
+                _truncate_old_content_block(block)
+
+    if msg.get("role") == "assistant" and isinstance(content, str) and len(content) > 3000:
+        msg["content"] = content[:3000] + _TRUNCATION_SUFFIX
+
+
+def _drop_oldest_turn(messages: list) -> None:
+    """Drop the oldest user+assistant pair (and any orphaned tool_result) in-place."""
+    messages.pop(0)
+    if messages and messages[0].get("role") == "assistant":
+        messages.pop(0)
+    # Remove orphaned tool_result that followed the dropped assistant message
+    if messages and messages[0].get("role") == "user":
+        content = messages[0].get("content")
+        if isinstance(content, list) and all(
+            isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+        ):
+            messages.pop(0)
 
 
 def _trim_history(history: list, max_tokens: int = 150000) -> list:
@@ -499,71 +664,13 @@ def _trim_history(history: list, max_tokens: int = 150000) -> list:
     if _estimate_tokens(messages) <= max_tokens:
         return messages
 
-    # First pass: truncate both tool results AND assistant text in older messages.
-    # Keeping old assistant analysis intact while truncating tool results causes
-    # hallucination — the model sees a coherent old analysis without the data
-    # to contradict it, and repeats old details for new investigations.
-    for msg in messages[:-4]:  # Keep last 2 turns (4 messages) intact
-        content = msg.get("content")
-
-        # Truncate large tool_result content
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_result":
-                    result_str = block.get("content", "")
-                    if isinstance(result_str, str) and len(result_str) > 2000:
-                        try:
-                            result_data = json.loads(result_str)
-                            if isinstance(result_data, dict):
-                                if "rows" in result_data:
-                                    result_data["rows"] = result_data["rows"][:5]
-                                    result_data["_truncated_for_context"] = True
-                                if "results" in result_data and isinstance(
-                                    result_data["results"], list
-                                ):
-                                    result_data["results"] = result_data["results"][:5]
-                                    result_data["_truncated_for_context"] = True
-                                if (
-                                    "result" in result_data
-                                    and isinstance(result_data["result"], str)
-                                    and len(result_data["result"]) > 2000
-                                ):
-                                    result_data["result"] = (
-                                        result_data["result"][:2000] + "\n... [truncated]"
-                                    )
-                                    result_data["_truncated_for_context"] = True
-                                block["content"] = json.dumps(result_data)
-                        except (json.JSONDecodeError, TypeError):
-                            block["content"] = result_str[:2000] + "... [truncated]"
-
-                # Truncate large assistant text blocks in older turns
-                elif isinstance(block, dict) and block.get("type") == "text":
-                    text = block.get("text", "")
-                    if isinstance(text, str) and len(text) > 3000:
-                        block["text"] = (
-                            text[:3000]
-                            + "\n\n[Earlier analysis truncated — use current tool results only]"
-                        )
-
-        # Truncate large string-type assistant content
-        if msg.get("role") == "assistant" and isinstance(content, str) and len(content) > 3000:
-            msg["content"] = (
-                content[:3000] + "\n\n[Earlier analysis truncated — use current tool results only]"
-            )
+    # First pass: truncate old messages (keep last 2 turns = 4 messages intact)
+    for msg in messages[:-4]:
+        _truncate_old_message(msg)
 
     # If still over, drop oldest turns
     while len(messages) > 2 and _estimate_tokens(messages) > max_tokens:
-        # Remove oldest user+assistant pair
-        messages.pop(0)
-        if messages and messages[0].get("role") == "assistant":
-            messages.pop(0)
-        # Also remove any orphaned tool_result
-        if messages and messages[0].get("role") == "user":
-            content = messages[0].get("content")
-            if isinstance(content, list) and all(
-                isinstance(b, dict) and b.get("type") == "tool_result" for b in content
-            ):
-                messages.pop(0)
+        _drop_oldest_turn(messages)
 
     return messages
 
@@ -598,6 +705,17 @@ def _clean_content_block(block) -> dict:
     return d
 
 
+def _serialize_content_block(block) -> dict:
+    """Serialize a single content block (SDK object or dict) to a clean dict."""
+    if isinstance(block, dict):
+        return _clean_content_block(block)
+    if hasattr(block, "model_dump"):
+        return _clean_content_block(block.model_dump())
+    if hasattr(block, "to_dict"):
+        return _clean_content_block(block.to_dict())
+    return {"type": "text", "text": str(block)}
+
+
 def _serialize_messages(messages: list) -> list:
     """Serialize the messages array to JSON-safe dicts.
 
@@ -612,29 +730,12 @@ def _serialize_messages(messages: list) -> list:
         if isinstance(content, str):
             result.append({"role": role, "content": content})
         elif isinstance(content, list):
-            serialized_content = []
-            for block in content:
-                if isinstance(block, dict):
-                    serialized_content.append(_clean_content_block(block))
-                elif hasattr(block, "model_dump"):
-                    serialized_content.append(_clean_content_block(block.model_dump()))
-                elif hasattr(block, "to_dict"):
-                    serialized_content.append(_clean_content_block(block.to_dict()))
-                else:
-                    serialized_content.append({"type": "text", "text": str(block)})
-            result.append({"role": role, "content": serialized_content})
+            result.append({"role": role, "content": [_serialize_content_block(b) for b in content]})
         else:
             # SDK content object list (from response.content)
             try:
-                serialized_content = [
-                    (
-                        _clean_content_block(b.model_dump())
-                        if hasattr(b, "model_dump")
-                        else {"type": "text", "text": str(b)}
-                    )
-                    for b in content
-                ]
-                result.append({"role": role, "content": serialized_content})
+                serialized = [_serialize_content_block(b) for b in content]
+                result.append({"role": role, "content": serialized})
             except TypeError:
                 result.append({"role": role, "content": str(content)})
 
@@ -830,6 +931,36 @@ async def _handle_delegation(
         agent_span_ctx.__exit__(*sys.exc_info())
 
 
+def _check_tool_cache(tool_name: str, tool_input: dict) -> tuple[dict | None, bool]:
+    """Check tool cache for a cached result. Returns (result, True) or (None, False)."""
+    cache = _tool_cache.get(None)
+    if cache is None or tool_name in _UNCACHEABLE_TOOLS:
+        return None, False
+    key = _cache_key(tool_name, tool_input)
+    if key in cache:
+        logger.info("Cache hit for %s (direct tool)", tool_name)
+        return cache[key], True
+    return None, False
+
+
+def _store_tool_cache(tool_name: str, tool_input: dict, result: dict) -> None:
+    """Store a tool result in the cache if applicable."""
+    cache = _tool_cache.get(None)
+    if cache is not None and tool_name not in _UNCACHEABLE_TOOLS and "error" not in result:
+        cache[_cache_key(tool_name, tool_input)] = result
+
+
+def _yield_output_events(tool_name: str, result: dict) -> list[str]:
+    """Build any extra SSE events for output-producing tools (reports, charts)."""
+    events: list[str] = []
+    if tool_name == "generate_report" and "error" not in result:
+        download_url = f"/api/reports/{result['filename']}"
+        events.append(sse_report(result["filename"], result["format"], download_url))
+    elif tool_name == "render_chart" and "error" not in result:
+        events.append(sse_event("chart", result))
+    return events
+
+
 async def _handle_direct_tool(
     tool_block: Any,
     tool_input: dict,
@@ -839,27 +970,13 @@ async def _handle_direct_tool(
     yield sse_tool_start(tool_name, tool_input), None
 
     tool_start = _time.monotonic()
-    cached = False
-    cache = _tool_cache.get(None)
-    if cache is not None and tool_name not in _UNCACHEABLE_TOOLS:
-        key = _cache_key(tool_name, tool_input)
-        if key in cache:
-            logger.info("Cache hit for %s (direct tool)", tool_name)
-            result = cache[key]
-            cached = True
-            yield sse_event("cache_hit", {"tool": tool_name}), None
-        else:
-            task = asyncio.create_task(_execute_tool(tool_name, tool_input))
-            elapsed = 0
-            while not task.done():
-                done, _ = await asyncio.wait({task}, timeout=10)
-                if not done:
-                    elapsed += 10
-                    yield sse_status(f"Processing {tool_name}... ({elapsed}s)"), None
-            result = task.result()
-            if "error" not in result:
-                cache[key] = result
+    cached_result, cached = _check_tool_cache(tool_name, tool_input)
+
+    if cached and cached_result is not None:
+        result = cached_result
+        yield sse_event("cache_hit", {"tool": tool_name}), None
     else:
+        # Execute with progress reporting
         task = asyncio.create_task(_execute_tool(tool_name, tool_input))
         elapsed = 0
         while not task.done():
@@ -868,6 +985,7 @@ async def _handle_direct_tool(
                 elapsed += 10
                 yield sse_status(f"Processing {tool_name}... ({elapsed}s)"), None
         result = task.result()
+        _store_tool_cache(tool_name, tool_input, result)
 
     tool_duration_ms = (_time.monotonic() - tool_start) * 1000
 
@@ -889,11 +1007,8 @@ async def _handle_direct_tool(
 
     yield sse_tool_result(tool_name, result), None
 
-    if tool_name == "generate_report" and "error" not in result:
-        download_url = f"/api/reports/{result['filename']}"
-        yield sse_report(result["filename"], result["format"], download_url), None
-    elif tool_name == "render_chart" and "error" not in result:
-        yield sse_event("chart", result), None
+    for evt in _yield_output_events(tool_name, result):
+        yield evt, None
 
     yield (
         None,
@@ -905,7 +1020,123 @@ async def _handle_direct_tool(
     )
 
 
-async def run_agent(  # noqa: C901
+def _flush_collector(collector: MetricsCollector) -> None:
+    """Stop collector timer and schedule async flush to MLflow."""
+    collector.stop_timer()
+    task = asyncio.create_task(collector.flush_to_mlflow())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+def _parse_response_blocks(
+    response_content: list,
+) -> tuple[list[str], list]:
+    """Separate response content into text parts and tool_use blocks."""
+    text_parts: list[str] = []
+    tool_use_blocks: list = []
+    for block in response_content:
+        if block.type == "text":
+            text_parts.append(block.text)
+        elif block.type == "tool_use":
+            tool_use_blocks.append(block)
+    return text_parts, tool_use_blocks
+
+
+def _record_llm_span(
+    llm_span,
+    round_num: int,
+    response,
+    default_model: str,
+    response_text: str,
+    tool_use_names: list[str],
+) -> None:
+    """Record LLM span outputs with safe attribute access on the response."""
+    set_llm_span_outputs(
+        llm_span,
+        round_num=round_num,
+        model=response.model if hasattr(response, "model") else default_model,
+        input_tokens=response.usage.input_tokens if hasattr(response, "usage") else 0,
+        output_tokens=response.usage.output_tokens if hasattr(response, "usage") else 0,
+        response_text=response_text,
+        tool_use_names=tool_use_names,
+    )
+
+
+def _record_usage(collector: MetricsCollector, response, model: str) -> None:
+    """Record token usage and model info from an API response."""
+    if not hasattr(response, "usage"):
+        return
+    collector.record_tokens(
+        input_tokens=response.usage.input_tokens,
+        output_tokens=response.usage.output_tokens,
+        cache_creation_tokens=getattr(response.usage, "cache_creation_input_tokens", 0) or 0,
+        cache_read_tokens=getattr(response.usage, "cache_read_input_tokens", 0) or 0,
+    )
+    if not collector.model:
+        collector.record_model(response.model)
+        collector.record_agent_dispatch("orchestrator", routing_method="llm")
+
+
+def _extract_text_from_sse(event: str) -> str:
+    """Extract text content from an SSE text event. Returns empty string if not a text event."""
+    if not event.startswith("event: text\n"):
+        return ""
+    try:
+        data_line = event.split("data: ", 1)[1].strip()
+        return json.loads(data_line).get("content", "")
+    except (IndexError, json.JSONDecodeError, AttributeError):
+        return ""
+
+
+async def _poll_api_progress(
+    api_task: asyncio.Task, status_prefix: str
+) -> AsyncGenerator[str, None]:
+    """Poll an API task and yield SSE status updates at 10-second intervals."""
+    elapsed = 0
+    while not api_task.done():
+        await asyncio.sleep(10)
+        if not api_task.done():
+            elapsed += 10
+            yield sse_status(f"{status_prefix}... ({elapsed}s)")
+
+
+async def _dispatch_tool_blocks(
+    tool_use_blocks: list,
+    client: Any,
+    incoming_history: list,
+    collector: MetricsCollector | None = None,
+) -> AsyncGenerator[tuple[str | None, dict | None], None]:
+    """Dispatch each tool block to the appropriate handler, yielding SSE events and results."""
+    for tool_block in tool_use_blocks:
+        agent_type = _DELEGATION_TOOL_MAP.get(tool_block.name)
+
+        if agent_type:
+            handler = _handle_delegation(
+                agent_type,
+                tool_block,
+                tool_block.input,
+                client,
+                incoming_history,
+                collector=collector,
+            )
+        else:
+            handler = _handle_direct_tool(tool_block, tool_block.input)
+
+        async for sse_evt, tool_result in handler:
+            yield sse_evt, tool_result
+
+
+_MAX_ROUNDS_TEXT = (
+    "\n\nI've used all my planned tool calls but haven't finished. "
+    "Would you like me to keep going?\n\n"
+    "{{choices}}\n"
+    "Keep investigating\n"
+    "That's enough, thanks\n"
+    "{{/choices}}"
+)
+
+
+async def run_agent(
     question: str,
     conversation_history: list | None = None,
     conversation_id: str | None = None,
@@ -968,17 +1199,11 @@ async def run_agent(  # noqa: C901
                 conversation_history=conversation_history,
                 metrics=collector,
             ):
-                if event.startswith("event: text\n"):
-                    try:
-                        data_line = event.split("data: ", 1)[1].strip()
-                        response_parts.append(json.loads(data_line).get("content", ""))
-                    except (IndexError, json.JSONDecodeError, AttributeError):
-                        pass
+                text = _extract_text_from_sse(event)
+                if text:
+                    response_parts.append(text)
                 yield event
-            collector.stop_timer()
-            task = asyncio.create_task(collector.flush_to_mlflow())
-            _background_tasks.add(task)
-            task.add_done_callback(_background_tasks.discard)
+            _flush_collector(collector)
             return
 
         # Full orchestrator mode
@@ -992,10 +1217,7 @@ async def run_agent(  # noqa: C901
             client = _build_client(cfg)
         except ValueError as e:
             yield sse_error(str(e))
-            collector.stop_timer()
-            task = asyncio.create_task(collector.flush_to_mlflow())
-            _background_tasks.add(task)
-            task.add_done_callback(_background_tasks.discard)
+            _flush_collector(collector)
             yield sse_done()
             return
 
@@ -1049,51 +1271,19 @@ async def run_agent(  # noqa: C901
                     api_task: asyncio.Task[anthropic.types.Message] = asyncio.ensure_future(
                         asyncio.to_thread(_call_api)
                     )
-                    elapsed = 0
-                    while not api_task.done():
-                        await asyncio.sleep(10)
-                        if not api_task.done():
-                            elapsed += 10
-                            yield sse_status(f"Orchestrator analyzing... ({elapsed}s)")
+                    async for status in _poll_api_progress(api_task, "Orchestrator analyzing"):
+                        yield status
                     response = api_task.result()
-                    if hasattr(response, "usage"):
-                        collector.record_tokens(
-                            input_tokens=response.usage.input_tokens,
-                            output_tokens=response.usage.output_tokens,
-                            cache_creation_tokens=getattr(
-                                response.usage, "cache_creation_input_tokens", 0
-                            )
-                            or 0,
-                            cache_read_tokens=getattr(response.usage, "cache_read_input_tokens", 0)
-                            or 0,
-                        )
-                        if not collector.model:
-                            collector.record_model(response.model)
-                            collector.record_agent_dispatch("orchestrator", routing_method="llm")
+                    _record_usage(collector, response, model)
 
-                    assistant_content = response.content
-                    tool_use_blocks = []
-                    response_text_parts: list[str] = []
-
-                    for block in assistant_content:
-                        if block.type == "text":
-                            response_text_parts.append(block.text)
-                        elif block.type == "tool_use":
-                            tool_use_blocks.append(block)
-
-                    tool_names = [b.name for b in tool_use_blocks]
-                    set_llm_span_outputs(
+                    response_text_parts, tool_use_blocks = _parse_response_blocks(response.content)
+                    _record_llm_span(
                         llm_span,
-                        round_num=_round,
-                        model=response.model if hasattr(response, "model") else model,
-                        input_tokens=(
-                            response.usage.input_tokens if hasattr(response, "usage") else 0
-                        ),
-                        output_tokens=(
-                            response.usage.output_tokens if hasattr(response, "usage") else 0
-                        ),
-                        response_text="\n".join(response_text_parts),
-                        tool_use_names=tool_names,
+                        _round,
+                        response,
+                        model,
+                        "\n".join(response_text_parts),
+                        [b.name for b in tool_use_blocks],
                     )
 
                 # Yield text outside the LLM span
@@ -1104,74 +1294,41 @@ async def run_agent(  # noqa: C901
             except anthropic.APIError as e:
                 logger.exception("Claude API error in orchestrator")
                 yield sse_error(f"Claude API error: {e}")
-                collector.stop_timer()
-                task = asyncio.create_task(collector.flush_to_mlflow())
-                _background_tasks.add(task)
-                task.add_done_callback(_background_tasks.discard)
+                _flush_collector(collector)
                 yield sse_done()
                 return
 
             messages.append(
                 {
                     "role": "assistant",
-                    "content": [_clean_content_block(b) for b in assistant_content],
+                    "content": [_clean_content_block(b) for b in response.content],
                 }
             )
 
             if not tool_use_blocks:
                 yield sse_event("history", {"messages": _serialize_messages(messages)})
-                collector.stop_timer()
-                task = asyncio.create_task(collector.flush_to_mlflow())
-                _background_tasks.add(task)
-                task.add_done_callback(_background_tasks.discard)
+                _flush_collector(collector)
                 yield sse_done()
                 return
 
             tool_results = []
-            for tool_block in tool_use_blocks:
-                tool_name = tool_block.name
-                tool_input = tool_block.input
-
-                agent_type = _DELEGATION_TOOL_MAP.get(tool_name)
-
-                if agent_type:
-                    handler = _handle_delegation(
-                        agent_type,
-                        tool_block,
-                        tool_input,
-                        client,
-                        incoming_history,
-                        collector=collector,
-                    )
-                else:
-                    handler = _handle_direct_tool(tool_block, tool_input)
-
-                async for sse_evt, tool_result in handler:
-                    if sse_evt is not None:
-                        yield sse_evt
-                    if tool_result is not None:
-                        tool_results.append(tool_result)
+            async for sse_evt, tool_result in _dispatch_tool_blocks(
+                tool_use_blocks, client, incoming_history, collector
+            ):
+                if sse_evt is not None:
+                    yield sse_evt
+                if tool_result is not None:
+                    tool_results.append(tool_result)
 
             messages.append({"role": "user", "content": tool_results})
             yield sse_event("history", {"messages": _serialize_messages(messages)})
 
-        max_rounds_text = (
-            "\n\nI've used all my planned tool calls but haven't finished. "
-            "Would you like me to keep going?\n\n"
-            "{{choices}}\n"
-            "Keep investigating\n"
-            "That's enough, thanks\n"
-            "{{/choices}}"
-        )
-        yield sse_text(max_rounds_text)
+        yield sse_text(_MAX_ROUNDS_TEXT)
         messages.append(
-            {"role": "assistant", "content": [{"type": "text", "text": max_rounds_text}]}
+            {"role": "assistant", "content": [{"type": "text", "text": _MAX_ROUNDS_TEXT}]}
         )
         yield sse_event("history", {"messages": _serialize_messages(messages)})
-        collector.stop_timer()
-        task = asyncio.create_task(collector.flush_to_mlflow())
-        _background_tasks.add(task)
-        task.add_done_callback(_background_tasks.discard)
+        _flush_collector(collector)
         yield sse_done()
 
     finally:
@@ -1185,6 +1342,155 @@ async def run_agent(  # noqa: C901
             total_output_tokens=collector.output_tokens,
         )
         span_ctx.__exit__(*sys.exc_info())
+
+
+def _build_alert_user_message(
+    alert_type: str,
+    account_id: str,
+    alert_text: str,
+    account_name: str = "",
+    user_arn: str = "",
+    event_time: str = "",
+    region: str = "",
+    event_details: dict | None = None,
+) -> str:
+    """Construct the user message for an alert investigation."""
+    parts = [
+        "Investigate this alert and submit your verdict.\n",
+        f"**Alert type:** {alert_type}",
+        f"**Account ID:** {account_id}",
+    ]
+    if account_name:
+        parts.append(f"**Account name:** {account_name}")
+    if user_arn:
+        parts.append(f"**User ARN:** {user_arn}")
+    if event_time:
+        parts.append(f"**Event time:** {event_time}")
+    if region:
+        parts.append(f"**Region:** {region}")
+    parts.append(f"\n**Alert text:**\n{alert_text}")
+    if event_details:
+        details_str = json.dumps(event_details, default=str)
+        parts.append(f"\n**Event details:**\n```json\n{details_str}\n```")
+    return "\n".join(parts)
+
+
+async def _process_alert_tool_call(
+    tool_block: Any,
+    investigation_log: list[str],
+) -> tuple[dict | None, dict]:
+    """Execute a single tool call during alert investigation.
+
+    Returns (verdict_or_none, tool_result_dict).
+    """
+    tool_name = tool_block.name
+    tool_input = tool_block.input
+
+    if tool_name == "submit_alert_verdict":
+        verdict = {
+            "should_alert": tool_input.get("should_alert", True),
+            "severity": tool_input.get("severity", "medium"),
+            "summary": tool_input.get("summary", ""),
+        }
+        investigation_log.append(
+            f"[Verdict] should_alert={verdict['should_alert']}, "
+            f"severity={verdict['severity']}: {verdict['summary']}"
+        )
+        tool_result = {
+            "type": "tool_result",
+            "tool_use_id": tool_block.id,
+            "content": json.dumps({"status": "verdict_recorded"}),
+        }
+        return verdict, tool_result
+
+    investigation_log.append(
+        f"[Tool: {tool_name}] input={json.dumps(tool_input, default=str)[:200]}"
+    )
+
+    tool_start_t = _time.monotonic()
+    try:
+        result = await _execute_tool(tool_name, tool_input)
+    except Exception as e:
+        logger.exception("Tool %s failed during alert investigation", tool_name)
+        result = {"error": str(e)}
+    tool_duration_ms = (_time.monotonic() - tool_start_t) * 1000
+
+    with mlflow.start_span(
+        name=f"tool:{tool_name}",
+        span_type=SpanType.TOOL,
+    ) as tool_span:
+        set_tool_span_outputs(
+            tool_span,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            result=result if "error" not in result else None,
+            error=result.get("error") if "error" in result else None,
+            duration_ms=tool_duration_ms,
+            cached=False,
+        )
+
+    result_str = json.dumps(result, default=str)
+    log_suffix = f"{result_str[:300]}..." if len(result_str) > 300 else result_str
+    investigation_log.append(f"[Tool: {tool_name}] result: {log_suffix}")
+
+    tool_result = {
+        "type": "tool_result",
+        "tool_use_id": tool_block.id,
+        "content": _cap_tool_result(json.dumps(result, default=str)),
+    }
+    return None, tool_result
+
+
+def _parse_alert_response_blocks(
+    response_content: list,
+    investigation_log: list[str],
+) -> tuple[list[str], list]:
+    """Separate alert response content into text/log parts and tool_use blocks."""
+    text_parts: list[str] = []
+    tool_use_blocks: list = []
+    for block in response_content:
+        if block.type == "text" and block.text.strip():
+            investigation_log.append(block.text)
+            text_parts.append(block.text)
+        elif block.type == "tool_use":
+            tool_use_blocks.append(block)
+    return text_parts, tool_use_blocks
+
+
+async def _process_alert_round_tools(
+    tool_use_blocks: list,
+    investigation_log: list[str],
+) -> tuple[dict | None, list[dict], int]:
+    """Process all tool calls in one alert investigation round.
+
+    Returns (verdict_or_none, tool_results, new_tool_call_count).
+    """
+    tool_results: list[dict] = []
+    tool_call_count = 0
+    verdict: dict | None = None
+    for tool_block in tool_use_blocks:
+        block_verdict, tool_result = await _process_alert_tool_call(tool_block, investigation_log)
+        tool_results.append(tool_result)
+        if block_verdict is not None:
+            verdict = block_verdict
+        else:
+            tool_call_count += 1
+    return verdict, tool_results, tool_call_count
+
+
+def _make_error_verdict(
+    error_msg: str,
+    investigation_log: list[str],
+    start: float,
+) -> dict:
+    """Build a fallback verdict dict when investigation encounters an error."""
+    return {
+        "should_alert": True,
+        "severity": "medium",
+        "summary": error_msg,
+        "investigation_log": "\n".join(investigation_log),
+        "duration_seconds": round(_time.monotonic() - start, 1),
+    }
 
 
 async def run_alert_investigation(
@@ -1211,13 +1517,7 @@ async def run_alert_investigation(
     try:
         client = _build_client(cfg)
     except ValueError as e:
-        return {
-            "should_alert": True,
-            "severity": "medium",
-            "summary": f"Investigation failed: {e}",
-            "investigation_log": "",
-            "duration_seconds": round(_time.monotonic() - start, 1),
-        }
+        return _make_error_verdict(f"Investigation failed: {e}", [], start)
 
     today = datetime.now(UTC).strftime("%Y-%m-%d")
 
@@ -1230,24 +1530,16 @@ async def run_alert_investigation(
     alert_tools = list(get_security_tools())
     alert_tools.append(SUBMIT_ALERT_VERDICT_TOOL)
 
-    # Construct the user message from alert context
-    details_str = json.dumps(event_details, default=str) if event_details else ""
-    user_message = (
-        f"Investigate this alert and submit your verdict.\n\n"
-        f"**Alert type:** {alert_type}\n"
-        f"**Account ID:** {account_id}\n"
+    user_message = _build_alert_user_message(
+        alert_type,
+        account_id,
+        alert_text,
+        account_name=account_name,
+        user_arn=user_arn,
+        event_time=event_time,
+        region=region,
+        event_details=event_details,
     )
-    if account_name:
-        user_message += f"**Account name:** {account_name}\n"
-    if user_arn:
-        user_message += f"**User ARN:** {user_arn}\n"
-    if event_time:
-        user_message += f"**Event time:** {event_time}\n"
-    if region:
-        user_message += f"**Region:** {region}\n"
-    user_message += f"\n**Alert text:**\n{alert_text}\n"
-    if details_str:
-        user_message += f"\n**Event details:**\n```json\n{details_str}\n```\n"
 
     messages: list[dict] = [{"role": "user", "content": user_message}]
     investigation_log: list[str] = []
@@ -1292,122 +1584,46 @@ async def run_alert_investigation(
                 ) as llm_span:
                     response = await asyncio.to_thread(_call_api)
 
-                    assistant_content = response.content
-                    tool_use_blocks = []
-                    response_text_parts: list[str] = []
-
-                    for block in assistant_content:
-                        if block.type == "text" and block.text.strip():
-                            investigation_log.append(block.text)
-                            response_text_parts.append(block.text)
-                        elif block.type == "tool_use":
-                            tool_use_blocks.append(block)
-
-                    tool_names = [b.name for b in tool_use_blocks]
-                    set_llm_span_outputs(
+                    response_text_parts, tool_use_blocks = _parse_alert_response_blocks(
+                        response.content, investigation_log
+                    )
+                    _record_llm_span(
                         llm_span,
-                        round_num=_round,
-                        model=response.model if hasattr(response, "model") else model,
-                        input_tokens=(
-                            response.usage.input_tokens if hasattr(response, "usage") else 0
-                        ),
-                        output_tokens=(
-                            response.usage.output_tokens if hasattr(response, "usage") else 0
-                        ),
-                        response_text="\n".join(response_text_parts),
-                        tool_use_names=tool_names,
+                        _round,
+                        response,
+                        model,
+                        "\n".join(response_text_parts),
+                        [b.name for b in tool_use_blocks],
                     )
 
             except anthropic.APIError as e:
                 logger.exception("Claude API error during alert investigation")
                 root_span.set_outputs({"status": "error", "error": str(e)})
-                return {
-                    "should_alert": True,
-                    "severity": "medium",
-                    "summary": f"Investigation failed: Claude API error ({e})",
-                    "investigation_log": "\n".join(investigation_log),
-                    "duration_seconds": round(_time.monotonic() - start, 1),
-                }
+                return _make_error_verdict(
+                    f"Investigation failed: Claude API error ({e})",
+                    investigation_log,
+                    start,
+                )
 
             messages.append(
                 {
                     "role": "assistant",
-                    "content": [_clean_content_block(b) for b in assistant_content],
+                    "content": [_clean_content_block(b) for b in response.content],
                 }
             )
 
             if not tool_use_blocks:
                 break
 
-            tool_results = []
-            for tool_block in tool_use_blocks:
-                tool_name = tool_block.name
-                tool_input = tool_block.input
-
-                if tool_name == "submit_alert_verdict":
-                    verdict = {
-                        "should_alert": tool_input.get("should_alert", True),
-                        "severity": tool_input.get("severity", "medium"),
-                        "summary": tool_input.get("summary", ""),
-                    }
-                    investigation_log.append(
-                        f"[Verdict] should_alert={verdict['should_alert']}, "
-                        f"severity={verdict['severity']}: {verdict['summary']}"
-                    )
-                    tool_results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": tool_block.id,
-                            "content": json.dumps({"status": "verdict_recorded"}),
-                        }
-                    )
-                    continue
-
-                tool_call_count += 1
-                investigation_log.append(
-                    f"[Tool: {tool_name}] input={json.dumps(tool_input, default=str)[:200]}"
-                )
-
-                tool_start_t = _time.monotonic()
-                try:
-                    result = await _execute_tool(tool_name, tool_input)
-                except Exception as e:
-                    logger.exception("Tool %s failed during alert investigation", tool_name)
-                    result = {"error": str(e)}
-                tool_duration_ms = (_time.monotonic() - tool_start_t) * 1000
-
-                # Span records metadata only; actual duration is in duration_ms attr.
-                with mlflow.start_span(
-                    name=f"tool:{tool_name}",
-                    span_type=SpanType.TOOL,
-                ) as tool_span:
-                    set_tool_span_outputs(
-                        tool_span,
-                        tool_name=tool_name,
-                        tool_input=tool_input,
-                        result=result if "error" not in result else None,
-                        error=result.get("error") if "error" in result else None,
-                        duration_ms=tool_duration_ms,
-                        cached=False,
-                    )
-
-                result_str = json.dumps(result, default=str)
-                if len(result_str) > 300:
-                    investigation_log.append(f"[Tool: {tool_name}] result: {result_str[:300]}...")
-                else:
-                    investigation_log.append(f"[Tool: {tool_name}] result: {result_str}")
-
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tool_block.id,
-                        "content": _cap_tool_result(json.dumps(result, default=str)),
-                    }
-                )
+            round_verdict, tool_results, round_tool_calls = await _process_alert_round_tools(
+                tool_use_blocks, investigation_log
+            )
+            tool_call_count += round_tool_calls
+            if round_verdict is not None:
+                verdict = round_verdict
 
             messages.append({"role": "user", "content": tool_results})
-            trimmed = _trim_history(messages)
-            messages[:] = trimmed
+            messages[:] = _trim_history(messages)
 
             if verdict is not None:
                 break

@@ -3,6 +3,7 @@
 import logging
 import os
 import ssl
+import tempfile
 from base64 import b64decode
 from typing import Any
 
@@ -19,6 +20,35 @@ _clients: dict[str, httpx.AsyncClient] = {}
 _cluster_configs: dict[str, dict[str, Any]] = {}
 
 
+def _resolve_context(kc: dict, path: str) -> dict:
+    """Resolve the active context from a kubeconfig dict."""
+    current_ctx = kc.get("current-context", "")
+    contexts = kc.get("contexts", [])
+    if not contexts:
+        raise ValueError(f"No contexts in kubeconfig: {path}")
+
+    ctx = None
+    if current_ctx:
+        ctx = next((c for c in contexts if c["name"] == current_ctx), None)
+    if not ctx:
+        ctx = contexts[0]
+    return ctx
+
+
+def _resolve_user_credentials(kc: dict, user_name: str) -> dict[str, str]:
+    """Resolve user credentials (token, client cert) from kubeconfig."""
+    result = {"token": "", "client_cert_data": "", "client_key_data": ""}  # nosec B105
+    if not user_name:
+        return result
+    users = kc.get("users", [])
+    user = next((u for u in users if u["name"] == user_name), None)
+    if user and "user" in user:
+        result["token"] = user["user"].get("token", "")
+        result["client_cert_data"] = user["user"].get("client-certificate-data", "")
+        result["client_key_data"] = user["user"].get("client-key-data", "")
+    return result
+
+
 def _parse_kubeconfig(path: str) -> dict[str, Any]:
     """Parse a kubeconfig file and extract server URL, token, and TLS settings.
 
@@ -32,61 +62,58 @@ def _parse_kubeconfig(path: str) -> dict[str, Any]:
     with open(expanded) as f:
         kc = yaml.safe_load(f)
 
-    # Resolve context
-    current_ctx = kc.get("current-context", "")
-    contexts = kc.get("contexts", [])
-    if not contexts:
-        raise ValueError(f"No contexts in kubeconfig: {path}")
-
-    ctx = None
-    if current_ctx:
-        ctx = next((c for c in contexts if c["name"] == current_ctx), None)
-    if not ctx:
-        ctx = contexts[0]
-
+    ctx = _resolve_context(kc, path)
     ctx_info = ctx["context"]
     cluster_name = ctx_info["cluster"]
     user_name = ctx_info.get("user", "")
 
-    # Find cluster
     clusters = kc.get("clusters", [])
     cluster = next((c for c in clusters if c["name"] == cluster_name), None)
     if not cluster:
         raise ValueError(f"Cluster '{cluster_name}' not found in kubeconfig: {path}")
 
     cluster_data = cluster["cluster"]
-    server = cluster_data["server"].rstrip("/")
-    verify_ssl = not cluster_data.get("insecure-skip-tls-verify", False)
-    ca_data = cluster_data.get("certificate-authority-data", "")
-
-    # Find user credentials (token or client certificate)
-    token = ""  # nosec B105
-    client_cert_data = ""
-    client_key_data = ""
-    if user_name:
-        users = kc.get("users", [])
-        user = next((u for u in users if u["name"] == user_name), None)
-        if user and "user" in user:
-            token = user["user"].get("token", "")
-            client_cert_data = user["user"].get("client-certificate-data", "")
-            client_key_data = user["user"].get("client-key-data", "")
+    creds = _resolve_user_credentials(kc, user_name)
 
     return {
-        "server": server,
-        "token": token,
-        "verify_ssl": verify_ssl,
-        "ca_data": ca_data,
-        "client_cert_data": client_cert_data,
-        "client_key_data": client_key_data,
+        "server": cluster_data["server"].rstrip("/"),
+        "token": creds["token"],
+        "verify_ssl": not cluster_data.get("insecure-skip-tls-verify", False),
+        "ca_data": cluster_data.get("certificate-authority-data", ""),
+        "client_cert_data": creds["client_cert_data"],
+        "client_key_data": creds["client_key_data"],
     }
+
+
+def _load_ca_cert(ctx: ssl.SSLContext, ca_data: str) -> None:
+    """Load CA certificate data into SSL context."""
+    ca_bytes = b64decode(ca_data)
+    with tempfile.NamedTemporaryFile(suffix=".crt", delete=False) as f:
+        f.write(ca_bytes)
+        ca_path = f.name
+    ctx.load_verify_locations(ca_path)
+    os.unlink(ca_path)
+
+
+def _load_client_cert(ctx: ssl.SSLContext, cert_data: str, key_data: str) -> None:
+    """Load client certificate and key into SSL context."""
+    cert_bytes = b64decode(cert_data)
+    key_bytes = b64decode(key_data)
+    with tempfile.NamedTemporaryFile(suffix=".crt", delete=False) as cf:
+        cf.write(cert_bytes)
+        cert_path = cf.name
+    with tempfile.NamedTemporaryFile(suffix=".key", delete=False) as kf:
+        kf.write(key_bytes)
+        key_path = kf.name
+    ctx.load_cert_chain(cert_path, key_path)
+    os.unlink(cert_path)
+    os.unlink(key_path)
 
 
 def _build_ssl_context(
     cluster_cfg: dict[str, Any],
 ) -> ssl.SSLContext | bool:
     """Build SSL context from cluster config, including client certificates."""
-    import tempfile
-
     has_ca = bool(cluster_cfg.get("ca_data"))
     has_client_cert = bool(
         cluster_cfg.get("client_cert_data") and cluster_cfg.get("client_key_data")
@@ -94,41 +121,18 @@ def _build_ssl_context(
 
     if not cluster_cfg["verify_ssl"] and not has_client_cert:
         return False
-
     if not has_ca and not has_client_cert:
         return True
 
-    # Need a real SSL context for CA and/or client certs
-    if cluster_cfg["verify_ssl"]:
-        ctx = ssl.create_default_context()
-    else:
-        ctx = ssl.create_default_context()
+    ctx = ssl.create_default_context()
+    if not cluster_cfg["verify_ssl"]:
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
 
     if has_ca:
-        ca_bytes = b64decode(cluster_cfg["ca_data"])
-        with tempfile.NamedTemporaryFile(suffix=".crt", delete=False) as f:
-            f.write(ca_bytes)
-            ca_path = f.name
-        ctx.load_verify_locations(ca_path)
-        os.unlink(ca_path)
-
+        _load_ca_cert(ctx, cluster_cfg["ca_data"])
     if has_client_cert:
-        cert_bytes = b64decode(cluster_cfg["client_cert_data"])
-        key_bytes = b64decode(cluster_cfg["client_key_data"])
-
-        with tempfile.NamedTemporaryFile(suffix=".crt", delete=False) as cf:
-            cf.write(cert_bytes)
-            cert_path = cf.name
-
-        with tempfile.NamedTemporaryFile(suffix=".key", delete=False) as kf:
-            kf.write(key_bytes)
-            key_path = kf.name
-
-        ctx.load_cert_chain(cert_path, key_path)
-        os.unlink(cert_path)
-        os.unlink(key_path)
+        _load_client_cert(ctx, cluster_cfg["client_cert_data"], cluster_cfg["client_key_data"])
 
     return ctx
 

@@ -52,25 +52,39 @@ class ConversationSummary(BaseModel):
     owner: str | None = None
 
 
+def _extract_first_user_text(messages: list) -> str:
+    """Extract text from the first user message in a conversation."""
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(
+                block.get("text", "") for block in content if isinstance(block, dict)
+            )
+        content = content.strip()
+        if content:
+            return content
+    return ""
+
+
+def _truncate_title(text: str, max_len: int) -> str:
+    """Truncate text at a word boundary for use as a title."""
+    if len(text) <= max_len:
+        return text
+    truncated = text[:max_len]
+    last_space = truncated.rfind(" ")
+    if last_space > max_len // 2:
+        truncated = truncated[:last_space]
+    return truncated + "..."
+
+
 def _auto_title(messages: list) -> str:
     """Generate a title from the first user message."""
-    for msg in messages:
-        if isinstance(msg, dict) and msg.get("role") == "user":
-            content = msg.get("content", "")
-            if isinstance(content, list):
-                content = " ".join(
-                    block.get("text", "") for block in content if isinstance(block, dict)
-                )
-            content = content.strip()
-            if content:
-                if len(content) <= 80:
-                    return content
-                truncated = content[:80]
-                last_space = truncated.rfind(" ")
-                if last_space > 40:
-                    truncated = truncated[:last_space]
-                return truncated + "..."
-    return "New conversation"
+    text = _extract_first_user_text(messages)
+    if not text:
+        return "New conversation"
+    return _truncate_title(text, 80)
 
 
 def _count_user_messages(messages: list) -> int:
@@ -154,6 +168,27 @@ async def _background_learn(messages: list) -> None:
         logger.exception("Background learning analysis failed (non-fatal)")
 
 
+def _read_conversation_summary(fpath: str, owner: str, *, all_users: bool) -> dict | None:
+    """Read a single conversation file and return a summary dict, or None."""
+    try:
+        with open(fpath) as f:
+            data = json.load(f)
+    except Exception:  # nosec B112 — skip corrupt/unreadable JSON files
+        return None
+    if not all_users and data.get("owner") != owner:
+        return None
+    summary: dict = {
+        "id": data["id"],
+        "title": data.get("title", "Untitled"),
+        "created_at": data.get("created_at", ""),
+        "updated_at": data.get("updated_at", data.get("created_at", "")),
+        "message_count": _count_user_messages(data.get("messages", [])),
+    }
+    if all_users:
+        summary["owner"] = data.get("owner", "unknown")
+    return summary
+
+
 def _list_conversations_sync(owner: str, *, all_users: bool = False) -> list[dict]:
     """Scan conversations directory and return summaries.
 
@@ -161,31 +196,19 @@ def _list_conversations_sync(owner: str, *, all_users: bool = False) -> list[dic
     ``owner`` field populated.  Otherwise returns only conversations owned by
     *owner*.  Blocking I/O — always call via asyncio.to_thread.
     """
-    conversations: list[dict] = []
     try:
-        for fname in os.listdir(CONVERSATIONS_DIR):
-            if not fname.endswith(".json"):
-                continue
-            fpath = os.path.join(CONVERSATIONS_DIR, fname)
-            try:
-                with open(fpath) as f:
-                    data = json.load(f)
-                if not all_users and data.get("owner") != owner:
-                    continue
-                summary: dict = {
-                    "id": data["id"],
-                    "title": data.get("title", "Untitled"),
-                    "created_at": data.get("created_at", ""),
-                    "updated_at": data.get("updated_at", data.get("created_at", "")),
-                    "message_count": _count_user_messages(data.get("messages", [])),
-                }
-                if all_users:
-                    summary["owner"] = data.get("owner", "unknown")
-                conversations.append(summary)
-            except Exception:  # nosec B112 — skip corrupt/unreadable JSON files
-                continue
+        filenames = os.listdir(CONVERSATIONS_DIR)
     except FileNotFoundError:
-        pass
+        return []
+
+    conversations: list[dict] = []
+    for fname in filenames:
+        if not fname.endswith(".json"):
+            continue
+        fpath = os.path.join(CONVERSATIONS_DIR, fname)
+        summary = _read_conversation_summary(fpath, owner, all_users=all_users)
+        if summary:
+            conversations.append(summary)
 
     conversations.sort(key=lambda c: c.get("updated_at", ""), reverse=True)
     return conversations

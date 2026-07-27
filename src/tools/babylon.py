@@ -280,6 +280,70 @@ def _filter_job_vars(jv: dict) -> dict:
     return result
 
 
+def _parse_tower_jobs(tower_jobs: dict, fields: dict[str, str]) -> dict[str, Any]:
+    """Parse towerJobs dict from AnarchySubject status into clean format.
+
+    Args:
+        tower_jobs: The towerJobs dict from AnarchySubject status.
+        fields: Mapping of source field names to output key names
+                (e.g. {"towerHost": "controller", "deployerJob": "job_id"}).
+
+    Returns:
+        Dict keyed by action name with extracted fields.
+    """
+    if not tower_jobs or not isinstance(tower_jobs, dict):
+        return {}
+    parsed: dict[str, Any] = {}
+    for action_name, job_info in tower_jobs.items():
+        if not isinstance(job_info, dict):
+            continue
+        entry: dict[str, Any] = {}
+        for src_key, dst_key in fields.items():
+            val = job_info.get(src_key)
+            if val:
+                entry[dst_key] = val
+        if entry:
+            parsed[action_name] = entry
+    return parsed
+
+
+def _extract_provision_data(summary: dict) -> dict[str, Any]:
+    """Extract provision data from ResourceClaim status summary."""
+    result: dict[str, Any] = {
+        "state": summary.get("state", "unknown"),
+        "agnosticv": summary.get("agnosticv", {}),
+        "runtime_default": summary.get("runtime_default", ""),
+        "runtime_maximum": summary.get("runtime_maximum", ""),
+    }
+    pdata = summary.get("provision_data", {})
+    if not pdata:
+        return result
+    cloud = pdata.get("cloud_provider", "")
+    pd: dict[str, Any] = {
+        "cloud_provider": cloud,
+        "guid": pdata.get("guid", ""),
+    }
+    # AWS sandbox fields — present for both AWS-native and CNV items
+    # that provision spoke clusters or other resources on AWS
+    aws_account = pdata.get("aws_sandbox_account_id", "")
+    if aws_account:
+        pd["aws_region"] = pdata.get("aws_default_region", pdata.get("aws_region", ""))
+        pd["sandbox_account_id"] = aws_account
+        domain = pdata.get("aws_route53_domain", "")
+        if domain:
+            parts = domain.strip(".").split(".")
+            if parts:
+                pd["sandbox_name"] = parts[0]
+    # CNV-specific fields
+    if cloud == "openshift_cnv":
+        pd["cnv_cluster"] = pdata.get(
+            "sandbox_openshift_cluster",
+            pdata.get("openshift_cluster_ingress_domain", ""),
+        )
+    result["provision_data"] = pd
+    return result
+
+
 def _extract_deployment_info(resource_claim: dict) -> dict:
     """Extract key deployment info from a ResourceClaim, stripping secrets."""
     metadata = resource_claim.get("metadata", {})
@@ -302,38 +366,7 @@ def _extract_deployment_info(resource_claim: dict) -> dict:
     # Extract summary (has provision_data with sandbox info)
     summary = status.get("summary", {})
     if summary:
-        result["state"] = summary.get("state", "unknown")
-        result["agnosticv"] = summary.get("agnosticv", {})
-        result["runtime_default"] = summary.get("runtime_default", "")
-        result["runtime_maximum"] = summary.get("runtime_maximum", "")
-
-        # Extract sanitized provision_data
-        pdata = summary.get("provision_data", {})
-        if pdata:
-            cloud = pdata.get("cloud_provider", "")
-            result["provision_data"] = {
-                "cloud_provider": cloud,
-                "guid": pdata.get("guid", ""),
-            }
-            # AWS sandbox fields — present for both AWS-native and CNV items
-            # that provision spoke clusters or other resources on AWS
-            aws_account = pdata.get("aws_sandbox_account_id", "")
-            if aws_account:
-                result["provision_data"]["aws_region"] = pdata.get(
-                    "aws_default_region", pdata.get("aws_region", "")
-                )
-                result["provision_data"]["sandbox_account_id"] = aws_account
-                domain = pdata.get("aws_route53_domain", "")
-                if domain:
-                    parts = domain.strip(".").split(".")
-                    if parts:
-                        result["provision_data"]["sandbox_name"] = parts[0]
-            # CNV-specific fields
-            if cloud == "openshift_cnv":
-                result["provision_data"]["cnv_cluster"] = pdata.get(
-                    "sandbox_openshift_cluster",
-                    pdata.get("openshift_cluster_ingress_domain", ""),
-                )
+        result.update(_extract_provision_data(summary))
 
     # Extract job_vars from embedded AnarchySubject state
     resources = status.get("resources", [])
@@ -349,6 +382,36 @@ def _extract_deployment_info(resource_claim: dict) -> dict:
             instance_vars = _filter_job_vars(jv)
             result["instance_vars"] = instance_vars
 
+    return result
+
+
+def _extract_anarchy_state(state: dict) -> dict[str, Any]:
+    """Extract state info from an embedded AnarchySubject.
+
+    Returns an empty dict if the state is not an AnarchySubject.
+    """
+    if state.get("kind") != "AnarchySubject":
+        return {}
+    as_vars = state.get("spec", {}).get("vars", {})
+    jv = as_vars.get("job_vars", {})
+    result: dict[str, Any] = {
+        "current_state": as_vars.get("current_state", ""),
+        "desired_state": as_vars.get("desired_state", ""),
+        "guid": jv.get("guid", ""),
+        "cloud_provider": jv.get("cloud_provider", ""),
+    }
+    tower_jobs = state.get("status", {}).get("towerJobs", {})
+    parsed = _parse_tower_jobs(
+        tower_jobs,
+        {
+            "towerHost": "controller",
+            "deployerJob": "job_id",
+            "jobStatus": "status",
+            "completeTimestamp": "completed",
+        },
+    )
+    if parsed:
+        result["tower_jobs"] = parsed
     return result
 
 
@@ -381,35 +444,7 @@ def _extract_resource_components(resource_claim: dict) -> list[dict]:
 
         # Extract state from embedded AnarchySubject
         state = res.get("state", {})
-        if state.get("kind") == "AnarchySubject":
-            as_vars = state.get("spec", {}).get("vars", {})
-            comp["current_state"] = as_vars.get("current_state", "")
-            comp["desired_state"] = as_vars.get("desired_state", "")
-
-            jv = as_vars.get("job_vars", {})
-            comp["guid"] = jv.get("guid", "")
-            comp["cloud_provider"] = jv.get("cloud_provider", "")
-
-            # Tower job references from AnarchySubject status
-            tower_jobs = state.get("status", {}).get("towerJobs", {})
-            if tower_jobs and isinstance(tower_jobs, dict):
-                parsed_jobs: dict[str, Any] = {}
-                for action_name, job_info in tower_jobs.items():
-                    if not isinstance(job_info, dict):
-                        continue
-                    entry: dict[str, Any] = {}
-                    if job_info.get("towerHost"):
-                        entry["controller"] = job_info["towerHost"]
-                    if job_info.get("deployerJob"):
-                        entry["job_id"] = job_info["deployerJob"]
-                    if job_info.get("jobStatus"):
-                        entry["status"] = job_info["jobStatus"]
-                    if job_info.get("completeTimestamp"):
-                        entry["completed"] = job_info["completeTimestamp"]
-                    if entry:
-                        parsed_jobs[action_name] = entry
-                if parsed_jobs:
-                    comp["tower_jobs"] = parsed_jobs
+        comp.update(_extract_anarchy_state(state))
 
         components.append(comp)
 
@@ -451,22 +486,16 @@ def _extract_anarchy_subject_info(subject: dict) -> dict:
     # Extract towerJobs from status — contains controller hostname and job IDs
     # for each lifecycle action (provision, destroy, stop, start)
     tower_jobs = status.get("towerJobs", {})
-    if tower_jobs and isinstance(tower_jobs, dict):
-        parsed_jobs: dict[str, Any] = {}
-        for action_name, job_info in tower_jobs.items():
-            if not isinstance(job_info, dict):
-                continue
-            entry: dict[str, Any] = {}
-            if job_info.get("towerHost"):
-                entry["towerHost"] = job_info["towerHost"]
-            if job_info.get("deployerJob"):
-                entry["deployerJob"] = job_info["deployerJob"]
-            if job_info.get("completeJob"):
-                entry["completeJob"] = job_info["completeJob"]
-            if entry:
-                parsed_jobs[action_name] = entry
-        if parsed_jobs:
-            result["tower_jobs"] = parsed_jobs
+    parsed_jobs = _parse_tower_jobs(
+        tower_jobs,
+        {
+            "towerHost": "towerHost",
+            "deployerJob": "deployerJob",
+            "completeJob": "completeJob",
+        },
+    )
+    if parsed_jobs:
+        result["tower_jobs"] = parsed_jobs
 
     return result
 
@@ -499,16 +528,25 @@ def _extract_resource_pool_info(pool: dict) -> dict:
     return result
 
 
+def _extract_provision_count(status: dict) -> dict[str, int]:
+    """Extract provision count from Workshop/MultiWorkshop status."""
+    provision_count = status.get("provisionCount", {})
+    if not isinstance(provision_count, dict):
+        provision_count = {}
+    return {
+        "ordered": provision_count.get("ordered", 0),
+        "active": provision_count.get("active", 0),
+        "failed": provision_count.get("failed", 0),
+        "retries": provision_count.get("retries", 0),
+    }
+
+
 def _extract_workshop_info(workshop: dict) -> dict:
     """Extract key info from a Workshop."""
     metadata = workshop.get("metadata", {})
     spec = workshop.get("spec", {})
     status = workshop.get("status", {})
     labels = metadata.get("labels", {})
-
-    provision_count = status.get("provisionCount", {})
-    if not isinstance(provision_count, dict):
-        provision_count = {}
 
     return {
         "name": metadata.get("name", ""),
@@ -519,12 +557,7 @@ def _extract_workshop_info(workshop: dict) -> dict:
         "description": spec.get("description", ""),
         "open_registration": spec.get("openRegistration", False),
         "lifespan": spec.get("lifespan", {}),
-        "provision_count": {
-            "ordered": provision_count.get("ordered", 0),
-            "active": provision_count.get("active", 0),
-            "failed": provision_count.get("failed", 0),
-            "retries": provision_count.get("retries", 0),
-        },
+        "provision_count": _extract_provision_count(status),
         "user_count": status.get("userCount", 0),
         "user_assignments_count": (
             len(status.get("userAssignments", {}))
@@ -593,6 +626,15 @@ def _extract_multi_workshop_info(mw: dict) -> dict:
     }
 
 
+def _resolve_cluster_target(cluster: str, sandbox_comment: str) -> str:
+    """Resolve target cluster from explicit name or sandbox comment."""
+    if cluster:
+        return cluster
+    if sandbox_comment:
+        return resolve_cluster_from_comment(sandbox_comment)
+    return ""
+
+
 async def query_babylon_catalog(
     action: str,
     cluster: str = "",
@@ -632,9 +674,7 @@ async def query_babylon_catalog(
         return {"error": "No Babylon clusters configured. Set babylon.clusters in config."}
 
     # Resolve which cluster to query
-    target_cluster = cluster
-    if not target_cluster and sandbox_comment:
-        target_cluster = resolve_cluster_from_comment(sandbox_comment)
+    target_cluster = _resolve_cluster_target(cluster, sandbox_comment)
 
     # For GUID-based searches, search all clusters until found
     if not target_cluster and guid and action in ("list_anarchy_subjects", "list_anarchy_actions"):
@@ -1121,6 +1161,40 @@ async def _list_workshops(
     }
 
 
+async def _fetch_resource_claims(cluster: str, namespace: str, rc_names: dict | list) -> list[dict]:
+    """Fetch ResourceClaims and extract their components."""
+    names = list(rc_names.keys()) if isinstance(rc_names, dict) else rc_names
+
+    resource_claims: list[dict] = []
+    for rc_name in names:
+        try:
+            rc = await k8s_get_resource(
+                cluster,
+                RESOURCE_CLAIM_GROUP,
+                RESOURCE_CLAIM_VERSION,
+                RESOURCE_CLAIM_PLURAL,
+                namespace,
+                rc_name,
+            )
+        except Exception as e:
+            resource_claims.append({"name": rc_name, "error": str(e)})
+            continue
+
+        rc_status = rc.get("status", {})
+        rc_info: dict[str, Any] = {
+            "name": rc_name,
+            "state": rc_status.get("summary", {}).get("state", "unknown"),
+            "healthy": rc_status.get("healthy"),
+            "ready": rc_status.get("ready"),
+        }
+
+        # Extract ALL resource components (AnarchySubjects)
+        rc_info["resources"] = _extract_resource_components(rc)
+        resource_claims.append(rc_info)
+
+    return resource_claims
+
+
 async def _get_workshop(
     cluster: str,
     name: str,
@@ -1180,10 +1254,6 @@ async def _get_workshop(
     ws_labels = ws_meta.get("labels", {})
     ws_annotations = ws_meta.get("annotations", {})
 
-    provision_count = ws_status.get("provisionCount", {})
-    if not isinstance(provision_count, dict):
-        provision_count = {}
-
     result: dict[str, Any] = {
         "cluster": cluster,
         "name": ws_meta.get("name", ""),
@@ -1194,12 +1264,7 @@ async def _get_workshop(
         "requester": ws_annotations.get("demo.redhat.com/requester", ""),
         "multiworkshop": ws_labels.get("babylon.gpte.redhat.com/multiworkshop", ""),
         "lifespan": ws_spec.get("lifespan", {}),
-        "provision_count": {
-            "ordered": provision_count.get("ordered", 0),
-            "active": provision_count.get("active", 0),
-            "failed": provision_count.get("failed", 0),
-            "retries": provision_count.get("retries", 0),
-        },
+        "provision_count": _extract_provision_count(ws_status),
         "user_count": ws_status.get("userCount", {}),
     }
 
@@ -1208,34 +1273,7 @@ async def _get_workshop(
     if not isinstance(rc_refs, dict):
         rc_refs = {}
 
-    resource_claims: list[dict] = []
-    for rc_name in rc_refs:
-        try:
-            rc = await k8s_get_resource(
-                cluster,
-                RESOURCE_CLAIM_GROUP,
-                RESOURCE_CLAIM_VERSION,
-                RESOURCE_CLAIM_PLURAL,
-                namespace,
-                rc_name,
-            )
-        except Exception as e:
-            resource_claims.append({"name": rc_name, "error": str(e)})
-            continue
-
-        rc_status = rc.get("status", {})
-        rc_info: dict[str, Any] = {
-            "name": rc_name,
-            "state": rc_status.get("summary", {}).get("state", "unknown"),
-            "healthy": rc_status.get("healthy"),
-            "ready": rc_status.get("ready"),
-        }
-
-        # Extract ALL resource components (AnarchySubjects)
-        rc_info["resources"] = _extract_resource_components(rc)
-        resource_claims.append(rc_info)
-
-    result["resource_claims"] = resource_claims
+    result["resource_claims"] = await _fetch_resource_claims(cluster, namespace, rc_refs)
 
     return result
 
@@ -1477,26 +1515,16 @@ async def _get_multiworkshop(
         ws_status = ws.get("status", {})
         ws_labels = ws_meta.get("labels", {})
 
-        provision_count = ws_status.get("provisionCount", {})
-        if not isinstance(provision_count, dict):
-            provision_count = {}
-
-        failed = provision_count.get("failed", 0)
-        active = provision_count.get("active", 0)
-        total_failed += failed
-        total_active += active
+        pc = _extract_provision_count(ws_status)
+        total_failed += pc["failed"]
+        total_active += pc["active"]
 
         ws_info: dict[str, Any] = {
             "name": ws_meta.get("name", ""),
             "display_name": ws_spec.get("displayName", ""),
             "catalog_item": ws_labels.get(_LABEL_CATALOG_ITEM_NAME, ""),
             "workshop_id": ws_labels.get(_LABEL_WORKSHOP_ID, ""),
-            "provision_count": {
-                "ordered": provision_count.get("ordered", 0),
-                "active": active,
-                "failed": failed,
-                "retries": provision_count.get("retries", 0),
-            },
+            "provision_count": pc,
         }
 
         # 3. Fetch each ResourceClaim referenced by this Workshop
@@ -1504,34 +1532,7 @@ async def _get_multiworkshop(
         if not isinstance(rc_refs, dict):
             rc_refs = {}
 
-        resource_claims: list[dict] = []
-        for rc_name in rc_refs:
-            try:
-                rc = await k8s_get_resource(
-                    cluster,
-                    RESOURCE_CLAIM_GROUP,
-                    RESOURCE_CLAIM_VERSION,
-                    RESOURCE_CLAIM_PLURAL,
-                    namespace,
-                    rc_name,
-                )
-            except Exception as e:
-                resource_claims.append({"name": rc_name, "error": str(e)})
-                continue
-
-            rc_status = rc.get("status", {})
-            rc_info: dict[str, Any] = {
-                "name": rc_name,
-                "state": rc_status.get("summary", {}).get("state", "unknown"),
-                "healthy": rc_status.get("healthy"),
-                "ready": rc_status.get("ready"),
-            }
-
-            # 4. Extract ALL resource components (AnarchySubjects)
-            rc_info["resources"] = _extract_resource_components(rc)
-            resource_claims.append(rc_info)
-
-        ws_info["resource_claims"] = resource_claims
+        ws_info["resource_claims"] = await _fetch_resource_claims(cluster, namespace, rc_refs)
         workshops_data.append(ws_info)
 
     result["summary"] = {

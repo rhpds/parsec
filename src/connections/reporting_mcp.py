@@ -149,6 +149,62 @@ def _build_prompt_tool(prompts_info: list[dict]) -> dict:
     }
 
 
+async def _discover_tools(session) -> list[dict]:
+    """Discover and convert MCP tools to Claude API format."""
+    tools_result = await session.list_tools()
+    claude_tools: list[dict] = []
+    for tool in tools_result.tools:
+        if tool.name == "query":
+            # Handled by query_provisions_db wrapper (SQL validation)
+            continue
+        claude_tools.append(_mcp_schema_to_claude(tool))
+    return claude_tools
+
+
+async def _discover_resources(session, claude_tools: list[dict]) -> None:
+    """Discover MCP resources and add db_read_knowledge tool if domains found."""
+    try:
+        resources_result = await session.list_resources()
+        knowledge_domains: list[str] = []
+        for resource in resources_result.resources:
+            uri = str(resource.uri)
+            if uri.startswith("database://knowledge/"):
+                domain = uri.split("/")[-1]
+                knowledge_domains.append(domain)
+
+        if knowledge_domains:
+            claude_tools.append(_build_knowledge_tool(sorted(knowledge_domains)))
+            logger.info(
+                "Reporting MCP knowledge domains: %s",
+                ", ".join(sorted(knowledge_domains)),
+            )
+    except Exception:
+        logger.warning("Could not discover MCP resources — db_read_knowledge will not be available")
+
+
+async def _discover_prompts(session, claude_tools: list[dict]) -> None:
+    """Discover MCP prompts and add db_get_prompt tool if prompts found."""
+    try:
+        prompts_result = await session.list_prompts()
+        prompts_info: list[dict] = []
+        for prompt in prompts_result.prompts:
+            prompts_info.append(
+                {
+                    "name": prompt.name,
+                    "description": prompt.description or "",
+                }
+            )
+
+        if prompts_info:
+            claude_tools.append(_build_prompt_tool(prompts_info))
+            logger.info(
+                "Reporting MCP prompts: %s",
+                ", ".join(p["name"] for p in prompts_info),
+            )
+    except Exception:
+        logger.warning("Could not discover MCP prompts — db_get_prompt will not be available")
+
+
 async def fetch_server_instructions() -> str:
     """Connect to the MCP server and discover all capabilities.
 
@@ -168,7 +224,6 @@ async def fetch_server_instructions() -> str:
             session,
             init_result,
         ):
-            # 1. Cache instructions
             instructions = init_result.instructions or ""
             if instructions:
                 _server_instructions = instructions
@@ -179,60 +234,10 @@ async def fetch_server_instructions() -> str:
             else:
                 logger.warning("Reporting MCP returned no instructions")
 
-            # 2. Discover and cache tools
-            tools_result = await session.list_tools()
-            claude_tools: list[dict] = []
-            for tool in tools_result.tools:
-                if tool.name == "query":
-                    # Handled by query_provisions_db wrapper (SQL validation)
-                    continue
-                claude_tools.append(_mcp_schema_to_claude(tool))
+            claude_tools = await _discover_tools(session)
+            await _discover_resources(session, claude_tools)
+            await _discover_prompts(session, claude_tools)
 
-            # 3. Discover resources → build db_read_knowledge tool
-            try:
-                resources_result = await session.list_resources()
-                knowledge_domains: list[str] = []
-                for resource in resources_result.resources:
-                    uri = str(resource.uri)
-                    if uri.startswith("database://knowledge/"):
-                        domain = uri.split("/")[-1]
-                        knowledge_domains.append(domain)
-
-                if knowledge_domains:
-                    claude_tools.append(_build_knowledge_tool(sorted(knowledge_domains)))
-                    logger.info(
-                        "Reporting MCP knowledge domains: %s",
-                        ", ".join(sorted(knowledge_domains)),
-                    )
-            except Exception:
-                logger.warning(
-                    "Could not discover MCP resources — db_read_knowledge will not be available"
-                )
-
-            # 4. Discover prompts → build db_get_prompt tool
-            try:
-                prompts_result = await session.list_prompts()
-                prompts_info: list[dict] = []
-                for prompt in prompts_result.prompts:
-                    prompts_info.append(
-                        {
-                            "name": prompt.name,
-                            "description": prompt.description or "",
-                        }
-                    )
-
-                if prompts_info:
-                    claude_tools.append(_build_prompt_tool(prompts_info))
-                    logger.info(
-                        "Reporting MCP prompts: %s",
-                        ", ".join(p["name"] for p in prompts_info),
-                    )
-            except Exception:
-                logger.warning(
-                    "Could not discover MCP prompts — db_get_prompt will not be available"
-                )
-
-            # Cache the final tool list
             _mcp_tools = claude_tools
             _mcp_tool_names = {t["name"] for t in claude_tools}
 

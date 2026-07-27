@@ -6,7 +6,7 @@ import os
 import pathlib
 import ssl
 import time
-from typing import Annotated
+from typing import Annotated, Any, NoReturn
 
 import httpx
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -103,6 +103,56 @@ def _log_identity_debug(request: Request) -> None:
         logger.info("=== SSO DEBUG: No identity headers found in request ===")
 
 
+def _parse_csv_set(value: str) -> set[str]:
+    """Parse a comma-separated string into a lowercase set, skipping blanks."""
+    return {item.strip().lower() for item in value.split(",") if item.strip()}
+
+
+def _is_user_in_email_list(user: str, allowed_str: str) -> bool:
+    """Return True if user's email is in the comma-separated allowed list."""
+    if not allowed_str:
+        return False
+    allowed = _parse_csv_set(allowed_str)
+    return bool(allowed and user.lower() in allowed)
+
+
+def _raise_no_identity() -> NoReturn:
+    """Raise 403 for missing user identity."""
+    logger.warning("Access denied: no user identity in request headers")
+    raise HTTPException(
+        status_code=403,
+        detail="Authentication required — no user identity found in request",
+    )
+
+
+async def _check_group_access(cfg: Any, user: str) -> bool:
+    """Check if user is in an allowed OpenShift group. Returns True if allowed."""
+    allowed_groups_str = cfg.auth.get("allowed_groups", "")
+    if not allowed_groups_str:
+        return False  # No group restriction configured
+    allowed_groups = _parse_csv_set(allowed_groups_str)
+    if not allowed_groups:
+        return False
+    user_groups = await _get_user_groups(user)
+    if user_groups & allowed_groups:
+        return True
+
+    # Check email fallback before denying
+    if _is_user_in_email_list(user, cfg.auth.get("allowed_users", "")):
+        return True
+
+    # Neither group nor email matched
+    user_groups_str = ", ".join(sorted(user_groups)) if user_groups else "(none)"
+    logger.warning("Access denied for user '%s' — not in allowed groups or users", user)
+    logger.warning("  Allowed groups: %s", ", ".join(sorted(allowed_groups)))
+    logger.warning("  User groups: %s", user_groups_str)
+    raise HTTPException(
+        status_code=403,
+        detail=f"Access denied: user '{user}' is not in an allowed group. "
+        f"Contact an administrator to request access.",
+    )
+
+
 async def _check_user_allowed(request: Request, user: str | None) -> None:
     """Check if the user is allowed via group membership or email whitelist.
 
@@ -113,54 +163,24 @@ async def _check_user_allowed(request: Request, user: str | None) -> None:
     _log_identity_debug(request)
 
     cfg = get_config()
-
-    # Check group membership first (queried from OpenShift API)
     allowed_groups_str = cfg.auth.get("allowed_groups", "")
-    if allowed_groups_str and user:
-        allowed_groups = {g.strip().lower() for g in allowed_groups_str.split(",") if g.strip()}
-        if allowed_groups:
-            user_groups = await _get_user_groups(user)
-            if user_groups & allowed_groups:
-                return  # User is in an allowed group
 
-        # Groups are configured but user is not in any — check email fallback
-        allowed_str = cfg.auth.get("allowed_users", "")
-        if allowed_str:
-            allowed = {u.strip().lower() for u in allowed_str.split(",") if u.strip()}
-            if allowed and user.lower() in allowed:
-                return  # User is in the email whitelist
-
-        # Neither group nor email matched
-        user_groups_str = ", ".join(sorted(user_groups)) if user_groups else "(none)"
-        logger.warning("Access denied for user '%s' — not in allowed groups or users", user)
-        logger.warning("  Allowed groups: %s", ", ".join(sorted(allowed_groups)))
-        logger.warning("  User groups: %s", user_groups_str)
-        raise HTTPException(
-            status_code=403,
-            detail=f"Access denied: user '{user}' is not in an allowed group. "
-            f"Contact an administrator to request access.",
-        )
-
-    if not user and allowed_groups_str:
-        logger.warning("Access denied: no user identity in request headers")
-        raise HTTPException(
-            status_code=403,
-            detail="Authentication required — no user identity found in request",
-        )
+    # Group-based auth path
+    if allowed_groups_str:
+        if not user:
+            _raise_no_identity()
+        await _check_group_access(cfg, user)
+        return
 
     # No group restriction — fall back to email-only check
     allowed_str = cfg.auth.get("allowed_users", "")
     if not allowed_str:
-        return  # No restriction configured
-    allowed = {u.strip().lower() for u in allowed_str.split(",") if u.strip()}
+        return
+    allowed = _parse_csv_set(allowed_str)
     if not allowed:
         return
     if not user:
-        logger.warning("Access denied: no user identity in request headers")
-        raise HTTPException(
-            status_code=403,
-            detail="Authentication required — no user identity found in request",
-        )
+        _raise_no_identity()
     if user.lower() not in allowed:
         logger.warning("Access denied for user '%s' — not in allowed_users list", user)
         logger.warning("  Allowed users: %s", ", ".join(sorted(allowed)))

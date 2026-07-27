@@ -631,6 +631,820 @@ marked.setOptions({ renderer: renderer });
     }
 })();
 
+// ─── Stream event helpers (extracted to reduce cognitive complexity — S3776) ───
+
+function _ensureStreamStarted(state) {
+    if (!state.streamStarted) {
+        state.statusEl.remove();
+        state.streamStarted = true;
+    }
+}
+
+function _renderCurrentChunk(state) {
+    var textEl = state.contentEl.querySelector(".md-text-live");
+    if (!textEl) {
+        textEl = document.createElement("div");
+        textEl.className = "md-text-live";
+        state.contentEl.appendChild(textEl);
+    }
+    textEl.innerHTML = marked.parse(state.currentChunk);
+}
+
+function _handleTextEvent(data, state) {
+    _ensureStreamStarted(state);
+    var si = state.contentEl.querySelector(".status-indicator");
+    if (si) si.remove();
+    state.fullText += data.content;
+    state.currentChunk += data.content;
+    _renderCurrentChunk(state);
+    scrollToBottom();
+}
+
+function _createLiveToolWrapper(state) {
+    state.liveWrapper = document.createElement("details");
+    state.liveWrapper.className = "tool-calls-summary";
+    state.liveWrapper.open = true;
+    state.liveSummary = document.createElement("summary");
+    state.liveWrapper.appendChild(state.liveSummary);
+    state.liveInner = document.createElement("div");
+    state.liveInner.className = "tool-calls-inner";
+    state.liveWrapper.appendChild(state.liveInner);
+    state.contentEl.appendChild(state.liveWrapper);
+}
+
+function _handleToolStartEvent(data, state) {
+    _ensureStreamStarted(state);
+    if (state.currentToolEl) {
+        var prevStatus = state.currentToolEl.querySelector(".tool-status");
+        if (prevStatus && prevStatus.classList.contains("running")) {
+            prevStatus.className = "tool-status done";
+            prevStatus.textContent = "done";
+        }
+    }
+    if (state.currentChunk.trim()) {
+        state.textChunks.push(state.currentChunk);
+    }
+    state.currentChunk = "";
+    var liveTextEl = state.contentEl.querySelector(".md-text-live");
+    if (liveTextEl) liveTextEl.remove();
+    if (!state.liveWrapper) {
+        _createLiveToolWrapper(state);
+    }
+    state.liveToolCount++;
+    state.liveSummary.textContent = state.liveToolCount === 1
+        ? "1 query running..."
+        : state.liveToolCount + " queries running...";
+    state.currentToolEl = createToolCall(data.tool, data.input);
+    state.currentToolName = data.tool;
+    state.currentToolInput = data.input;
+    state.toolElements[data.tool + "_" + Object.keys(state.toolElements).length] = state.currentToolEl;
+    state.liveInner.appendChild(state.currentToolEl);
+    scrollToBottom();
+}
+
+function _handleCacheHitEvent(state) {
+    if (!state.currentToolEl) return;
+    var cacheStatus = state.currentToolEl.querySelector(".tool-status");
+    if (cacheStatus) {
+        cacheStatus.className = "tool-status cached";
+        cacheStatus.textContent = "cached";
+    }
+}
+
+function _handleToolResultEvent(data, state) {
+    if (!state.currentToolEl) return;
+    finalizeToolCall(state.currentToolEl, data.tool, data.result);
+    state.toolResults.push({
+        tool: state.currentToolName || data.tool,
+        input: state.currentToolInput || {},
+        result: data.result
+    });
+    state.currentToolName = null;
+    state.currentToolInput = null;
+    state.currentToolEl = null;
+    scrollToBottom();
+}
+
+function _handleChartEvent(data, state) {
+    _ensureStreamStarted(state);
+    var chartEl = renderChart(data);
+    state.contentEl.appendChild(chartEl);
+    var chartCanvas = chartEl.querySelector("canvas");
+    if (chartCanvas) {
+        state.chartCanvases.push({ title: data.title || "chart", canvas: chartCanvas });
+    }
+    scrollToBottom();
+}
+
+function _handleReportEvent(data, contentEl) {
+    var link = document.createElement("a");
+    link.className = "report-download";
+    link.href = data.url;
+    link.download = data.filename;
+    link.textContent = "Download report: " + data.filename;
+    contentEl.appendChild(link);
+    scrollToBottom();
+}
+
+function _handleAgentStartEvent(data, state) {
+    _ensureStreamStarted(state);
+    var agentBanner = document.createElement("div");
+    agentBanner.className = "agent-banner agent-running";
+    agentBanner.dataset.agent = data.agent;
+    agentBanner.innerHTML = '<span class="agent-icon">&#9881;</span> ' +
+        '<span class="agent-label">' + (data.name || data.agent) + '</span>' +
+        ' <span class="agent-status">investigating…</span>';
+    state.contentEl.appendChild(agentBanner);
+    scrollToBottom();
+}
+
+function _handleAgentDoneEvent(data, contentEl) {
+    var banners = contentEl.querySelectorAll('.agent-banner[data-agent="' + data.agent + '"]');
+    banners.forEach(function(b) {
+        b.classList.remove("agent-running");
+        b.classList.add("agent-done");
+        var statusSpan = b.querySelector(".agent-status");
+        if (statusSpan) statusSpan.textContent = "done";
+    });
+}
+
+function _handleStatusEvent(data, state) {
+    _ensureStreamStarted(state);
+    var oldStatus = state.contentEl.querySelector(".status-indicator");
+    if (oldStatus) oldStatus.remove();
+    var si = document.createElement("div");
+    si.className = "status-indicator";
+    si.innerHTML = '<div class="spinner"></div> ' + data.message;
+    state.contentEl.appendChild(si);
+    scrollToBottom();
+}
+
+function _handleErrorEvent(data, state) {
+    _ensureStreamStarted(state);
+    var errEl = document.createElement("div");
+    errEl.className = "error-message";
+    errEl.textContent = data.message;
+    state.contentEl.appendChild(errEl);
+    scrollToBottom();
+}
+
+function _handleConfidenceEvent(data, state) {
+    _ensureStreamStarted(state);
+    if (data.level !== "medium" && data.level !== "low") return;
+    var callout = document.createElement("div");
+    callout.className = "confidence-callout " + data.level;
+    var title = data.level === "low" ? "Low confidence" : "Medium confidence";
+    var icon = data.level === "low" ? "⚠️" : "⚠";
+    var html = '<div class="confidence-title">' + icon + " " + title + "</div>";
+    var reasons = data.reasons || [];
+    if (reasons.length > 0) {
+        html += "<ul>";
+        reasons.forEach(function(r) {
+            html += "<li>" + r.replaceAll("<", "&lt;").replaceAll(">", "&gt;") + "</li>";
+        });
+        html += "</ul>";
+    }
+    callout.innerHTML = html;
+    state.contentEl.appendChild(callout);
+    scrollToBottom();
+}
+
+function _cleanupStatusIndicators(contentEl) {
+    var remainingStatus = contentEl.querySelector(".status-indicator");
+    if (remainingStatus) remainingStatus.remove();
+}
+
+function _finalizeRunningToolStatuses(contentEl) {
+    contentEl.querySelectorAll(".tool-status.running").forEach(function(s) {
+        s.className = "tool-status done";
+        s.textContent = "done";
+    });
+}
+
+function _appendThinkingText(container, text) {
+    var thinkEl = document.createElement("div");
+    thinkEl.className = "thinking-text";
+    thinkEl.innerHTML = marked.parse(text);
+    container.appendChild(thinkEl);
+}
+
+function _rebuildToolWrapperInner(state) {
+    var toolEls = Array.from(state.liveInner.querySelectorAll(".tool-call"));
+    state.liveInner.replaceChildren();
+    var chunkIdx = 0;
+    toolEls.forEach(function(tc) {
+        if (chunkIdx < state.textChunks.length) {
+            _appendThinkingText(state.liveInner, state.textChunks[chunkIdx]);
+            chunkIdx++;
+        }
+        state.liveInner.appendChild(tc);
+    });
+    while (chunkIdx < state.textChunks.length) {
+        _appendThinkingText(state.liveInner, state.textChunks[chunkIdx]);
+        chunkIdx++;
+    }
+}
+
+function _finalizeLiveToolWrapper(state) {
+    var qCount = state.liveToolCount;
+    state.liveSummary.textContent = qCount === 1
+        ? "1 query executed"
+        : qCount + " queries executed";
+    if (qCount > 1) {
+        addExpandCollapseToggle(state.liveSummary, state.liveWrapper);
+    }
+    _rebuildToolWrapperInner(state);
+    state.liveWrapper.open = false;
+    state.contentEl.insertBefore(state.liveWrapper, state.contentEl.firstChild);
+}
+
+function _mergeConfidenceMarker(existing, level, reason) {
+    if (level === "low" && existing.classList.contains("medium")) {
+        existing.classList.remove("medium");
+        existing.classList.add("low");
+        existing.querySelector(".confidence-title").innerHTML = '⚠️ Low confidence';
+    }
+    var ul = existing.querySelector("ul");
+    if (ul) {
+        var li = document.createElement("li");
+        li.textContent = reason;
+        ul.appendChild(li);
+    }
+}
+
+function _createConfidenceCallout(contentEl, level, reason) {
+    var mc = document.createElement("div");
+    mc.className = "confidence-callout " + level;
+    var mTitle = level === "low" ? "Low confidence" : "Medium confidence";
+    mc.innerHTML = '<div class="confidence-title">⚠ ' + mTitle + "</div><ul><li>" + reason.replaceAll("<", "&lt;") + "</li></ul>";
+    contentEl.appendChild(mc);
+}
+
+function _applyConfidenceMarker(contentEl, level, reason) {
+    var existing = contentEl.querySelector(".confidence-callout");
+    if (existing) {
+        _mergeConfidenceMarker(existing, level, reason);
+    } else {
+        _createConfidenceCallout(contentEl, level, reason);
+    }
+}
+
+function _processInlineConfidenceMarkers(contentEl) {
+    var allTextEls = contentEl.querySelectorAll(".md-text, .md-text-live");
+    allTextEls.forEach(function(el) {
+        var html = el.innerHTML;
+        var markerRegex = /\[confidence:\s*(medium|low)\s*\|\s*([^\]]+)\]/gi;
+        var match;
+        while ((match = markerRegex.exec(html)) !== null) {
+            _applyConfidenceMarker(contentEl, match[1].toLowerCase(), match[2].trim());
+        }
+        el.innerHTML = html.replaceAll(/\[confidence:\s*(?:medium|low)\s*\|\s*[^\]]+\]/gi, "");
+    });
+}
+
+function _renderFinalText(contentEl, currentChunk, fullText) {
+    var finalText = currentChunk || fullText;
+    var choicesResult = extractChoices(finalText);
+    if (choicesResult) {
+        finalText = choicesResult.cleanedText;
+    }
+    var liveEl = contentEl.querySelector(".md-text-live");
+    if (liveEl) {
+        if (choicesResult) {
+            liveEl.innerHTML = marked.parse(finalText);
+        }
+        liveEl.className = "md-text";
+    }
+    if (choicesResult) {
+        contentEl.appendChild(renderChoices(choicesResult.options, choicesResult.multi));
+    }
+}
+
+function _addExportBar(state) {
+    state.assistantEl._exportMarkdown = state.currentChunk || state.fullText;
+    state.assistantEl._exportCharts = state.chartCanvases;
+    state.assistantEl._exportToolResults = state.toolResults;
+    if (state.fullText.trim() || state.currentChunk.trim() || state.chartCanvases.length > 0 || state.toolResults.length > 0) {
+        state.contentEl.appendChild(createResponseExportBar(state.assistantEl));
+    }
+}
+
+function _handleDoneEvent(state) {
+    _cleanupStatusIndicators(state.contentEl);
+    _finalizeRunningToolStatuses(state.contentEl);
+    if (state.liveWrapper && state.liveSummary) {
+        _finalizeLiveToolWrapper(state);
+    }
+    _processInlineConfidenceMarkers(state.contentEl);
+    _renderFinalText(state.contentEl, state.currentChunk, state.fullText);
+    _addExportBar(state);
+    scrollToBottom();
+}
+
+function processStreamEvent(eventType, data, state) {
+    switch (eventType) {
+        case "text":
+            _handleTextEvent(data, state);
+            break;
+        case "tool_start":
+            _handleToolStartEvent(data, state);
+            break;
+        case "cache_hit":
+            _handleCacheHitEvent(state);
+            break;
+        case "tool_result":
+            _handleToolResultEvent(data, state);
+            break;
+        case "chart":
+            _handleChartEvent(data, state);
+            break;
+        case "report":
+            _handleReportEvent(data, state.contentEl);
+            break;
+        case "agent_start":
+            _handleAgentStartEvent(data, state);
+            break;
+        case "agent_done":
+            _handleAgentDoneEvent(data, state.contentEl);
+            break;
+        case "status":
+            _handleStatusEvent(data, state);
+            break;
+        case "error":
+            _handleErrorEvent(data, state);
+            break;
+        case "confidence":
+            _handleConfidenceEvent(data, state);
+            break;
+        case "history":
+            conversationHistory = data.messages;
+            try { localStorage.setItem("parsec_history", JSON.stringify(conversationHistory)); } catch { /* expected: localStorage may be unavailable */ }
+            saveConversation();
+            break;
+        case "done":
+            _handleDoneEvent(state);
+            break;
+    }
+}
+
+// ─── renderSharedMessages helpers ───
+
+function _buildToolResultMap(messages) {
+    var map = {};
+    messages.forEach(function(msg) {
+        if (msg.role !== "user" || !Array.isArray(msg.content)) return;
+        msg.content.forEach(function(block) {
+            if (block.type === "tool_result" && block.tool_use_id) {
+                try {
+                    map[block.tool_use_id] = JSON.parse(block.content);
+                } catch (e) {
+                    map[block.tool_use_id] = block.content;
+                }
+            }
+        });
+    });
+    return map;
+}
+
+function _tryCollapseToolChain(messages, startIdx) {
+    var groupToolCalls = [];
+    var groupToolUseIds = [];
+    var finalText = [];
+    var j = startIdx;
+    while (j < messages.length) {
+        var cur = messages[j];
+        if (cur.role !== "assistant" || !Array.isArray(cur.content)) break;
+        var curTools = cur.content.filter(function(b) { return b.type === "tool_use"; });
+        var curText = cur.content.filter(function(b) { return b.type === "text" && b.text; });
+        curTools.forEach(function(t) { groupToolCalls.push(t); groupToolUseIds.push(t.id); });
+        if (curText.length > 0) finalText = curText;
+        var next = messages[j + 1];
+        if (next && next.role === "user" && Array.isArray(next.content)) {
+            var hasRealText = next.content.some(function(b) {
+                return b.type !== "tool_result" && b.text && b.text.trim();
+            });
+            if (!hasRealText) {
+                j += 2;
+                continue;
+            }
+        }
+        break;
+    }
+    if (j <= startIdx) return { collapsed: false };
+    var combinedContent = [];
+    groupToolCalls.forEach(function(t) { combinedContent.push(t); });
+    finalText.forEach(function(t) { combinedContent.push(t); });
+    return {
+        collapsed: true,
+        msg: { role: "assistant", content: combinedContent, _collapsedToolIds: groupToolUseIds },
+        nextIndex: j
+    };
+}
+
+function _collapseSubAgentMessages(messages) {
+    var collapsed = [];
+    var i = 0;
+    while (i < messages.length) {
+        var msg = messages[i];
+        if (msg.role === "assistant" && Array.isArray(msg.content)) {
+            var hasToolUse = msg.content.some(function(b) { return b.type === "tool_use"; });
+            if (hasToolUse) {
+                var result = _tryCollapseToolChain(messages, i);
+                if (result.collapsed) {
+                    collapsed.push(result.msg);
+                    i = result.nextIndex;
+                    continue;
+                }
+            }
+        }
+        collapsed.push(messages[i]);
+        i++;
+    }
+    return collapsed;
+}
+
+function _renderRestoredUserMessage(msg) {
+    var text = msg.content;
+    if (Array.isArray(text)) {
+        var userParts = text.filter(function(b) { return b.type !== "tool_result"; });
+        text = userParts.map(function(b) { return b.text || ""; }).join("");
+    }
+    if (text && text.trim()) {
+        addMessage("user", text);
+    }
+}
+
+function _appendRestoredToolCall(inner, tc, toolResultMap) {
+    var tcEl = document.createElement("details");
+    tcEl.className = "tool-call";
+    var tcSummary = document.createElement("summary");
+    var nameSpan = document.createElement("span");
+    nameSpan.className = "tool-name";
+    nameSpan.textContent = tc.name || "tool";
+    var statusSpan = document.createElement("span");
+    statusSpan.className = "tool-status done";
+    statusSpan.textContent = "done";
+    tcSummary.appendChild(nameSpan);
+    tcSummary.appendChild(statusSpan);
+    tcEl.appendChild(tcSummary);
+    var body = document.createElement("div");
+    body.className = "tool-body";
+    body.textContent = JSON.stringify(tc.input || {}, null, 2);
+    var result = toolResultMap[tc.id];
+    if (result && typeof result === "object") {
+        body.textContent += "\n\n--- Result ---\n" + JSON.stringify(result, null, 2);
+    }
+    tcEl.appendChild(body);
+    inner.appendChild(tcEl);
+}
+
+function _renderRestoredToolCalls(toolCalls, toolResultMap, contentEl) {
+    var agentNames = {
+        cost: "Cost Investigation", aap2: "AAP2 Investigation",
+        babylon: "Babylon Investigation", security: "Security Investigation",
+        ocpv: "OCPV Investigation", icinga: "Icinga Investigation"
+    };
+    var delegationTools = {
+        investigate_costs: "cost", investigate_aap2_job: "aap2",
+        investigate_babylon: "babylon", investigate_security: "security",
+        investigate_ocpv: "ocpv", investigate_icinga: "icinga"
+    };
+    var totalQueries = 0;
+    var delegations = [];
+    var restoredToolResults = [];
+
+    toolCalls.forEach(function(tc) {
+        var result = toolResultMap[tc.id];
+        var isDelegation = tc.name in delegationTools;
+        if (isDelegation && result && result.tool_calls) {
+            totalQueries += result.tool_calls;
+            delegations.push({ tc: tc, result: result, agentType: delegationTools[tc.name] });
+        } else {
+            totalQueries++;
+        }
+        if (!isDelegation && result && typeof result === "object" && !result.error) {
+            restoredToolResults.push({ tool: tc.name, input: tc.input || {}, result: result });
+        }
+    });
+
+    var wrapper = document.createElement("details");
+    wrapper.className = "tool-calls-summary";
+    var tcSummaryEl = document.createElement("summary");
+    tcSummaryEl.textContent = totalQueries === 1
+        ? "1 query executed"
+        : totalQueries + " queries executed";
+    if (toolCalls.length > 1) {
+        addExpandCollapseToggle(tcSummaryEl, wrapper);
+    }
+    wrapper.appendChild(tcSummaryEl);
+    var inner = document.createElement("div");
+    inner.className = "tool-calls-inner";
+    toolCalls.forEach(function(tc) {
+        if (tc.name in delegationTools) return;
+        _appendRestoredToolCall(inner, tc, toolResultMap);
+    });
+    wrapper.appendChild(inner);
+    contentEl.appendChild(wrapper);
+
+    return { delegations: delegations, restoredToolResults: restoredToolResults, agentNames: agentNames };
+}
+
+function _appendAgentBanner(contentEl, agentType, agentLabel) {
+    var agentBanner = document.createElement("div");
+    agentBanner.className = "agent-banner agent-done";
+    agentBanner.dataset.agent = agentType;
+    var iconSpan = document.createElement("span");
+    iconSpan.className = "agent-icon";
+    iconSpan.textContent = "⚙";
+    var labelSpan = document.createElement("span");
+    labelSpan.className = "agent-label";
+    labelSpan.textContent = agentLabel;
+    var statusSpan = document.createElement("span");
+    statusSpan.className = "agent-status";
+    statusSpan.textContent = "done";
+    agentBanner.appendChild(iconSpan);
+    agentBanner.appendChild(document.createTextNode(" "));
+    agentBanner.appendChild(labelSpan);
+    agentBanner.appendChild(document.createTextNode(" "));
+    agentBanner.appendChild(statusSpan);
+    contentEl.appendChild(agentBanner);
+}
+
+function _appendDelegationSummary(d, contentEl, textParts) {
+    var summaryText = d.result.summary || "";
+    if (!summaryText.trim()) {
+        var findings = d.result.findings || [];
+        summaryText = findings.filter(function(f) {
+            return typeof f === "string" && !f.startsWith("[Tool:");
+        }).join("\n\n");
+    }
+    if (summaryText.trim()) {
+        var findingsDiv = document.createElement("div");
+        findingsDiv.className = "md-text";
+        findingsDiv.innerHTML = marked.parse(summaryText);
+        contentEl.appendChild(findingsDiv);
+        textParts.push(summaryText);
+    }
+}
+
+function _renderRestoredDelegations(delegations, agentNames, contentEl, textParts) {
+    delegations.forEach(function(d) {
+        var agentType = d.agentType || d.result.agent || "unknown";
+        var agentLabel = agentNames[agentType] || agentType;
+        _appendAgentBanner(contentEl, agentType, agentLabel);
+        _appendDelegationSummary(d, contentEl, textParts);
+    });
+}
+
+function _reconstructReportsAndCharts(toolCalls, toolResultMap, contentEl) {
+    var restoredCharts = [];
+    toolCalls.forEach(function(tc) {
+        var result = toolResultMap[tc.id];
+        if (!result || typeof result !== "object" || result.error) return;
+        if (tc.name === "generate_report" && result.filename) {
+            var link = document.createElement("a");
+            link.className = "report-download";
+            link.href = "/api/reports/" + result.filename;
+            link.download = result.filename;
+            link.textContent = "Download report: " + result.filename;
+            contentEl.appendChild(link);
+        } else if (tc.name === "render_chart" && result.datasets) {
+            try {
+                var chartEl = renderChart(result);
+                contentEl.appendChild(chartEl);
+                var chartCanvas = chartEl.querySelector("canvas");
+                if (chartCanvas) {
+                    restoredCharts.push({ title: result.title || "chart", canvas: chartCanvas });
+                }
+            } catch (e) {
+                console.warn("Failed to reconstruct chart:", e);
+            }
+        }
+    });
+    return restoredCharts;
+}
+
+function _renderRestoredTextWithChoices(text, contentEl, msgIdx, collapsed, interactive) {
+    var sharedChoices = extractChoices(text);
+    var renderText = sharedChoices ? sharedChoices.cleanedText : text;
+    var textDiv = document.createElement("div");
+    textDiv.className = "md-text";
+    textDiv.innerHTML = marked.parse(renderText);
+    contentEl.appendChild(textDiv);
+    if (!sharedChoices) return;
+    var isLastMsg = (msgIdx === collapsed.length - 1);
+    if (interactive && isLastMsg) {
+        contentEl.appendChild(renderChoices(sharedChoices.options, sharedChoices.multi));
+    } else {
+        var choicesSummary = document.createElement("div");
+        choicesSummary.className = "choices-summary";
+        choicesSummary.textContent = "Choices were presented";
+        contentEl.appendChild(choicesSummary);
+    }
+}
+
+function _renderRestoredArrayContent(content, toolResultMap, contentEl, msgIdx, collapsed, interactive) {
+    var toolCalls = [];
+    var textParts = [];
+    var delegations = [];
+    var restoredToolResults = [];
+    var restoredCharts = [];
+
+    content.forEach(function(block) {
+        if (block.type === "text" && block.text) {
+            textParts.push(block.text);
+        } else if (block.type === "tool_use") {
+            toolCalls.push(block);
+        }
+    });
+
+    if (toolCalls.length > 0) {
+        var tcResult = _renderRestoredToolCalls(toolCalls, toolResultMap, contentEl);
+        delegations = tcResult.delegations;
+        restoredToolResults = tcResult.restoredToolResults;
+        _renderRestoredDelegations(delegations, tcResult.agentNames, contentEl, textParts);
+        restoredCharts = _reconstructReportsAndCharts(toolCalls, toolResultMap, contentEl);
+    }
+
+    var restoredText = textParts.join("");
+    if (restoredText.trim() && delegations.length === 0) {
+        _renderRestoredTextWithChoices(restoredText, contentEl, msgIdx, collapsed, interactive);
+    }
+
+    return { restoredText: restoredText, restoredCharts: restoredCharts, restoredToolResults: restoredToolResults };
+}
+
+function _renderRestoredAssistantMessage(msg, msgIdx, collapsed, toolResultMap, interactive) {
+    var el = addMessage("assistant", "");
+    var contentEl = el.querySelector(".content");
+    var content = msg.content;
+    var restoredText = "";
+    var restoredCharts = [];
+    var restoredToolResults = [];
+
+    if (typeof content === "string") {
+        restoredText = content;
+        var textDiv = document.createElement("div");
+        textDiv.className = "md-text";
+        textDiv.innerHTML = marked.parse(content);
+        contentEl.appendChild(textDiv);
+    } else if (Array.isArray(content)) {
+        var result = _renderRestoredArrayContent(content, toolResultMap, contentEl, msgIdx, collapsed, interactive);
+        restoredText = result.restoredText;
+        restoredCharts = result.restoredCharts;
+        restoredToolResults = result.restoredToolResults;
+    }
+
+    if (restoredText.trim() || restoredToolResults.length > 0) {
+        el._exportMarkdown = restoredText;
+        el._exportCharts = restoredCharts;
+        el._exportToolResults = restoredToolResults;
+        contentEl.appendChild(createResponseExportBar(el));
+    }
+}
+
+// ─── parseAllMarkdownTables helpers ───
+
+function _findTableTitle(lines, tableStartIndex) {
+    for (var j = tableStartIndex - 1; j >= Math.max(0, tableStartIndex - 5); j--) {
+        var prevLine = lines[j].trim();
+        if (prevLine.match(/^#{1,6}\s+(.+)$/)) {
+            return prevLine.replace(/^#{1,6}\s+/, "");
+        }
+        if (prevLine.length > 0 && !prevLine.includes("|")) {
+            return prevLine;
+        }
+    }
+    return null;
+}
+
+function _collectTableLines(lines, startIndex) {
+    var tableLines = [];
+    var i = startIndex;
+    while (i < lines.length && lines[i].trim().startsWith("|")) {
+        tableLines.push(lines[i]);
+        i++;
+    }
+    return { lines: tableLines, nextIndex: i };
+}
+
+// ─── exportResponseAsCSV helpers ───
+
+function _collectUniqueHeaders(rows) {
+    var headers = [];
+    var headerSet = {};
+    rows.forEach(function(row) {
+        Object.keys(row).forEach(function(key) {
+            if (!headerSet[key]) {
+                headerSet[key] = true;
+                headers.push(key);
+            }
+        });
+    });
+    return headers;
+}
+
+function _formatRowsAsCSV(title, headers, rows) {
+    var lines = [];
+    lines.push("# " + title, headers.map(csvEscapeField).join(","));
+    rows.forEach(function(row) {
+        var vals = headers.map(function(h) {
+            var val = row[h];
+            if (typeof val === "object" && val !== null) val = JSON.stringify(val);
+            return csvEscapeField(val);
+        });
+        lines.push(vals.join(","));
+    });
+    return lines.join("\n");
+}
+
+function _processToolResultForCSV(tr) {
+    var sections = [];
+    var rows = findTabularData(tr.result);
+
+    if (!rows && tr.tool === "generate_report" && tr.input && tr.input.content) {
+        var tables = parseAllMarkdownTables(tr.input.content);
+        tables.forEach(function(table) {
+            var headers = _collectUniqueHeaders(table.rows);
+            sections.push(_formatRowsAsCSV(table.title, headers, table.rows));
+        });
+        return sections;
+    }
+
+    if (rows) {
+        var headers = _collectUniqueHeaders(rows);
+        sections.push(_formatRowsAsCSV(tr.tool || "results", headers, rows));
+    }
+
+    return sections;
+}
+
+// ─── exportResponseAsPDF helpers ───
+
+function _applyPDFPrintStyles(clone) {
+    clone.style.background = "#ffffff";
+    clone.style.color = "#1a1a1a";
+    clone.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
+    clone.style.fontSize = "13px";
+    clone.style.lineHeight = "1.6";
+    clone.style.padding = "20px";
+    clone.style.width = "550px";
+    clone.querySelectorAll("h1, h2, h3").forEach(function(el) { el.style.color = "#1a1a1a"; });
+    clone.querySelectorAll("th").forEach(function(el) {
+        el.style.background = "#f0f0f0";
+        el.style.color = "#1a1a1a";
+        el.style.borderColor = "#ccc";
+    });
+    clone.querySelectorAll("td").forEach(function(el) { el.style.borderColor = "#ccc"; });
+    clone.querySelectorAll("code").forEach(function(el) {
+        el.style.background = "#f0f0f0";
+        el.style.color = "#1a1a1a";
+    });
+    clone.querySelectorAll("pre").forEach(function(el) { el.style.background = "#f0f0f0"; });
+    clone.querySelectorAll("a").forEach(function(el) { el.style.color = "#2563eb"; });
+}
+
+function _renderCanvasToMultiPagePDF(doc, canvas, margin, contentW, contentH) {
+    var scale = canvas.width / contentW;
+    var sliceH = Math.floor(contentH * scale);
+    var yPx = 0;
+    var pageNum = 0;
+    while (yPx < canvas.height) {
+        if (pageNum > 0) doc.addPage();
+        var h = Math.min(sliceH, canvas.height - yPx);
+        var pageCanvas = document.createElement("canvas");
+        pageCanvas.width = canvas.width;
+        pageCanvas.height = h;
+        var ctx = pageCanvas.getContext("2d");
+        ctx.drawImage(canvas, 0, yPx, canvas.width, h, 0, 0, canvas.width, h);
+        var pageImg = pageCanvas.toDataURL("image/png");
+        var drawH = h / scale;
+        doc.addImage(pageImg, "PNG", margin, margin, contentW, drawH);
+        yPx += sliceH;
+        pageNum++;
+    }
+}
+
+// ─── finalizeToolCall helper ───
+
+function _getToolResultStatusText(result, wasCached) {
+    var prefix = wasCached ? "cached: " : "";
+    if (result.bytes_scanned !== undefined && result.row_count !== undefined) {
+        var mb = (result.bytes_scanned / 1024 / 1024).toFixed(0);
+        return prefix + result.row_count + " rows (" + mb + " MB scanned)";
+    }
+    if (result.row_count !== undefined) return prefix + result.row_count + " rows";
+    if (result.instance_count !== undefined) return prefix + result.instance_count + " instances";
+    if (result.user_count !== undefined) return prefix + result.user_count + " users";
+    if (result.agreement_count !== undefined) return prefix + result.agreement_count + " agreements";
+    if (result.event_count !== undefined) return prefix + result.event_count + " events";
+    if (result.total_cost !== undefined) return prefix + "$" + result.total_cost.toLocaleString();
+    if (result.filename) return prefix + result.filename;
+    return wasCached ? "cached" : "done";
+}
+
+// ─── SSE form handler ───
+
 form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const question = input.value.trim();
@@ -684,343 +1498,28 @@ form.addEventListener("submit", async (e) => {
     statusEl.innerHTML = '<div class="spinner"></div> Thinking...';
     contentEl.appendChild(statusEl);
 
-    let fullText = "";
-    let currentToolEl = null;
-    let toolElements = {};   // Map tool name to element for finalization
-    let streamStarted = false;
-    let textChunks = [];     // Array of text segments between tool calls
-    let currentChunk = "";   // Current text being accumulated
-    let chartCanvases = [];  // Track chart canvases for export
-    let toolResults = [];    // Captured tool results for CSV/JSON export
-    let currentToolName = null;
-    let currentToolInput = null;
-    let liveWrapper = null;  // Live tool-calls-summary wrapper
-    let liveInner = null;    // Inner container for tool calls
-    let liveSummary = null;  // Summary element (updated with count)
-    let liveToolCount = 0;   // Running count of tool calls
-
-    function ensureStreamStarted() {
-        if (!streamStarted) {
-            statusEl.remove();
-            streamStarted = true;
-        }
-    }
-
-    function renderCurrentText() {
-        // Render the current chunk into a text element
-        let textEl = contentEl.querySelector(".md-text-live");
-        if (!textEl) {
-            textEl = document.createElement("div");
-            textEl.className = "md-text-live";
-            contentEl.appendChild(textEl);
-        }
-        textEl.innerHTML = marked.parse(currentChunk);
-    }
+    const state = {
+        contentEl: contentEl,
+        statusEl: statusEl,
+        assistantEl: assistantEl,
+        streamStarted: false,
+        fullText: "",
+        currentToolEl: null,
+        toolElements: {},
+        textChunks: [],
+        currentChunk: "",
+        chartCanvases: [],
+        toolResults: [],
+        currentToolName: null,
+        currentToolInput: null,
+        liveWrapper: null,
+        liveInner: null,
+        liveSummary: null,
+        liveToolCount: 0,
+    };
 
     function processEvent(eventType, data) {
-        switch (eventType) {
-            case "text": {
-                ensureStreamStarted();
-                // Remove status indicator when real text arrives
-                const si = contentEl.querySelector(".status-indicator");
-                if (si) si.remove();
-                fullText += data.content;
-                currentChunk += data.content;
-                renderCurrentText();
-                scrollToBottom();
-                break;
-            }
-
-            case "tool_start": {
-                ensureStreamStarted();
-                // Finalize any previous tool that didn't get a result
-                if (currentToolEl) {
-                    const prevStatus = currentToolEl.querySelector(".tool-status");
-                    if (prevStatus?.classList.contains("running")) {
-                        prevStatus.className = "tool-status done";
-                        prevStatus.textContent = "done";
-                    }
-                }
-                // Save current text chunk as intermediate thinking
-                if (currentChunk.trim()) {
-                    textChunks.push(currentChunk);
-                }
-                currentChunk = "";
-                // Remove the live text element — it'll be collapsed into wrapper later
-                const liveTextEl = contentEl.querySelector(".md-text-live");
-                if (liveTextEl) liveTextEl.remove();
-
-                // Create the live wrapper on first tool call
-                if (!liveWrapper) {
-                    liveWrapper = document.createElement("details");
-                    liveWrapper.className = "tool-calls-summary";
-                    liveWrapper.open = true;
-                    liveSummary = document.createElement("summary");
-                    liveWrapper.appendChild(liveSummary);
-                    liveInner = document.createElement("div");
-                    liveInner.className = "tool-calls-inner";
-                    liveWrapper.appendChild(liveInner);
-                    contentEl.appendChild(liveWrapper);
-                }
-
-                liveToolCount++;
-                liveSummary.textContent = liveToolCount === 1
-                    ? "1 query running..."
-                    : liveToolCount + " queries running...";
-
-                currentToolEl = createToolCall(data.tool, data.input);
-                currentToolName = data.tool;
-                currentToolInput = data.input;
-                toolElements[data.tool + "_" + Object.keys(toolElements).length] = currentToolEl;
-                liveInner.appendChild(currentToolEl);
-                scrollToBottom();
-                break;
-            }
-
-            case "cache_hit": {
-                if (currentToolEl) {
-                    const cacheStatus = currentToolEl.querySelector(".tool-status");
-                    if (cacheStatus) {
-                        cacheStatus.className = "tool-status cached";
-                        cacheStatus.textContent = "cached";
-                    }
-                }
-                break;
-            }
-
-            case "tool_result": {
-                if (currentToolEl) {
-                    finalizeToolCall(currentToolEl, data.tool, data.result);
-                    toolResults.push({ tool: currentToolName || data.tool, input: currentToolInput || {}, result: data.result });
-                    currentToolName = null;
-                    currentToolInput = null;
-                    currentToolEl = null;
-                }
-                scrollToBottom();
-                break;
-            }
-
-            case "chart": {
-                ensureStreamStarted();
-                const chartEl = renderChart(data);
-                contentEl.appendChild(chartEl);
-                const chartCanvas = chartEl.querySelector("canvas");
-                if (chartCanvas) {
-                    chartCanvases.push({ title: data.title || "chart", canvas: chartCanvas });
-                }
-                scrollToBottom();
-                break;
-            }
-
-            case "report": {
-                const link = document.createElement("a");
-                link.className = "report-download";
-                link.href = data.url;
-                link.download = data.filename;
-                link.textContent = "Download report: " + data.filename;
-                contentEl.appendChild(link);
-                scrollToBottom();
-                break;
-            }
-
-            case "agent_start": {
-                ensureStreamStarted();
-                const agentBanner = document.createElement("div");
-                agentBanner.className = "agent-banner agent-running";
-                agentBanner.dataset.agent = data.agent;
-                agentBanner.innerHTML = '<span class="agent-icon">&#9881;</span> ' +
-                    '<span class="agent-label">' + (data.name || data.agent) + '</span>' +
-                    ' <span class="agent-status">investigating\u2026</span>';
-                contentEl.appendChild(agentBanner);
-                scrollToBottom();
-                break;
-            }
-
-            case "agent_done": {
-                const banners = contentEl.querySelectorAll('.agent-banner[data-agent="' + data.agent + '"]');
-                banners.forEach(function(b) {
-                    b.classList.remove("agent-running");
-                    b.classList.add("agent-done");
-                    const statusSpan = b.querySelector(".agent-status");
-                    if (statusSpan) statusSpan.textContent = "done";
-                });
-                break;
-            }
-
-            case "status": {
-                ensureStreamStarted();
-                // Remove previous status indicator if any
-                const oldStatus = contentEl.querySelector(".status-indicator");
-                if (oldStatus) oldStatus.remove();
-                const si = document.createElement("div");
-                si.className = "status-indicator";
-                si.innerHTML = '<div class="spinner"></div> ' + data.message;
-                contentEl.appendChild(si);
-                scrollToBottom();
-                break;
-            }
-
-            case "error": {
-                ensureStreamStarted();
-                const errEl = document.createElement("div");
-                errEl.className = "error-message";
-                errEl.textContent = data.message;
-                contentEl.appendChild(errEl);
-                scrollToBottom();
-                break;
-            }
-
-            case "confidence": {
-                ensureStreamStarted();
-                const level = data.level;
-                const reasons = data.reasons || [];
-                if (level === "medium" || level === "low") {
-                    const callout = document.createElement("div");
-                    callout.className = "confidence-callout " + level;
-                    const title = level === "low" ? "Low confidence" : "Medium confidence";
-                    const icon = level === "low" ? "\u26A0\uFE0F" : "\u26A0";
-                    let html = '<div class="confidence-title">' + icon + " " + title + "</div>";
-                    if (reasons.length > 0) {
-                        html += "<ul>";
-                        reasons.forEach(function(r) {
-                            html += "<li>" + r.replaceAll("<", "&lt;").replaceAll(">", "&gt;") + "</li>";
-                        });
-                        html += "</ul>";
-                    }
-                    callout.innerHTML = html;
-                    contentEl.appendChild(callout);
-                    scrollToBottom();
-                }
-                break;
-            }
-
-            case "history":
-                // Store full message history (includes tool calls/results)
-                conversationHistory = data.messages;
-                try { localStorage.setItem("parsec_history", JSON.stringify(conversationHistory)); } catch { /* expected: localStorage may be unavailable */ }
-                // Auto-save conversation to server
-                saveConversation();
-                break;
-
-            case "done": {
-                // Clean up any remaining status indicator
-                const remainingStatus = contentEl.querySelector(".status-indicator");
-                if (remainingStatus) remainingStatus.remove();
-
-                // Finalize any tools still showing "running"
-                contentEl.querySelectorAll(".tool-status.running").forEach(function(s) {
-                    s.className = "tool-status done";
-                    s.textContent = "done";
-                });
-
-                // Finalize the live tool-calls wrapper
-                if (liveWrapper && liveSummary) {
-                    const qCount = liveToolCount;
-                    liveSummary.textContent = qCount === 1
-                        ? "1 query executed"
-                        : qCount + " queries executed";
-                    if (qCount > 1) {
-                        addExpandCollapseToggle(liveSummary, liveWrapper);
-                    }
-
-                    // Rebuild inner with interleaved thinking text + tool calls
-                    const toolEls = Array.from(liveInner.querySelectorAll(".tool-call"));
-                    liveInner.replaceChildren();
-                    let chunkIdx = 0;
-                    toolEls.forEach(function(tc) {
-                        if (chunkIdx < textChunks.length) {
-                            const thinkEl = document.createElement("div");
-                            thinkEl.className = "thinking-text";
-                            thinkEl.innerHTML = marked.parse(textChunks[chunkIdx]); // safe: server-generated
-                            liveInner.appendChild(thinkEl);
-                            chunkIdx++;
-                        }
-                        liveInner.appendChild(tc);
-                    });
-                    while (chunkIdx < textChunks.length) {
-                        const thinkEl2 = document.createElement("div");
-                        thinkEl2.className = "thinking-text";
-                        thinkEl2.innerHTML = marked.parse(textChunks[chunkIdx]); // safe: server-generated
-                        liveInner.appendChild(thinkEl2);
-                        chunkIdx++;
-                    }
-
-                    // Collapse the wrapper now that all queries are done
-                    liveWrapper.open = false;
-                    // Move wrapper to top of content
-                    contentEl.insertBefore(liveWrapper, contentEl.firstChild);
-                }
-
-                // Scan final text for [confidence: ...] markers from the agent
-                const allTextEls = contentEl.querySelectorAll(".md-text, .md-text-live");
-                allTextEls.forEach(function(el) {
-                    const html = el.innerHTML;
-                    const markerRegex = /\[confidence:\s*(medium|low)\s*\|\s*([^\]]+)\]/gi;
-                    let match;
-                    while ((match = markerRegex.exec(html)) !== null) {
-                        const markerLevel = match[1].toLowerCase();
-                        const markerReason = match[2].trim();
-                        // Create callout if not already present from SSE event
-                        const existing = contentEl.querySelector(".confidence-callout");
-                        if (existing) {
-                            // Merge: downgrade level if needed, add reason
-                            if (markerLevel === "low" && existing.classList.contains("medium")) {
-                                existing.classList.remove("medium");
-                                existing.classList.add("low");
-                                existing.querySelector(".confidence-title").innerHTML = '\u26A0\uFE0F Low confidence';
-                            }
-                            const ul = existing.querySelector("ul");
-                            if (ul) {
-                                const li = document.createElement("li");
-                                li.textContent = markerReason;
-                                ul.appendChild(li);
-                            }
-                        } else {
-                            const mc = document.createElement("div");
-                            mc.className = "confidence-callout " + markerLevel;
-                            const mTitle = markerLevel === "low" ? "Low confidence" : "Medium confidence";
-                            mc.innerHTML = '<div class="confidence-title">\u26A0 ' + mTitle + "</div><ul><li>" + markerReason.replaceAll("<", "&lt;") + "</li></ul>";
-                            contentEl.appendChild(mc);
-                        }
-                    }
-                    // Strip markers from displayed text
-                    el.innerHTML = html.replaceAll(/\[confidence:\s*(?:medium|low)\s*\|\s*[^\]]+\]/gi, "");
-                });
-
-                // Extract choice buttons from {{choices}} blocks before rendering final text
-                let finalText = currentChunk || fullText;
-                const choicesResult = extractChoices(finalText);
-                if (choicesResult) {
-                    finalText = choicesResult.cleanedText;
-                }
-
-                // Render the final answer
-                const liveEl = contentEl.querySelector(".md-text-live");
-                if (liveEl) {
-                    // Re-render with cleaned text if choices were extracted
-                    if (choicesResult) {
-                        liveEl.innerHTML = marked.parse(finalText);
-                    }
-                    liveEl.className = "md-text";
-                }
-
-                // Append choice buttons after the text
-                if (choicesResult) {
-                    contentEl.appendChild(renderChoices(choicesResult.options, choicesResult.multi));
-                }
-
-                // Store export data and add export buttons
-                assistantEl._exportMarkdown = currentChunk || fullText;
-                assistantEl._exportCharts = chartCanvases;
-                assistantEl._exportToolResults = toolResults;
-                if (fullText.trim() || currentChunk.trim() || chartCanvases.length > 0 || toolResults.length > 0) {
-                    contentEl.appendChild(createResponseExportBar(assistantEl));
-                }
-
-                scrollToBottom();
-                break;
-            }
-        }
+        processStreamEvent(eventType, data, state);
     }
 
     try {
@@ -1080,7 +1579,7 @@ form.addEventListener("submit", async (e) => {
     } catch (err) {
         if (err.name === "AbortError") {
             // User cancelled — clean up gracefully
-            if (!streamStarted) statusEl.remove();
+            if (!state.streamStarted) state.statusEl.remove();
             const cancelEl = document.createElement("div");
             cancelEl.className = "status-indicator cancelled";
             cancelEl.textContent = "Investigation cancelled.";
@@ -1096,7 +1595,7 @@ form.addEventListener("submit", async (e) => {
                 if (statusSpan) statusSpan.textContent = "cancelled";
             });
         } else {
-            if (!streamStarted) statusEl.remove();
+            if (!state.streamStarted) state.statusEl.remove();
             const errorEl = document.createElement("div");
             errorEl.className = "error-message";
             errorEl.textContent = err.message;
@@ -1218,27 +1717,7 @@ function finalizeToolCall(toolEl, toolName, result) {
         statusSpan.textContent = "error";
     } else {
         statusSpan.className = wasCached ? "tool-status cached" : "tool-status done";
-        const prefix = wasCached ? "cached: " : "";
-        if (result.bytes_scanned !== undefined && result.row_count !== undefined) {
-            const mb = (result.bytes_scanned / 1024 / 1024).toFixed(0);
-            statusSpan.textContent = prefix + result.row_count + " rows (" + mb + " MB scanned)";
-        } else if (result.row_count !== undefined) {
-            statusSpan.textContent = prefix + result.row_count + " rows";
-        } else if (result.instance_count !== undefined) {
-            statusSpan.textContent = prefix + result.instance_count + " instances";
-        } else if (result.user_count !== undefined) {
-            statusSpan.textContent = prefix + result.user_count + " users";
-        } else if (result.agreement_count !== undefined) {
-            statusSpan.textContent = prefix + result.agreement_count + " agreements";
-        } else if (result.event_count !== undefined) {
-            statusSpan.textContent = prefix + result.event_count + " events";
-        } else if (result.total_cost !== undefined) {
-            statusSpan.textContent = prefix + "$" + result.total_cost.toLocaleString();
-        } else if (result.filename) {
-            statusSpan.textContent = prefix + result.filename;
-        } else {
-            statusSpan.textContent = wasCached ? "cached" : "done";
-        }
+        statusSpan.textContent = _getToolResultStatusText(result, wasCached);
     }
 
     const body = toolEl.querySelector(".tool-body");
@@ -1463,28 +1942,7 @@ function exportResponseAsPDF(messageEl) {
         cloneCanvases[i].replaceWith(img);
     }
 
-    // Apply light theme inline styles for readable PDF
-    clone.style.background = "#ffffff";
-    clone.style.color = "#1a1a1a";
-    clone.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
-    clone.style.fontSize = "13px";
-    clone.style.lineHeight = "1.6";
-    clone.style.padding = "20px";
-    clone.style.width = "550px";
-
-    clone.querySelectorAll("h1, h2, h3").forEach(function(el) { el.style.color = "#1a1a1a"; });
-    clone.querySelectorAll("th").forEach(function(el) {
-        el.style.background = "#f0f0f0";
-        el.style.color = "#1a1a1a";
-        el.style.borderColor = "#ccc";
-    });
-    clone.querySelectorAll("td").forEach(function(el) { el.style.borderColor = "#ccc"; });
-    clone.querySelectorAll("code").forEach(function(el) {
-        el.style.background = "#f0f0f0";
-        el.style.color = "#1a1a1a";
-    });
-    clone.querySelectorAll("pre").forEach(function(el) { el.style.background = "#f0f0f0"; });
-    clone.querySelectorAll("a").forEach(function(el) { el.style.color = "#2563eb"; });
+    _applyPDFPrintStyles(clone);
 
     // Add clone to DOM visually hidden but still renderable by html2canvas
     clone.style.position = "fixed";
@@ -1497,40 +1955,14 @@ function exportResponseAsPDF(messageEl) {
         clone.remove();
 
         const jsPDF = window.jspdf.jsPDF;
-
-        // A4 dimensions in pt
         const pageW = 595.28;
         const pageH = 841.89;
         const margin = 20;
         const contentW = pageW - margin * 2;
         const contentH = pageH - margin * 2;
 
-        // How many source pixels correspond to one page of content
-        const scale = canvas.width / contentW;
-        const sliceH = Math.floor(contentH * scale);
-
         const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
-        let yPx = 0;
-        let pageNum = 0;
-
-        while (yPx < canvas.height) {
-            if (pageNum > 0) doc.addPage();
-            const h = Math.min(sliceH, canvas.height - yPx);
-
-            // Crop this page's slice from the full canvas
-            const pageCanvas = document.createElement("canvas");
-            pageCanvas.width = canvas.width;
-            pageCanvas.height = h;
-            const ctx = pageCanvas.getContext("2d");
-            ctx.drawImage(canvas, 0, yPx, canvas.width, h, 0, 0, canvas.width, h);
-
-            const pageImg = pageCanvas.toDataURL("image/png");
-            const drawH = h / scale;
-            doc.addImage(pageImg, "PNG", margin, margin, contentW, drawH);
-
-            yPx += sliceH;
-            pageNum++;
-        }
+        _renderCanvasToMultiPagePDF(doc, canvas, margin, contentW, contentH);
 
         const timestamp = new Date().toISOString().slice(0, 19).replaceAll(/[T:]/g, "-");
         doc.save("parsec-" + timestamp + ".pdf");
@@ -1579,55 +2011,23 @@ function parseMarkdownTable(str) {
 }
 
 function parseAllMarkdownTables(str) {
-    // Parse ALL markdown tables from a string and return them with context
-    // Returns an array of {title: string, rows: array} objects
     if (typeof str !== "string") return [];
-
-    const allLines = str.split("\n");
-    const tables = [];
-    let i = 0;
-
+    var allLines = str.split("\n");
+    var tables = [];
+    var i = 0;
     while (i < allLines.length) {
-        const line = allLines[i].trim();
-
-        // Look for table start (line with |)
-        if (line.startsWith("|")) {
-            // Try to find preceding header (lines starting with ##)
-            let title = null;
-            for (let j = i - 1; j >= Math.max(0, i - 5); j--) {
-                const prevLine = allLines[j].trim();
-                if (prevLine.match(/^#{1,6}\s+(.+)$/)) {
-                    title = prevLine.replace(/^#{1,6}\s+/, "");
-                    break;
-                }
-                if (prevLine.length > 0 && !prevLine.includes("|")) {
-                    // Use first non-empty, non-table line as title
-                    if (!title) title = prevLine;
-                    break;
-                }
-            }
-
-            // Collect all consecutive table lines
-            const tableLines = [];
-            while (i < allLines.length && allLines[i].trim().startsWith("|")) {
-                tableLines.push(allLines[i]);
-                i++;
-            }
-
-            // Parse this table
-            const tableStr = tableLines.join("\n");
-            const parsed = parseMarkdownTable(tableStr);
-            if (parsed?.length > 0) {
-                tables.push({
-                    title: title || "Table " + (tables.length + 1),
-                    rows: parsed
-                });
+        if (allLines[i].trim().startsWith("|")) {
+            var title = _findTableTitle(allLines, i);
+            var collected = _collectTableLines(allLines, i);
+            i = collected.nextIndex;
+            var parsed = parseMarkdownTable(collected.lines.join("\n"));
+            if (parsed && parsed.length > 0) {
+                tables.push({ title: title || "Table " + (tables.length + 1), rows: parsed });
             }
         } else {
             i++;
         }
     }
-
     return tables;
 }
 
@@ -1661,83 +2061,18 @@ function exportResponseAsCSV(messageEl) {
     if (toolResults.length === 0) return;
 
     const csvSections = [];
-
     toolResults.forEach(function(tr) {
-        // First try to find tabular data in the result
-        const rows = findTabularData(tr.result);
-
-        // For report generation tools, also check input.content for markdown tables
-        if (!rows && tr.tool === "generate_report" && tr.input?.content) {
-            const tables = parseAllMarkdownTables(tr.input.content);
-            if (tables.length > 0) {
-                // Export each table as a separate CSV section
-                tables.forEach(function(table) {
-                    const headers = [];
-                    const headerSet = {};
-                    table.rows.forEach(function(row) {
-                        Object.keys(row).forEach(function(key) {
-                            if (!headerSet[key]) {
-                                headerSet[key] = true;
-                                headers.push(key);
-                            }
-                        });
-                    });
-
-                    const lines = [];
-                    lines.push("# " + table.title, headers.map(csvEscapeField).join(","));
-                    table.rows.forEach(function(row) {
-                        const vals = headers.map(function(h) {
-                            let val = row[h];
-                            if (typeof val === "object" && val !== null) val = JSON.stringify(val);
-                            return csvEscapeField(val);
-                        });
-                        lines.push(vals.join(","));
-                    });
-
-                    csvSections.push(lines.join("\n"));
-                });
-                return; // Skip the rest of the processing for this tool result
-            }
-        }
-
-        // If we found rows in the result, export them
-        if (rows) {
-            // Collect all unique column headers across all rows
-            const headers = [];
-            const headerSet = {};
-            rows.forEach(function(row) {
-                Object.keys(row).forEach(function(key) {
-                    if (!headerSet[key]) {
-                        headerSet[key] = true;
-                        headers.push(key);
-                    }
-                });
-            });
-
-            const lines = [];
-            // Section header + column headers
-            lines.push("# " + (tr.tool || "results"), headers.map(csvEscapeField).join(","));
-            // Data rows
-            rows.forEach(function(row) {
-                const vals = headers.map(function(h) {
-                    let val = row[h];
-                    if (typeof val === "object" && val !== null) val = JSON.stringify(val);
-                    return csvEscapeField(val);
-                });
-                lines.push(vals.join(","));
-            });
-
-            csvSections.push(lines.join("\n"));
-        }
+        var sections = _processToolResultForCSV(tr);
+        sections.forEach(function(s) { csvSections.push(s); });
     });
 
     // Fallback: if no tabular data found, export as key-value pairs
     if (csvSections.length === 0) {
         toolResults.forEach(function(tr) {
-            const lines = [];
-            lines.push("# " + (tr.tool || "results"), "key,value");
-            Object.keys(tr.result || {}).forEach(function(key) {
-                let val = tr.result[key];
+            var headers = Object.keys(tr.result || {});
+            var lines = ["# " + (tr.tool || "results"), "key,value"];
+            headers.forEach(function(key) {
+                var val = tr.result[key];
                 if (typeof val === "object" && val !== null) val = JSON.stringify(val);
                 lines.push(csvEscapeField(key) + "," + csvEscapeField(val));
             });
@@ -1755,281 +2090,17 @@ function exportResponseAsCSV(messageEl) {
 }
 
 function renderSharedMessages(messages, interactive) {
-    // Build tool_use_id → tool_result map for reconst ructing reports/charts
-    const toolResultMap = {};
-    messages.forEach(function(msg) {
-        if (msg.role !== "user" || !Array.isArray(msg.content)) return;
-        msg.content.forEach(function(block) {
-            if (block.type === "tool_result" && block.tool_use_id) {
-                try {
-                    toolResultMap[block.tool_use_id] = JSON.parse(block.content);
-                } catch (e) {
-                    toolResultMap[block.tool_use_id] = block.content;
-                }
-            }
-        });
-    });
-
-    // Pre-process: collapse fast-path sub-agent intermediate messages.
-    // Pattern: assistant(tool_use) → user(tool_result only) → assistant(tool_use) → ...
-    // Collapse into one combined message, keeping only the final assistant text.
-    const collapsed = [];
-    let i = 0;
-    while (i < messages.length) {
-        const msg = messages[i];
-        if (msg.role === "assistant" && Array.isArray(msg.content)) {
-            const hasToolUse = msg.content.some(function(b) { return b.type === "tool_use"; });
-            if (hasToolUse) {
-                // Look ahead: is the next message a tool_result-only user message?
-                const groupToolCalls = [];
-                const groupToolUseIds = [];
-                let finalText = [];
-                let j = i;
-                while (j < messages.length) {
-                    const cur = messages[j];
-                    if (cur.role === "assistant" && Array.isArray(cur.content)) {
-                        const curTools = cur.content.filter(function(b) { return b.type === "tool_use"; });
-                        const curText = cur.content.filter(function(b) { return b.type === "text" && b.text; });
-                        curTools.forEach(function(t) { groupToolCalls.push(t); groupToolUseIds.push(t.id); });
-                        if (curText.length > 0) finalText = curText;
-                        // Check if next is tool_result-only user message
-                        const next = messages[j + 1];
-                        if (next?.role === "user" && Array.isArray(next.content)) {
-                            const hasRealText = next.content.some(function(b) {
-                                return b.type !== "tool_result" && b.text?.trim();
-                            });
-                            if (!hasRealText) {
-                                j += 2; // skip tool_result user msg + continue to next assistant
-                                continue;
-                            }
-                        }
-                    }
-                    break;
-                }
-                if (j > i) {
-                    // We collapsed multiple messages — create a combined one
-                    const combinedContent = [];
-                    groupToolCalls.forEach(function(t) { combinedContent.push(t); });
-                    finalText.forEach(function(t) { combinedContent.push(t); });
-                    collapsed.push({ role: "assistant", content: combinedContent, _collapsedToolIds: groupToolUseIds });
-                    i = j;
-                    continue;
-                }
-            }
-        }
-        collapsed.push(messages[i]);
-        i++;
-    }
-
+    var toolResultMap = _buildToolResultMap(messages);
+    var collapsed = _collapseSubAgentMessages(messages);
     collapsed.forEach(function(msg, msgIdx) {
         if (msg.role === "user") {
-            let text = msg.content;
-            if (Array.isArray(text)) {
-                const userParts = text.filter(function(b) { return b.type !== "tool_result"; });
-                text = userParts.map(function(b) { return b.text || ""; }).join("");
-            }
-            if (!text.trim()) return;
-            addMessage("user", text);
+            _renderRestoredUserMessage(msg);
         } else if (msg.role === "assistant") {
-            const el = addMessage("assistant", "");
-            const contentEl = el.querySelector(".content");
-            const content = msg.content;
-            let restoredText = "";
-            const restoredCharts = [];
-            const restoredToolResults = [];
-
-            if (typeof content === "string") {
-                restoredText = content;
-                const textDiv = document.createElement("div");
-                textDiv.className = "md-text";
-                textDiv.innerHTML = marked.parse(content);
-                contentEl.appendChild(textDiv);
-            } else if (Array.isArray(content)) {
-                const toolCalls = [];
-                const textParts = [];
-                let delegations = [];
-
-                content.forEach(function(block) {
-                    if (block.type === "text" && block.text) {
-                        textParts.push(block.text);
-                    } else if (block.type === "tool_use") {
-                        toolCalls.push(block);
-                    }
-                });
-
-                // Show tool calls as collapsed summary
-                if (toolCalls.length > 0) {
-                    // Count total queries including sub-agent tool calls
-                    const agentNames = {
-                        cost: "Cost Investigation", aap2: "AAP2 Investigation",
-                        babylon: "Babylon Investigation", security: "Security Investigation",
-                        ocpv: "OCPV Investigation", icinga: "Icinga Investigation"
-                    };
-                    const delegationTools = {
-                        investigate_costs: "cost", investigate_aap2_job: "aap2",
-                        investigate_babylon: "babylon", investigate_security: "security",
-                        investigate_ocpv: "ocpv", investigate_icinga: "icinga"
-                    };
-                    let totalQueries = 0;
-                    delegations = [];
-                    toolCalls.forEach(function(tc) {
-                        const result = toolResultMap[tc.id];
-                        const isDelegation = tc.name in delegationTools;
-                        if (isDelegation && result?.tool_calls) {
-                            totalQueries += result.tool_calls;
-                            delegations.push({ tc: tc, result: result, agentType: delegationTools[tc.name] });
-                        } else {
-                            totalQueries++;
-                        }
-                        if (!isDelegation && result && typeof result === "object" && !result.error) {
-                            restoredToolResults.push({ tool: tc.name, input: tc.input || {}, result: result });
-                        }
-                    });
-
-                    const wrapper = document.createElement("details");
-                    wrapper.className = "tool-calls-summary";
-                    const tcSummaryEl = document.createElement("summary");
-                    tcSummaryEl.textContent = totalQueries === 1
-                        ? "1 query executed"
-                        : totalQueries + " queries executed";
-                    if (toolCalls.length > 1) {
-                        addExpandCollapseToggle(tcSummaryEl, wrapper);
-                    }
-                    wrapper.appendChild(tcSummaryEl);
-                    const inner = document.createElement("div");
-                    inner.className = "tool-calls-inner";
-                    toolCalls.forEach(function(tc) {
-                        if (tc.name in delegationTools) return;
-                        const tcEl = document.createElement("details");
-                        tcEl.className = "tool-call";
-                        const tcSummary = document.createElement("summary");
-                        const nameSpan = document.createElement("span");
-                        nameSpan.className = "tool-name";
-                        nameSpan.textContent = tc.name || "tool";
-                        const statusSpan = document.createElement("span");
-                        statusSpan.className = "tool-status done";
-                        statusSpan.textContent = "done";
-                        tcSummary.appendChild(nameSpan);
-                        tcSummary.appendChild(statusSpan);
-                        tcEl.appendChild(tcSummary);
-                        const body = document.createElement("div");
-                        body.className = "tool-body";
-                        body.textContent = JSON.stringify(tc.input || {}, null, 2);
-
-                        // Append tool result if available
-                        const result = toolResultMap[tc.id];
-                        if (result && typeof result === "object") {
-                            body.textContent += "\n\n--- Result ---\n" + JSON.stringify(result, null, 2);
-                        }
-
-                        tcEl.appendChild(body);
-                        inner.appendChild(tcEl);
-                    });
-                    wrapper.appendChild(inner);
-                    contentEl.appendChild(wrapper);
-
-                    // Render sub-agent banners and findings for delegations
-                    delegations.forEach(function(d) {
-                        const agentType = d.agentType || d.result.agent || "unknown";
-                        const agentLabel = agentNames[agentType] || agentType;
-
-                        const agentBanner = document.createElement("div");
-                        agentBanner.className = "agent-banner agent-done";
-                        agentBanner.dataset.agent = agentType;
-                        const iconSpan = document.createElement("span");
-                        iconSpan.className = "agent-icon";
-                        iconSpan.textContent = "\u2699";
-                        const labelSpan = document.createElement("span");
-                        labelSpan.className = "agent-label";
-                        labelSpan.textContent = agentLabel;
-                        const statusSpan2 = document.createElement("span");
-                        statusSpan2.className = "agent-status";
-                        statusSpan2.textContent = "done";
-                        agentBanner.appendChild(iconSpan);
-                        agentBanner.appendChild(document.createTextNode(" "));
-                        agentBanner.appendChild(labelSpan);
-                        agentBanner.appendChild(document.createTextNode(" "));
-                        agentBanner.appendChild(statusSpan2);
-                        contentEl.appendChild(agentBanner);
-
-                        // Render sub-agent summary as markdown (server-generated, not user input)
-                        let summaryText = d.result.summary || "";
-                        if (!summaryText.trim()) {
-                            const findings = d.result.findings || [];
-                            summaryText = findings.filter(function(f) {
-                                return typeof f === "string" && !f.startsWith("[Tool:");
-                            }).join("\n\n");
-                        }
-                        if (summaryText.trim()) {
-                            const findingsDiv = document.createElement("div");
-                            findingsDiv.className = "md-text";
-                            findingsDiv.innerHTML = marked.parse(summaryText); // safe: server-generated markdown
-                            contentEl.appendChild(findingsDiv);
-                            textParts.push(summaryText);
-                        }
-                    });
-
-                    // Reconst ruct report download links and charts
-                    toolCalls.forEach(function(tc) {
-                        const result = toolResultMap[tc.id];
-                        if (!result || typeof result !== "object" || result.error) return;
-
-                        if (tc.name === "generate_report" && result.filename) {
-                            const link = document.createElement("a");
-                            link.className = "report-download";
-                            link.href = "/api/reports/" + result.filename;
-                            link.download = result.filename;
-                            link.textContent = "Download report: " + result.filename;
-                            contentEl.appendChild(link);
-                        } else if (tc.name === "render_chart" && result.datasets) {
-                            try {
-                                const chartEl = renderChart(result);
-                                contentEl.appendChild(chartEl);
-                                const chartCanvas = chartEl.querySelector("canvas");
-                                if (chartCanvas) {
-                                    restoredCharts.push({ title: result.title || "chart", canvas: chartCanvas });
-                                }
-                            } catch (e) {
-                                console.warn("Failed to reconst ruct chart:", e);
-                            }
-                        }
-                    });
-                }
-
-                // Render text content (skip if delegations already rendered summaries)
-                restoredText = textParts.join("");
-                if (restoredText.trim() && delegations.length === 0) {
-                    const sharedChoices = extractChoices(restoredText);
-                    const renderText = sharedChoices ? sharedChoices.cleanedText : restoredText;
-                    const textDiv2 = document.createElement("div");
-                    textDiv2.className = "md-text";
-                    textDiv2.innerHTML = marked.parse(renderText);  // safe: server-generated markdown
-                    contentEl.appendChild(textDiv2);
-                    if (sharedChoices) {
-                        const isLastMsg = (msgIdx === messages.length - 1);
-                        if (interactive && isLastMsg) {
-                            contentEl.appendChild(renderChoices(sharedChoices.options, sharedChoices.multi));
-                        } else {
-                            const choicesSummary = document.createElement("div");
-                            choicesSummary.className = "choices-summary";
-                            choicesSummary.textContent = "Choices were presented";
-                            contentEl.appendChild(choicesSummary);
-                        }
-                    }
-                }
-            }
-
-            // Add export bar to restored assistant messages
-            if (restoredText.trim() || restoredToolResults.length > 0) {
-                el._exportMarkdown = restoredText;
-                el._exportCharts = restoredCharts;
-                el._exportToolResults = restoredToolResults;
-                contentEl.appendChild(createResponseExportBar(el));
-            }
+            _renderRestoredAssistantMessage(msg, msgIdx, collapsed, toolResultMap, interactive);
         }
-        // Skip tool_result messages — internal
     });
 }
+
 
 function scrollToBottom() {
     const chat = document.getElementById("chat");

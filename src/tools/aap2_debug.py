@@ -56,42 +56,45 @@ def find_controller_for_url(url: str) -> str:
     return resolve_controller(hostname)
 
 
+def _parse_extra_vars(data: dict) -> dict:
+    """Parse extra_vars from job data, handling string or dict formats."""
+    raw_ev = data.get("extra_vars")
+    if isinstance(raw_ev, dict):
+        return raw_ev
+    if isinstance(raw_ev, str) and raw_ev:
+        with contextlib.suppress(json.JSONDecodeError, TypeError):
+            return json.loads(raw_ev)
+    return {}
+
+
+def _int_field(data: dict, key: str) -> int | None:
+    """Return the value of *key* if it's an int, otherwise None."""
+    val = data.get(key)
+    return val if isinstance(val, int) else None
+
+
 async def fetch_job_metadata(cluster_name: str, job_id: int) -> dict:
     """Fetch job metadata from AAP2 controller."""
     data = await api_get(cluster_name, f"/api/v2/jobs/{job_id}/")
+    extra_vars = _parse_extra_vars(data)
 
-    extra_vars: dict = {}
-    raw_ev = data.get("extra_vars")
-    if isinstance(raw_ev, str) and raw_ev:
-        with contextlib.suppress(json.JSONDecodeError, TypeError):
-            extra_vars = json.loads(raw_ev)
-    elif isinstance(raw_ev, dict):
-        extra_vars = raw_ev
+    action_val = extra_vars.get("ACTION")
+    action = action_val if isinstance(action_val, str) else "unknown"
+    ig = data.get("instance_group")
 
-    action = (
-        extra_vars.get("ACTION", "unknown")
-        if isinstance(extra_vars.get("ACTION"), str)
-        else "unknown"
-    )
-
-    ee_val = data.get("execution_environment")
     return {
         "id": job_id,
         "status": data.get("status", "pending"),
         "action": action,
-        "executionEnvironment": ee_val if isinstance(ee_val, int) else None,
-        "instanceGroup": (
-            str(data["instance_group"]) if isinstance(data.get("instance_group"), int) else None
-        ),
+        "executionEnvironment": _int_field(data, "execution_environment"),
+        "instanceGroup": str(ig) if isinstance(ig, int) else None,
         "executionNode": data.get("execution_node") or None,
         "jobExplanation": data.get("job_explanation", "") or "",
         "resultTraceback": data.get("result_traceback", "") or "",
         "launchType": data.get("launch_type", "") or "",
-        "jobTemplate": (
-            data["job_template"] if isinstance(data.get("job_template"), int) else None
-        ),
+        "jobTemplate": _int_field(data, "job_template"),
         "jobTemplateName": ((data.get("summary_fields") or {}).get("job_template", {}).get("name")),
-        "projectId": (data["project"] if isinstance(data.get("project"), int) else None),
+        "projectId": _int_field(data, "project"),
         "started": data.get("started") or None,
         "finished": data.get("finished") or None,
         "elapsed": data.get("elapsed") if isinstance(data.get("elapsed"), int | float) else 0,

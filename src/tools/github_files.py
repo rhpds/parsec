@@ -111,6 +111,76 @@ def _simplify_directory_listing(content: str) -> str:
     return "\n".join(sorted(lines))
 
 
+def _find_catalog_dirs(tree: list[dict]) -> dict[str, list[str]]:
+    """Find catalog item directories from a git tree listing."""
+    catalog_dirs: dict[str, list[str]] = {}
+    for entry in tree:
+        parts = entry["path"].split("/")
+        if len(parts) >= 2 and entry["type"] == "tree":
+            # Skip hidden/special directories
+            if parts[0].startswith(".") or parts[0] in (
+                "includes",
+                "tests",
+                "EXAMPLE_ACCOUNT",
+            ):
+                continue
+            if len(parts) == 2:
+                catalog_dirs.setdefault(entry["path"], [])
+        elif len(parts) == 3 and entry["type"] == "blob":
+            parent = "/".join(parts[:2])
+            if parent in catalog_dirs:
+                catalog_dirs[parent].append(parts[2])
+    return catalog_dirs
+
+
+async def _index_single_repo(
+    client: httpx.AsyncClient,
+    owner: str,
+    repo: str,
+    headers: dict[str, str],
+) -> dict[str, dict]:
+    """Index catalog items from a single agnosticv repo."""
+    items: dict[str, dict] = {}
+
+    # Get default branch
+    repo_resp = await client.get(
+        f"https://api.github.com/repos/{owner}/{repo}",
+        headers=headers,
+    )
+    default_branch = "main"
+    if repo_resp.status_code == 200:
+        default_branch = repo_resp.json().get("default_branch", "main")
+
+    # Get tree
+    url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/HEAD?recursive=1"
+    resp = await client.get(url, headers=headers)
+    if resp.status_code != 200:
+        logger.warning("Failed to index %s/%s: HTTP %s", owner, repo, resp.status_code)
+        return items
+
+    tree = resp.json().get("tree", [])
+    catalog_dirs = _find_catalog_dirs(tree)
+
+    for dir_path, files in catalog_dirs.items():
+        if "common.yaml" not in files:
+            continue
+        parts = dir_path.split("/")
+        account = parts[0]
+        item_dir = parts[1]
+        key = item_dir.lower().replace("_", "-")
+        items[key] = {
+            "owner": owner,
+            "repo": repo,
+            "account": account,
+            "directory": item_dir,
+            "path": dir_path,
+            "files": files,
+            "default_branch": default_branch,
+        }
+
+    return items
+
+
 async def _build_catalog_index() -> None:
     """Build the catalog item index from all agnosticv repos."""
     global _catalog_index, _index_built_at  # noqa: PLW0603
@@ -130,67 +200,9 @@ async def _build_catalog_index() -> None:
     async with httpx.AsyncClient(timeout=30) as client:
         for owner, repo in _AGNOSTICV_REPOS:
             try:
-                # Get repo metadata for default branch name
-                repo_resp = await client.get(
-                    f"https://api.github.com/repos/{owner}/{repo}",
-                    headers=headers,
-                )
-                default_branch = "main"
-                if repo_resp.status_code == 200:
-                    default_branch = repo_resp.json().get("default_branch", "main")
-
-                url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/HEAD?recursive=1"
-                resp = await client.get(url, headers=headers)
-                if resp.status_code != 200:
-                    logger.warning("Failed to index %s/%s: HTTP %s", owner, repo, resp.status_code)
-                    continue
-
-                tree = resp.json().get("tree", [])
-
-                # Find catalog item directories: account/item_name/common.yaml
-                # Catalog items are directories that contain a common.yaml file
-                catalog_dirs: dict[str, list[str]] = {}
-                for entry in tree:
-                    parts = entry["path"].split("/")
-                    if len(parts) >= 2 and entry["type"] == "tree":
-                        # Skip hidden/special directories
-                        if parts[0].startswith(".") or parts[0] in (
-                            "includes",
-                            "tests",
-                            "EXAMPLE_ACCOUNT",
-                        ):
-                            continue
-                        if len(parts) == 2:
-                            catalog_dirs.setdefault(entry["path"], [])
-                    elif len(parts) == 3 and entry["type"] == "blob":
-                        parent = "/".join(parts[:2])
-                        if parent in catalog_dirs:
-                            catalog_dirs[parent].append(parts[2])
-
-                for dir_path, files in catalog_dirs.items():
-                    if "common.yaml" not in files:
-                        continue
-                    parts = dir_path.split("/")
-                    account = parts[0]
-                    item_dir = parts[1]
-                    key = item_dir.lower().replace("_", "-")
-                    new_index[key] = {
-                        "owner": owner,
-                        "repo": repo,
-                        "account": account,
-                        "directory": item_dir,
-                        "path": dir_path,
-                        "files": files,
-                        "default_branch": default_branch,
-                    }
-
-                logger.info(
-                    "Indexed %s/%s: %d catalog items",
-                    owner,
-                    repo,
-                    sum(1 for v in new_index.values() if v["repo"] == repo),
-                )
-
+                repo_items = await _index_single_repo(client, owner, repo, headers)
+                new_index.update(repo_items)
+                logger.info("Indexed %s/%s: %d catalog items", owner, repo, len(repo_items))
             except Exception:
                 logger.exception("Failed to index %s/%s", owner, repo)
 
@@ -310,6 +322,47 @@ async def search_github_repo(
         return {"error": f"GitHub tree search failed: {exc}"}
 
 
+async def _fetch_pr_changed_files(
+    client: httpx.AsyncClient,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+) -> list[str]:
+    """Fetch the list of changed files for a PR."""
+    try:
+        files_resp = await client.get(
+            f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files",
+            params={"per_page": 100},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": _GITHUB_ACCEPT_HEADER,
+            },
+        )
+        if files_resp.status_code == 200:
+            return [f.get("filename", "") for f in files_resp.json()]
+    except Exception:
+        pass
+    return []
+
+
+def _build_pr_result(pr: dict, owner: str, repo: str, matched_files: list[str]) -> dict:
+    """Build a PR search result dict."""
+    return {
+        "owner": owner,
+        "repo": repo,
+        "pr_number": pr.get("number", 0),
+        "title": pr.get("title", ""),
+        "branch": pr.get("head", {}).get("ref", ""),
+        "state": pr.get("state", ""),
+        "author": pr.get("user", {}).get("login", ""),
+        "url": pr.get("html_url", ""),
+        "created_at": pr.get("created_at", ""),
+        "updated_at": pr.get("updated_at", ""),
+        "files": matched_files[:20],
+    }
+
+
 async def search_agnosticv_prs(
     search: str,
     state: str = "open",
@@ -359,71 +412,24 @@ async def search_agnosticv_prs(
                 prs = resp.json()
 
                 for pr in prs:
-                    title = pr.get("title", "")
                     pr_number = pr.get("number", 0)
-                    branch = pr.get("head", {}).get("ref", "")
-
-                    # Check title match
+                    title = pr.get("title", "")
                     title_match = search_lower in title.lower()
 
-                    # Check changed files for path match
-                    file_match = False
-                    matched_files: list[str] = []
-                    if not title_match:
-                        # Only fetch files if title didn't match (save API calls)
-                        try:
-                            files_resp = await client.get(
-                                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files",
-                                params={"per_page": 100},
-                                headers={
-                                    "Authorization": f"Bearer {token}",
-                                    "Accept": _GITHUB_ACCEPT_HEADER,
-                                },
-                            )
-                            if files_resp.status_code == 200:
-                                pr_files = files_resp.json()
-                                for f in pr_files:
-                                    if search_lower in f.get("filename", "").lower():
-                                        file_match = True
-                                        matched_files.append(f["filename"])
-                        except Exception:
-                            pass
+                    changed_files = await _fetch_pr_changed_files(
+                        client, owner, repo, pr_number, token
+                    )
+
+                    if title_match:
+                        matched_files = changed_files
                     else:
-                        # Title matched — still get files for context
-                        try:
-                            files_resp = await client.get(
-                                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files",
-                                params={"per_page": 100},
-                                headers={
-                                    "Authorization": f"Bearer {token}",
-                                    "Accept": _GITHUB_ACCEPT_HEADER,
-                                },
-                            )
-                            if files_resp.status_code == 200:
-                                pr_files = files_resp.json()
-                                matched_files = [f["filename"] for f in pr_files]
-                        except Exception:
-                            pass
+                        matched_files = [f for f in changed_files if search_lower in f.lower()]
+                        if not matched_files:
+                            continue
 
-                    if title_match or file_match:
-                        all_matches.append(
-                            {
-                                "owner": owner,
-                                "repo": repo,
-                                "pr_number": pr_number,
-                                "title": title,
-                                "branch": branch,
-                                "state": pr.get("state", ""),
-                                "author": pr.get("user", {}).get("login", ""),
-                                "url": pr.get("html_url", ""),
-                                "created_at": pr.get("created_at", ""),
-                                "updated_at": pr.get("updated_at", ""),
-                                "files": matched_files[:20],
-                            }
-                        )
-
-                        if len(all_matches) >= max_results:
-                            break
+                    all_matches.append(_build_pr_result(pr, owner, repo, matched_files))
+                    if len(all_matches) >= max_results:
+                        break
 
             except Exception as exc:
                 logger.warning("PR search failed for %s/%s: %s", owner, repo, exc)

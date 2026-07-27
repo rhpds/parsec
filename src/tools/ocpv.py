@@ -33,6 +33,22 @@ def _strip_secrets_from_line(line: str) -> str | None:
     return line
 
 
+async def _resolve_ocpv_cluster_from_ns(
+    namespace: str,
+) -> tuple[str, dict[str, Any] | None]:
+    """Try to resolve OCPV cluster from namespace. Returns (cluster_name, error_or_None)."""
+    if namespace:
+        found = await _find_namespace(namespace, "")
+        if "cluster" in found and "error" not in found:
+            return found["cluster"], None
+        return "", found
+    configured = get_configured_clusters()
+    return "", {
+        "error": "No cluster specified and could not resolve one. "
+        f"Available clusters: {configured}",
+    }
+
+
 async def query_ocpv_cluster(
     action: str,
     cluster: str = "",
@@ -58,60 +74,62 @@ async def query_ocpv_cluster(
     """
     target_cluster = ""
     try:
-        # Resolve cluster
         target_cluster = cluster.lower() if cluster else ""
         if not target_cluster and sandbox_comment:
             target_cluster = resolve_cluster_from_comment(sandbox_comment)
 
-        # Actions that don't require a pre-resolved cluster
         if action == "find_namespace":
             return await _find_namespace(namespace, target_cluster)
 
-        # For other actions, resolve cluster from namespace if needed
-        if not target_cluster and namespace:
-            found = await _find_namespace(namespace, "")
-            if "cluster" in found and "error" not in found:
-                target_cluster = found["cluster"]
-            else:
-                return found  # Return the error
-
         if not target_cluster:
-            configured = get_configured_clusters()
-            return {
-                "error": "No cluster specified and could not resolve one. "
-                f"Available clusters: {configured}",
-            }
+            target_cluster, error = await _resolve_ocpv_cluster_from_ns(namespace)
+            if error:
+                return error
 
-        if action == "list_pvcs":
-            return await _list_pvcs(target_cluster, namespace, name, max_results)
-        elif action == "list_pvs":
-            return await _list_pvs(target_cluster, name, max_results)
-        elif action == "list_storage_classes":
-            return await _list_storage_classes(target_cluster)
-        elif action == "list_vms":
-            return await _list_vms(target_cluster, namespace, name, max_results)
-        elif action == "get_node_resources":
-            return await _get_node_resources(target_cluster, name)
-        elif action == "get_ocpv_pod_logs":
-            return await _get_ocpv_pod_logs(target_cluster, namespace, name, search, max_results)
-        elif action == "list_pods":
-            return await _list_pods(target_cluster, namespace, name, max_results)
-        elif action == "nodes_top":
-            return await _nodes_top(target_cluster, name)
-        elif action == "pods_top":
-            return await _pods_top(target_cluster, namespace, name, max_results)
-        elif action == "list_machines":
-            return await _list_machines(target_cluster, name, max_results)
-        else:
-            return {
-                "error": f"Unknown action: {action}. Use: find_namespace, "
-                "list_pvcs, list_pvs, list_storage_classes, list_vms, "
-                "get_node_resources, get_ocpv_pod_logs, list_pods, nodes_top, "
-                "pods_top, list_machines"
-            }
+        return await _dispatch_ocpv_action(
+            action, target_cluster, namespace, name, search, max_results
+        )
     except Exception as e:
         logger.exception("OCPV query failed: action=%s cluster=%s", action, target_cluster)
         return {"error": str(e), "cluster": target_cluster}
+
+
+async def _dispatch_ocpv_action(
+    action: str,
+    cluster: str,
+    namespace: str,
+    name: str,
+    search: str,
+    max_results: int,
+) -> dict[str, Any]:
+    """Dispatch OCPV action to the appropriate handler."""
+    if action == "list_pvcs":
+        return await _list_pvcs(cluster, namespace, name, max_results)
+    elif action == "list_pvs":
+        return await _list_pvs(cluster, name, max_results)
+    elif action == "list_storage_classes":
+        return await _list_storage_classes(cluster)
+    elif action == "list_vms":
+        return await _list_vms(cluster, namespace, name, max_results)
+    elif action == "get_node_resources":
+        return await _get_node_resources(cluster, name)
+    elif action == "get_ocpv_pod_logs":
+        return await _get_ocpv_pod_logs(cluster, namespace, name, search, max_results)
+    elif action == "list_pods":
+        return await _list_pods(cluster, namespace, name, max_results)
+    elif action == "nodes_top":
+        return await _nodes_top(cluster, name)
+    elif action == "pods_top":
+        return await _pods_top(cluster, namespace, name, max_results)
+    elif action == "list_machines":
+        return await _list_machines(cluster, name, max_results)
+    else:
+        return {
+            "error": f"Unknown action: {action}. Use: find_namespace, "
+            "list_pvcs, list_pvs, list_storage_classes, list_vms, "
+            "get_node_resources, get_ocpv_pod_logs, list_pods, nodes_top, "
+            "pods_top, list_machines"
+        }
 
 
 async def _find_namespace(namespace: str, cluster: str) -> dict[str, Any]:
@@ -287,6 +305,98 @@ async def _list_storage_classes(cluster: str) -> dict[str, Any]:
     return {"cluster": cluster, "storage_classes": scs, "count": len(scs)}
 
 
+def _parse_volume_entry(v: dict) -> dict[str, str]:
+    """Parse a volume spec into a typed entry."""
+    vol_entry: dict[str, str] = {"name": v.get("name", "")}
+    if "dataVolume" in v:
+        vol_entry["type"] = "dataVolume"
+        vol_entry["source"] = v["dataVolume"].get("name", "")
+    elif "persistentVolumeClaim" in v:
+        vol_entry["type"] = "pvc"
+        vol_entry["source"] = v["persistentVolumeClaim"].get("claimName", "")
+    elif "cloudInitNoCloud" in v:
+        vol_entry["type"] = "cloudInit"
+    elif "containerDisk" in v:
+        vol_entry["type"] = "containerDisk"
+        vol_entry["source"] = v["containerDisk"].get("image", "")
+    else:
+        vol_entry["type"] = "other"
+    return vol_entry
+
+
+def _extract_vm_condition(vmi_status: dict) -> dict[str, str] | None:
+    """Extract the first failing condition from VMI status."""
+    for cond in vmi_status.get("conditions", []):
+        if cond.get("status") == "False" and cond.get("message"):
+            return {
+                "type": cond.get("type", ""),
+                "reason": cond.get("reason", ""),
+                "message": cond["message"][:200],
+            }
+    return None
+
+
+def _parse_vm_info(vm: dict, vmi_by_name: dict) -> dict[str, Any]:
+    """Parse a VirtualMachine into a summary dict."""
+    vm_name = vm["metadata"]["name"]
+    vm_status = vm.get("status", {})
+    print_status = vm_status.get("printableStatus", "Unknown")
+    ready = vm_status.get("ready", False)
+
+    # Get VMI info
+    vmi = vmi_by_name.get(vm_name, {})
+    vmi_status = vmi.get("status", {}) if vmi else {}
+    node = vmi_status.get("nodeName", "")
+    phase = vmi_status.get("phase", "")
+    interfaces = vmi_status.get("interfaces", [])
+    ip = interfaces[0].get("ipAddress", "") if interfaces else ""
+
+    # Extract spec
+    tmpl_spec = vm.get("spec", {}).get("template", {}).get("spec", {})
+    domain = tmpl_spec.get("domain", {})
+
+    # CPU
+    cpu_spec = domain.get("cpu", {})
+    total_vcpus = cpu_spec.get("cores", 1) * cpu_spec.get("sockets", 1) * cpu_spec.get("threads", 1)
+
+    # Memory
+    guest_mem = domain.get("memory", {}).get("guest", "")
+
+    # Disks
+    disks = domain.get("devices", {}).get("disks", [])
+    disk_list = [
+        {
+            "name": d.get("name", ""),
+            "bus": d.get("disk", d.get("cdrom", {})).get("bus", ""),
+        }
+        for d in disks
+    ]
+
+    # Volumes
+    volumes = tmpl_spec.get("volumes", [])
+    volume_list = [_parse_volume_entry(v) for v in volumes]
+
+    vm_info: dict[str, Any] = {
+        "name": vm_name,
+        "status": print_status,
+        "ready": ready,
+        "phase": phase,
+        "node": node or None,
+        "ip": ip or None,
+        "vcpus": total_vcpus,
+        "memory": guest_mem,
+        "disks": disk_list,
+        "volumes": volume_list,
+    }
+
+    if not ready:
+        condition = _extract_vm_condition(vmi_status)
+        if condition:
+            vm_info["condition"] = condition
+
+    return vm_info
+
+
 async def _list_vms(cluster: str, namespace: str, name: str, max_results: int) -> dict[str, Any]:
     """List VirtualMachines and VirtualMachineInstances in a namespace."""
     if not namespace:
@@ -305,102 +415,13 @@ async def _list_vms(cluster: str, namespace: str, name: str, max_results: int) -
     vmi_items = vmi_result.get("items", [])
 
     # Index VMIs by name
-    vmi_by_name = {}
-    for vmi in vmi_items:
-        vmi_name = vmi["metadata"]["name"]
-        vmi_by_name[vmi_name] = vmi
+    vmi_by_name = {vmi["metadata"]["name"]: vmi for vmi in vmi_items}
 
     if name:
         name_lower = name.lower()
         vm_items = [i for i in vm_items if name_lower in i["metadata"]["name"].lower()]
 
-    vms = []
-    for vm in vm_items[:max_results]:
-        vm_name = vm["metadata"]["name"]
-        vm_status = vm.get("status", {})
-        print_status = vm_status.get("printableStatus", "Unknown")
-        ready = vm_status.get("ready", False)
-
-        # Get VMI info if running
-        vmi = vmi_by_name.get(vm_name, {})
-        vmi_status = vmi.get("status", {}) if vmi else {}
-        node = vmi_status.get("nodeName", "")
-        phase = vmi_status.get("phase", "")
-        interfaces = vmi_status.get("interfaces", [])
-        ip = interfaces[0].get("ipAddress", "") if interfaces else ""
-
-        # Extract spec details
-        tmpl_spec = vm.get("spec", {}).get("template", {}).get("spec", {})
-        domain = tmpl_spec.get("domain", {})
-
-        # CPU
-        cpu_spec = domain.get("cpu", {})
-        cores = cpu_spec.get("cores", 1)
-        sockets = cpu_spec.get("sockets", 1)
-        threads = cpu_spec.get("threads", 1)
-        total_vcpus = cores * sockets * threads
-
-        # Memory
-        mem_spec = domain.get("memory", {})
-        guest_mem = mem_spec.get("guest", "")
-
-        # Disks and volumes
-        disks = domain.get("devices", {}).get("disks", [])
-        volumes = tmpl_spec.get("volumes", [])
-        disk_list = []
-        for d in disks:
-            disk_info = d.get("disk", d.get("cdrom", {}))
-            disk_list.append(
-                {
-                    "name": d.get("name", ""),
-                    "bus": disk_info.get("bus", ""),
-                }
-            )
-
-        volume_list = []
-        for v in volumes:
-            vol_entry: dict[str, str] = {"name": v.get("name", "")}
-            if "dataVolume" in v:
-                vol_entry["type"] = "dataVolume"
-                vol_entry["source"] = v["dataVolume"].get("name", "")
-            elif "persistentVolumeClaim" in v:
-                vol_entry["type"] = "pvc"
-                vol_entry["source"] = v["persistentVolumeClaim"].get("claimName", "")
-            elif "cloudInitNoCloud" in v:
-                vol_entry["type"] = "cloudInit"
-            elif "containerDisk" in v:
-                vol_entry["type"] = "containerDisk"
-                vol_entry["source"] = v["containerDisk"].get("image", "")
-            else:
-                vol_entry["type"] = "other"
-            volume_list.append(vol_entry)
-
-        vm_info: dict[str, Any] = {
-            "name": vm_name,
-            "status": print_status,
-            "ready": ready,
-            "phase": phase,
-            "node": node or None,
-            "ip": ip or None,
-            "vcpus": total_vcpus,
-            "memory": guest_mem,
-            "disks": disk_list,
-            "volumes": volume_list,
-        }
-
-        # Add scheduling conditions for non-running VMs
-        if not ready:
-            conditions = vmi_status.get("conditions", [])
-            for cond in conditions:
-                if cond.get("status") == "False" and cond.get("message"):
-                    vm_info["condition"] = {
-                        "type": cond.get("type", ""),
-                        "reason": cond.get("reason", ""),
-                        "message": cond["message"][:200],
-                    }
-                    break
-
-        vms.append(vm_info)
+    vms = [_parse_vm_info(vm, vmi_by_name) for vm in vm_items[:max_results]]
 
     return {
         "cluster": cluster,
@@ -408,6 +429,32 @@ async def _list_vms(cluster: str, namespace: str, name: str, max_results: int) -
         "vms": vms,
         "count": len(vms),
     }
+
+
+def _parse_capacity(capacity: dict) -> tuple[int, int, int]:
+    """Parse capacity dict into (cpu, memory_gi, ephemeral_gi)."""
+    cpu = int(capacity.get("cpu", "0"))
+    mem_ki = capacity.get("memory", "0")
+    mem_gi = (
+        int(mem_ki.replace("Ki", "")) // (1024 * 1024)
+        if isinstance(mem_ki, str) and mem_ki.endswith("Ki")
+        else 0
+    )
+    eph = capacity.get("ephemeral-storage", "0")
+    eph_gi = (
+        int(eph.replace("Ki", "")) // (1024 * 1024)
+        if isinstance(eph, str) and eph.endswith("Ki")
+        else 0
+    )
+    return cpu, mem_gi, eph_gi
+
+
+def _get_node_ready_status(conditions: list[dict]) -> str:
+    """Get Ready status from node conditions."""
+    for cond in conditions:
+        if cond.get("type") == "Ready":
+            return "Ready" if cond.get("status") == "True" else "NotReady"
+    return "Unknown"
 
 
 async def _get_node_resources(cluster: str, name: str) -> dict[str, Any]:
@@ -423,27 +470,9 @@ async def _get_node_resources(cluster: str, name: str) -> dict[str, Any]:
     for node in items:
         node_name = node["metadata"]["name"]
         capacity = node.get("status", {}).get("capacity", {})
-
-        # Parse capacity values
-        cpu = int(capacity.get("cpu", "0"))
-        mem_ki = capacity.get("memory", "0")
-        if isinstance(mem_ki, str) and mem_ki.endswith("Ki"):
-            mem_gi = int(mem_ki.replace("Ki", "")) // (1024 * 1024)
-        else:
-            mem_gi = 0
-
-        eph = capacity.get("ephemeral-storage", "0")
-        if isinstance(eph, str) and eph.endswith("Ki"):
-            eph_gi = int(eph.replace("Ki", "")) // (1024 * 1024)
-        else:
-            eph_gi = 0
-
-        # Node status
+        cpu, mem_gi, eph_gi = _parse_capacity(capacity)
         conditions = node.get("status", {}).get("conditions", [])
-        ready = "Unknown"
-        for cond in conditions:
-            if cond.get("type") == "Ready":
-                ready = "Ready" if cond.get("status") == "True" else "NotReady"
+        ready = _get_node_ready_status(conditions)
 
         nodes.append(
             {
