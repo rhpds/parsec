@@ -47,6 +47,8 @@ from src.metrics.tracing import SpanType, set_llm_span_outputs, set_tool_span_ou
 
 logger = logging.getLogger(__name__)
 
+_QUERYING_BABYLON_LABEL = "Querying Babylon cluster"
+
 # Type alias for the SSE event callback used to forward sub-agent progress
 EventCallback = Callable[[str], Coroutine[Any, Any, None]]
 
@@ -97,7 +99,7 @@ AGENTS: dict[str, AgentConfig] = {
             "Investigates AAP2 job failures and traces configs through agnosticv/agnosticd."
         ),
         slow_tool_labels={
-            "query_babylon_catalog": "Querying Babylon cluster",
+            "query_babylon_catalog": _QUERYING_BABYLON_LABEL,
             "query_aap2": "Querying AAP2 controller",
         },
     ),
@@ -111,7 +113,7 @@ AGENTS: dict[str, AgentConfig] = {
             "Investigates Babylon catalog items, deployments, lifecycle state, and workshops."
         ),
         slow_tool_labels={
-            "query_babylon_catalog": "Querying Babylon cluster",
+            "query_babylon_catalog": _QUERYING_BABYLON_LABEL,
         },
     ),
     "security": AgentConfig(
@@ -141,7 +143,7 @@ AGENTS: dict[str, AgentConfig] = {
         ),
         slow_tool_labels={
             "query_ocpv_cluster": "Querying OCPV cluster",
-            "query_babylon_catalog": "Querying Babylon cluster",
+            "query_babylon_catalog": _QUERYING_BABYLON_LABEL,
         },
     ),
     "icinga": AgentConfig(

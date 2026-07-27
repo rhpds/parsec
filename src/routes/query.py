@@ -4,6 +4,7 @@ import logging
 import os
 import ssl
 import time
+from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -171,8 +172,8 @@ async def _check_user_allowed(request: Request, user: str | None) -> None:
 @router.get("/auth/check")
 async def auth_check(
     request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """Check if the current user is authorized to use Parsec."""
     user = x_forwarded_email or x_forwarded_user
@@ -184,9 +185,9 @@ async def auth_check(
 async def query(
     body: QueryRequest,
     request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
-    x_forwarded_preferred_username: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
+    x_forwarded_preferred_username: Annotated[str | None, Header()] = None,
 ):
     """Stream an agent response as SSE events.
 
@@ -229,8 +230,8 @@ async def query(
 async def download_report(
     filename: str,
     request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """Download a generated report file."""
     user = x_forwarded_email or x_forwarded_user

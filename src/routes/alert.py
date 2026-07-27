@@ -2,6 +2,7 @@
 
 import logging
 import time
+from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
@@ -36,7 +37,7 @@ class AlertResponse(BaseModel):
 @router.post("/investigate", response_model=AlertResponse)
 async def investigate_alert(
     body: AlertRequest,
-    x_api_key: str | None = Header(None),
+    x_api_key: Annotated[str | None, Header()] = None,
 ):
     """Investigate an alert and return a structured verdict.
 

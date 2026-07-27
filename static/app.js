@@ -72,14 +72,14 @@ try {
 uploadBtn.addEventListener("click", function() { fileInput.click(); });
 
 fileInput.addEventListener("change", function() {
-    var file = fileInput.files[0];
+    const file = fileInput.files[0];
     if (!file) return;
     if (file.size > MAX_UPLOAD_SIZE) {
         alert("File too large — maximum size is 10 MB.");
         fileInput.value = "";
         return;
     }
-    var reader = new FileReader();
+    const reader = new FileReader();
     reader.onload = function() {
         pendingAttachment = { name: file.name, content: reader.result };
         attachmentNameEl.textContent = file.name;
@@ -108,35 +108,35 @@ document.getElementById("new-chat-btn").addEventListener("click", function() {
 
 // ─── Sidebar ───
 
-var sidebarEl = document.getElementById("sidebar");
-var sidebarListEl = document.getElementById("sidebar-list");
-var sidebarHistoryTitle = sidebarEl.querySelector(".sidebar-title");
-var sidebarExamplesEl = sidebarEl.querySelector(".sidebar-examples");
-var tabHistory = document.getElementById("sidebar-tab-history");
-var tabExamples = document.getElementById("sidebar-tab-examples");
-var tabSkills = document.getElementById("sidebar-tab-skills");
+const sidebarEl = document.getElementById("sidebar");
+const sidebarListEl = document.getElementById("sidebar-list");
+const sidebarHistoryTitle = sidebarEl.querySelector(".sidebar-title");
+const sidebarExamplesEl = sidebarEl.querySelector(".sidebar-examples");
+const tabHistory = document.getElementById("sidebar-tab-history");
+const tabExamples = document.getElementById("sidebar-tab-examples");
+const tabSkills = document.getElementById("sidebar-tab-skills");
 
 // Sidebar sections — hide all by default, show based on which tab was clicked
 sidebarListEl.style.display = "none";
 sidebarHistoryTitle.style.display = "none";
 sidebarExamplesEl.style.display = "none";
 
-var learningsPanel = document.getElementById("learnings-panel");
-var skillsPanel = document.getElementById("skills-panel");
-var isAdmin = false;
-var adminViewAllChats = false;
+const learningsPanel = document.getElementById("learnings-panel");
+const skillsPanel = document.getElementById("skills-panel");
+let isAdmin = false;
+let adminViewAllChats = false;
 
 function showAdminChatToggle() {
-    var existing = document.getElementById("admin-chat-toggle");
+    const existing = document.getElementById("admin-chat-toggle");
     if (existing) { existing.style.display = "flex"; return; }
-    var toggle = document.createElement("div");
+    const toggle = document.createElement("div");
     toggle.id = "admin-chat-toggle";
     toggle.className = "admin-chat-toggle";
-    var myBtn = document.createElement("button");
+    const myBtn = document.createElement("button");
     myBtn.id = "admin-toggle-my";
     myBtn.className = "admin-toggle-btn" + (!adminViewAllChats ? " active" : "");
     myBtn.textContent = "My Chats";
-    var allBtn = document.createElement("button");
+    const allBtn = document.createElement("button");
     allBtn.id = "admin-toggle-all";
     allBtn.className = "admin-toggle-btn" + (adminViewAllChats ? " active" : "");
     allBtn.textContent = "All Users";
@@ -152,7 +152,7 @@ function showAdminChatToggle() {
         myBtn.classList.remove("active");
         loadConversationList();
     });
-    var dlBtn = document.createElement("button");
+    const dlBtn = document.createElement("button");
     dlBtn.className = "admin-toggle-btn admin-download-btn";
     dlBtn.textContent = "⤓";
     dlBtn.title = "Download all conversations as JSON";
@@ -162,9 +162,9 @@ function showAdminChatToggle() {
             if (!resp.ok) throw new Error("Export failed");
             return resp.json();
         }).then(function(data) {
-            var blob = new Blob([JSON.stringify(data.conversations, null, 2)], { type: "application/json" });
-            var url = URL.createObjectURL(blob);
-            var a = document.createElement("a");
+            const blob = new Blob([JSON.stringify(data.conversations, null, 2)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
             a.href = url;
             a.download = "parsec-conversations-" + new Date().toISOString().slice(0, 10) + ".json";
             a.click();
@@ -183,7 +183,7 @@ function openSidebar(section) {
     sidebarExamplesEl.style.display = "none";
     learningsPanel.style.display = "none";
     skillsPanel.style.display = "none";
-    var adminToggle = document.getElementById("admin-chat-toggle");
+    const adminToggle = document.getElementById("admin-chat-toggle");
     if (adminToggle) adminToggle.style.display = "none";
     sidebarHistoryTitle.style.display = "";
 
@@ -217,7 +217,7 @@ tabHistory.addEventListener("click", function() { showChatView(); openSidebar("h
 tabExamples.addEventListener("click", function() { showChatView(); openSidebar("examples"); });
 tabSkills.addEventListener("click", function() { showChatView(); openSidebar("skills"); });
 
-var tabDebug = document.getElementById("sidebar-tab-debug");
+const tabDebug = document.getElementById("sidebar-tab-debug");
 tabDebug.addEventListener("click", function() {
     closeSidebar();
     showDebugView();
@@ -226,7 +226,7 @@ tabDebug.addEventListener("click", function() {
 // Example items click-to-fill
 document.querySelectorAll(".sidebar-examples-list li").forEach(function(li) {
     li.addEventListener("click", function() {
-        var input = document.getElementById("question");
+        const input = document.getElementById("question");
         input.value = li.textContent;
         input.focus();
         input.dispatchEvent(new Event("input"));
@@ -238,7 +238,7 @@ document.querySelectorAll(".sidebar-examples-list li").forEach(function(li) {
 // Nodes are built with textContent (never innerHTML) so skill metadata —
 // which comes from arbitrary on-disk SKILL.md files — can't inject markup.
 
-var skillsListEl = document.getElementById("skills-list");
+const skillsListEl = document.getElementById("skills-list");
 
 function loadSkills() {
     skillsListEl.textContent = "Loading…";
@@ -249,7 +249,7 @@ function loadSkills() {
         renderSkills(data.skills || []);
     }).catch(function(err) {
         skillsListEl.textContent = "";
-        var e = document.createElement("div");
+        const e = document.createElement("div");
         e.className = "skills-empty";
         e.textContent = "Could not load skills: " + err.message;
         skillsListEl.appendChild(e);
@@ -259,61 +259,61 @@ function loadSkills() {
 function renderSkills(skills) {
     skillsListEl.textContent = "";
     if (!skills.length) {
-        var empty = document.createElement("div");
+        const empty = document.createElement("div");
         empty.className = "skills-empty";
         empty.textContent = "No skills discovered. Set skills.plugin_paths to mount a skill repo.";
         skillsListEl.appendChild(empty);
         return;
     }
     skills.forEach(function(s) {
-        var card = document.createElement("div");
+        const card = document.createElement("div");
         card.className = "skill-card";
 
-        var head = document.createElement("div");
+        const head = document.createElement("div");
         head.className = "skill-card-head";
-        var name = document.createElement("span");
+        const name = document.createElement("span");
         name.className = "skill-name";
         name.textContent = s.name;
         head.appendChild(name);
         if (s.source) {
-            var src = document.createElement("span");
+            const src = document.createElement("span");
             src.className = "skill-badge";
             src.textContent = s.source;
             head.appendChild(src);
         }
         if (s.is_parsec_native) {
-            var nat = document.createElement("span");
+            const nat = document.createElement("span");
             nat.className = "skill-badge skill-badge-native";
             nat.textContent = "parsec";
             head.appendChild(nat);
         }
         card.appendChild(head);
 
-        var desc = document.createElement("div");
+        const desc = document.createElement("div");
         desc.className = "skill-desc";
         desc.textContent = s.description || "";
         card.appendChild(desc);
 
-        var bits = [];
+        const bits = [];
         if (s.parsec && s.parsec.version) bits.push("v" + s.parsec.version);
         if (s.parsec && s.parsec.domain) bits.push(s.parsec.domain);
         if (s.allowed_tools && s.allowed_tools.length) bits.push(s.allowed_tools.length + " tools");
         if (bits.length) {
-            var meta = document.createElement("div");
+            const meta = document.createElement("div");
             meta.className = "skill-meta";
             meta.textContent = bits.join(" · ");
             card.appendChild(meta);
         }
 
         (s.warnings || []).forEach(function(w) {
-            var warn = document.createElement("div");
+            const warn = document.createElement("div");
             warn.className = "skill-warning";
             warn.textContent = "⚠ " + w;
             card.appendChild(warn);
         });
 
         if (s.skill_path) {
-            var path = document.createElement("div");
+            const path = document.createElement("div");
             path.className = "skill-path";
             path.textContent = s.skill_path;
             path.title = "Discovered from " + s.skill_path;
@@ -345,9 +345,9 @@ function refreshLearningsCount() {
         return resp.json();
     }).then(function(data) {
         if (!data) return;
-        var countEl = document.getElementById("learnings-count");
+        const countEl = document.getElementById("learnings-count");
         if (data.has_learnings) {
-            var entries = (data.content.match(/^- /gm) || []).length;
+            const entries = (data.content.match(/^- /gm) || []).length;
             countEl.textContent = entries + " entries";
         } else {
             countEl.textContent = "empty";
@@ -361,16 +361,16 @@ document.getElementById("learnings-view-btn").addEventListener("click", function
         return resp.json();
     }).then(function(data) {
         if (!data) return;
-        var textarea = document.getElementById("learnings-text");
+        const textarea = document.getElementById("learnings-text");
         textarea.value = data.content || "(no learnings yet)";
         document.getElementById("learnings-modal").style.display = "flex";
     }).catch(function() {});
 });
 
 document.getElementById("learnings-copy-btn").addEventListener("click", function() {
-    var textarea = document.getElementById("learnings-text");
+    const textarea = document.getElementById("learnings-text");
     navigator.clipboard.writeText(textarea.value).then(function() {
-        var btn = document.getElementById("learnings-copy-btn");
+        const btn = document.getElementById("learnings-copy-btn");
         btn.textContent = "Copied!";
         setTimeout(function() { btn.textContent = "Copy All"; }, 2000);
     });
@@ -392,7 +392,7 @@ document.getElementById("learnings-clear-btn").addEventListener("click", functio
 });
 
 function loadConversationList() {
-    var url = "/api/conversations";
+    let url = "/api/conversations";
     if (isAdmin && adminViewAllChats) url += "?all_users=true";
     fetch(url).then(function(resp) {
         if (!resp.ok) return;
@@ -406,31 +406,31 @@ function loadConversationList() {
 function renderConversationList(conversations) {
     sidebarListEl.textContent = "";
     if (conversations.length === 0) {
-        var empty = document.createElement("div");
+        const empty = document.createElement("div");
         empty.className = "sidebar-empty";
         empty.textContent = adminViewAllChats ? "No conversations found" : "No previous conversations";
         sidebarListEl.appendChild(empty);
         return;
     }
     conversations.forEach(function(conv) {
-        var item = document.createElement("div");
+        const item = document.createElement("div");
         item.className = "sidebar-item";
         if (conv.id === currentConversationId) item.classList.add("active");
 
-        var titleEl = document.createElement("div");
+        const titleEl = document.createElement("div");
         titleEl.className = "sidebar-item-title";
         titleEl.textContent = conv.title;
 
-        var metaEl = document.createElement("div");
+        const metaEl = document.createElement("div");
         metaEl.className = "sidebar-item-meta";
-        var date = new Date(conv.updated_at);
-        var metaText = date.toLocaleDateString() + " \u00b7 " + conv.message_count + " msgs";
+        const date = new Date(conv.updated_at);
+        let metaText = date.toLocaleDateString() + " \u00b7 " + conv.message_count + " msgs";
         if (adminViewAllChats && conv.owner) {
             metaText = conv.owner + " \u00b7 " + metaText;
         }
         metaEl.textContent = metaText;
 
-        var deleteBtn = document.createElement("button");
+        const deleteBtn = document.createElement("button");
         deleteBtn.className = "sidebar-item-delete";
         deleteBtn.textContent = "\u00d7";
         deleteBtn.title = "Delete conversation";
@@ -480,7 +480,7 @@ function loadConversation(convId) {
 
 function saveConversation() {
     if (conversationHistory.length === 0) return;
-    var body = {
+    const body = {
         messages: conversationHistory,
     };
     if (currentConversationId) body.id = currentConversationId;
@@ -503,9 +503,9 @@ function saveConversation() {
 
 // Share modal handlers
 document.getElementById("share-copy-btn").addEventListener("click", function() {
-    var input = document.getElementById("share-link-input");
+    const input = document.getElementById("share-link-input");
     navigator.clipboard.writeText(input.value).then(function() {
-        var btn = document.getElementById("share-copy-btn");
+        const btn = document.getElementById("share-copy-btn");
         btn.textContent = "Copied!";
         setTimeout(function() { btn.textContent = "Copy"; }, 2000);
     });
@@ -521,14 +521,14 @@ document.getElementById("share-modal").addEventListener("click", function(e) {
 
 // Theme toggle — preference is applied in <head> to prevent flash
 document.getElementById("theme-toggle-btn").addEventListener("click", function() {
-    var current = document.documentElement.getAttribute("data-theme");
-    var next = current === "light" ? "dark" : "light";
+    const current = document.documentElement.getAttribute("data-theme");
+    const next = current === "light" ? "dark" : "light";
     document.documentElement.setAttribute("data-theme", next);
     localStorage.setItem("parsec_theme", next);
 });
 
 // Open all markdown links in new tabs
-var renderer = new marked.Renderer();
+const renderer = new marked.Renderer();
 renderer.link = function(href, title, text) {
     // marked v12+ passes an object as first arg
     if (typeof href === "object") {
@@ -536,7 +536,7 @@ renderer.link = function(href, title, text) {
         title = href.title;
         href = href.href;
     }
-    var titleAttr = title ? ' title="' + title + '"' : "";
+    const titleAttr = title ? ' title="' + title + '"' : "";
     return '<a href="' + href + '"' + titleAttr + ' target="_blank" rel="noopener">' + text + "</a>";
 };
 marked.setOptions({ renderer: renderer });
@@ -568,7 +568,7 @@ marked.setOptions({ renderer: renderer });
     el.id = "welcome-message";
     const contentEl = el.querySelector(".content");
 
-    var welcomeShort = document.createElement("div");
+    const welcomeShort = document.createElement("div");
     welcomeShort.className = "md-text welcome-short";
     welcomeShort.innerHTML = marked.parse(
         "**Hi, I'm Parsec** — a natural language investigation assistant for RHDP cloud costs and provisioning. " +
@@ -590,9 +590,9 @@ marked.setOptions({ renderer: renderer });
     const shareId = urlParams.get("share");
     if (shareId) {
         try {
-            var shareResp = await fetch("/api/share/" + encodeURIComponent(shareId));
+            const shareResp = await fetch("/api/share/" + encodeURIComponent(shareId));
             if (shareResp.ok) {
-                var shareData = await shareResp.json();
+                const shareData = await shareResp.json();
                 document.getElementById("shared-banner").style.display = "flex";
                 document.getElementById("query-form").style.display = "none";
                 messagesEl.textContent = "";
@@ -607,15 +607,15 @@ marked.setOptions({ renderer: renderer });
                 });
                 return;
             } else {
-                var shareErr = await shareResp.json().catch(function() { return {}; });
-                var errEl = document.createElement("div");
+                const shareErr = await shareResp.json().catch(function() { return {}; });
+                const errEl = document.createElement("div");
                 errEl.className = "error-message";
                 errEl.textContent = shareErr.detail || "Shared session not found";
                 messagesEl.appendChild(errEl);
                 return;
             }
         } catch (e) {
-            var errEl2 = document.createElement("div");
+            const errEl2 = document.createElement("div");
             errEl2.className = "error-message";
             errEl2.textContent = "Failed to load shared session: " + e.message;
             messagesEl.appendChild(errEl2);
@@ -647,7 +647,7 @@ form.addEventListener("submit", async (e) => {
     input.style.height = "auto";
 
     // Set up cancel button
-    var abortController = new AbortController();
+    const abortController = new AbortController();
     sendBtn.textContent = "Cancel";
     sendBtn.classList.add("cancelling");
     sendBtn.type = "button";
@@ -668,13 +668,13 @@ form.addEventListener("submit", async (e) => {
     // Collapse any active choice buttons from previous messages
     collapseActiveChoices("Skipped");
 
-    var attachment = pendingAttachment;
+    const attachment = pendingAttachment;
     pendingAttachment = null;
     fileInput.value = "";
     attachmentIndicator.style.display = "none";
     uploadBtn.classList.remove("has-file");
 
-    var displayText = attachment
+    const displayText = attachment
         ? question + "\n\n\uD83D\uDCCE *" + attachment.name + "*"
         : question;
     addMessage("user", displayText);
@@ -738,7 +738,7 @@ form.addEventListener("submit", async (e) => {
                 ensureStreamStarted();
                 // Finalize any previous tool that didn't get a result
                 if (currentToolEl) {
-                    var prevStatus = currentToolEl.querySelector(".tool-status");
+                    const prevStatus = currentToolEl.querySelector(".tool-status");
                     if (prevStatus && prevStatus.classList.contains("running")) {
                         prevStatus.className = "tool-status done";
                         prevStatus.textContent = "done";
@@ -782,7 +782,7 @@ form.addEventListener("submit", async (e) => {
 
             case "cache_hit": {
                 if (currentToolEl) {
-                    var cacheStatus = currentToolEl.querySelector(".tool-status");
+                    const cacheStatus = currentToolEl.querySelector(".tool-status");
                     if (cacheStatus) {
                         cacheStatus.className = "tool-status cached";
                         cacheStatus.textContent = "cached";
@@ -828,7 +828,7 @@ form.addEventListener("submit", async (e) => {
 
             case "agent_start": {
                 ensureStreamStarted();
-                var agentBanner = document.createElement("div");
+                const agentBanner = document.createElement("div");
                 agentBanner.className = "agent-banner agent-running";
                 agentBanner.dataset.agent = data.agent;
                 agentBanner.innerHTML = '<span class="agent-icon">&#9881;</span> ' +
@@ -840,11 +840,11 @@ form.addEventListener("submit", async (e) => {
             }
 
             case "agent_done": {
-                var banners = contentEl.querySelectorAll('.agent-banner[data-agent="' + data.agent + '"]');
+                const banners = contentEl.querySelectorAll('.agent-banner[data-agent="' + data.agent + '"]');
                 banners.forEach(function(b) {
                     b.classList.remove("agent-running");
                     b.classList.add("agent-done");
-                    var statusSpan = b.querySelector(".agent-status");
+                    const statusSpan = b.querySelector(".agent-status");
                     if (statusSpan) statusSpan.textContent = "done";
                 });
                 break;
@@ -875,14 +875,14 @@ form.addEventListener("submit", async (e) => {
 
             case "confidence": {
                 ensureStreamStarted();
-                var level = data.level;
-                var reasons = data.reasons || [];
+                const level = data.level;
+                const reasons = data.reasons || [];
                 if (level === "medium" || level === "low") {
-                    var callout = document.createElement("div");
+                    const callout = document.createElement("div");
                     callout.className = "confidence-callout " + level;
-                    var title = level === "low" ? "Low confidence" : "Medium confidence";
-                    var icon = level === "low" ? "\u26A0\uFE0F" : "\u26A0";
-                    var html = '<div class="confidence-title">' + icon + " " + title + "</div>";
+                    const title = level === "low" ? "Low confidence" : "Medium confidence";
+                    const icon = level === "low" ? "\u26A0\uFE0F" : "\u26A0";
+                    let html = '<div class="confidence-title">' + icon + " " + title + "</div>";
                     if (reasons.length > 0) {
                         html += "<ul>";
                         reasons.forEach(function(r) {
@@ -918,7 +918,7 @@ form.addEventListener("submit", async (e) => {
 
                 // Finalize the live tool-calls wrapper
                 if (liveWrapper && liveSummary) {
-                    var qCount = liveToolCount;
+                    const qCount = liveToolCount;
                     liveSummary.textContent = qCount === 1
                         ? "1 query executed"
                         : qCount + " queries executed";
@@ -927,12 +927,12 @@ form.addEventListener("submit", async (e) => {
                     }
 
                     // Rebuild inner with interleaved thinking text + tool calls
-                    var toolEls = Array.from(liveInner.querySelectorAll(".tool-call"));
+                    const toolEls = Array.from(liveInner.querySelectorAll(".tool-call"));
                     liveInner.replaceChildren();
-                    var chunkIdx = 0;
+                    let chunkIdx = 0;
                     toolEls.forEach(function(tc) {
                         if (chunkIdx < textChunks.length) {
-                            var thinkEl = document.createElement("div");
+                            const thinkEl = document.createElement("div");
                             thinkEl.className = "thinking-text";
                             thinkEl.innerHTML = marked.parse(textChunks[chunkIdx]); // safe: server-generated
                             liveInner.appendChild(thinkEl);
@@ -941,7 +941,7 @@ form.addEventListener("submit", async (e) => {
                         liveInner.appendChild(tc);
                     });
                     while (chunkIdx < textChunks.length) {
-                        var thinkEl2 = document.createElement("div");
+                        const thinkEl2 = document.createElement("div");
                         thinkEl2.className = "thinking-text";
                         thinkEl2.innerHTML = marked.parse(textChunks[chunkIdx]); // safe: server-generated
                         liveInner.appendChild(thinkEl2);
@@ -955,20 +955,20 @@ form.addEventListener("submit", async (e) => {
                 }
 
                 // Scan final text for [confidence: ...] markers from the agent
-                var allTextEls = contentEl.querySelectorAll(".md-text, .md-text-live");
+                const allTextEls = contentEl.querySelectorAll(".md-text, .md-text-live");
                 allTextEls.forEach(function(el) {
-                    var html = el.innerHTML;
-                    var markerRegex = /\[confidence:\s*(medium|low)\s*\|\s*([^\]]+)\]/gi;
-                    var match;
+                    const html = el.innerHTML;
+                    const markerRegex = /\[confidence:\s*(medium|low)\s*\|\s*([^\]]+)\]/gi;
+                    let match;
                     while ((match = markerRegex.exec(html)) !== null) {
-                        var markerLevel = match[1].toLowerCase();
-                        var markerReason = match[2].trim();
+                        const markerLevel = match[1].toLowerCase();
+                        const markerReason = match[2].trim();
                         // Create callout if not already present from SSE event
-                        var existing = contentEl.querySelector(".confidence-callout");
+                        const existing = contentEl.querySelector(".confidence-callout");
                         if (!existing) {
-                            var mc = document.createElement("div");
+                            const mc = document.createElement("div");
                             mc.className = "confidence-callout " + markerLevel;
-                            var mTitle = markerLevel === "low" ? "Low confidence" : "Medium confidence";
+                            const mTitle = markerLevel === "low" ? "Low confidence" : "Medium confidence";
                             mc.innerHTML = '<div class="confidence-title">\u26A0 ' + mTitle + "</div><ul><li>" + markerReason.replace(/</g, "&lt;") + "</li></ul>";
                             contentEl.appendChild(mc);
                         } else {
@@ -978,9 +978,9 @@ form.addEventListener("submit", async (e) => {
                                 existing.classList.add("low");
                                 existing.querySelector(".confidence-title").innerHTML = '\u26A0\uFE0F Low confidence';
                             }
-                            var ul = existing.querySelector("ul");
+                            const ul = existing.querySelector("ul");
                             if (ul) {
-                                var li = document.createElement("li");
+                                const li = document.createElement("li");
                                 li.textContent = markerReason;
                                 ul.appendChild(li);
                             }
@@ -991,8 +991,8 @@ form.addEventListener("submit", async (e) => {
                 });
 
                 // Extract choice buttons from {{choices}} blocks before rendering final text
-                var finalText = currentChunk || fullText;
-                var choicesResult = extractChoices(finalText);
+                let finalText = currentChunk || fullText;
+                const choicesResult = extractChoices(finalText);
                 if (choicesResult) {
                     finalText = choicesResult.cleanedText;
                 }
@@ -1027,7 +1027,7 @@ form.addEventListener("submit", async (e) => {
     }
 
     try {
-        var fullQuestion = question;
+        let fullQuestion = question;
         if (attachment) {
             fullQuestion = question + "\n\n--- Attached file: " + attachment.name + " ---\n" + attachment.content;
         }
@@ -1095,7 +1095,7 @@ form.addEventListener("submit", async (e) => {
             contentEl.querySelectorAll(".agent-banner.agent-running").forEach(function(b) {
                 b.classList.remove("agent-running");
                 b.classList.add("agent-cancelled");
-                var statusSpan = b.querySelector(".agent-status");
+                const statusSpan = b.querySelector(".agent-status");
                 if (statusSpan) statusSpan.textContent = "cancelled";
             });
         } else {
@@ -1199,14 +1199,14 @@ function createToolCall(toolName, toolInput) {
 }
 
 function addExpandCollapseToggle(summaryEl, wrapper) {
-    var toggle = document.createElement("button");
+    const toggle = document.createElement("button");
     toggle.className = "tool-toggle-all";
     toggle.textContent = "Expand all";
     toggle.addEventListener("click", function(e) {
         e.stopPropagation();
-        var inner = wrapper.querySelector(".tool-calls-inner");
-        var details = inner.querySelectorAll("details.tool-call");
-        var allOpen = Array.from(details).every(function(d) { return d.open; });
+        const inner = wrapper.querySelector(".tool-calls-inner");
+        const details = inner.querySelectorAll("details.tool-call");
+        const allOpen = Array.from(details).every(function(d) { return d.open; });
         details.forEach(function(d) { d.open = !allOpen; });
         toggle.textContent = allOpen ? "Expand all" : "Collapse all";
     });
@@ -1215,15 +1215,15 @@ function addExpandCollapseToggle(summaryEl, wrapper) {
 
 function finalizeToolCall(toolEl, toolName, result) {
     const statusSpan = toolEl.querySelector(".tool-status");
-    var wasCached = statusSpan.classList.contains("cached");
+    const wasCached = statusSpan.classList.contains("cached");
     if (result.error) {
         statusSpan.className = "tool-status error";
         statusSpan.textContent = "error";
     } else {
         statusSpan.className = wasCached ? "tool-status cached" : "tool-status done";
-        var prefix = wasCached ? "cached: " : "";
+        const prefix = wasCached ? "cached: " : "";
         if (result.bytes_scanned !== undefined && result.row_count !== undefined) {
-            var mb = (result.bytes_scanned / 1024 / 1024).toFixed(0);
+            const mb = (result.bytes_scanned / 1024 / 1024).toFixed(0);
             statusSpan.textContent = prefix + result.row_count + " rows (" + mb + " MB scanned)";
         } else if (result.row_count !== undefined) {
             statusSpan.textContent = prefix + result.row_count + " rows";
@@ -1260,8 +1260,8 @@ function renderChart(data) {
     wrapper.appendChild(canvas);
 
     const datasets = (data.datasets || []).map(function(ds, i) {
-        var colors = CHART_COLORS[i % CHART_COLORS.length];
-        var config = {
+        const colors = CHART_COLORS[i % CHART_COLORS.length];
+        const config = {
             label: ds.label,
             data: ds.data,
         };
@@ -1282,17 +1282,17 @@ function renderChart(data) {
     });
 
     // Auto-detect if values span multiple orders of magnitude → use log scale
-    var allValues = datasets.flatMap(function(ds) { return ds.data; }).filter(function(v) { return v > 0; });
-    var useLog = false;
+    const allValues = datasets.flatMap(function(ds) { return ds.data; }).filter(function(v) { return v > 0; });
+    let useLog = false;
     if (allValues.length >= 2) {
-        var maxVal = Math.max.apply(null, allValues);
-        var minVal = Math.min.apply(null, allValues);
+        const maxVal = Math.max.apply(null, allValues);
+        const minVal = Math.min.apply(null, allValues);
         if (minVal > 0 && maxVal / minVal > 100) {
             useLog = true;
         }
     }
 
-    var chartInstance = new Chart(canvas, {
+    const chartInstance = new Chart(canvas, {
         type: data.chart_type,
         data: {
             labels: data.labels,
@@ -1327,30 +1327,30 @@ function renderChart(data) {
     });
 
     // Export buttons
-    var exportBar = document.createElement("div");
+    const exportBar = document.createElement("div");
     exportBar.className = "chart-export-bar";
 
-    var pngBtn = document.createElement("button");
+    const pngBtn = document.createElement("button");
     pngBtn.className = "chart-export-btn";
     pngBtn.textContent = "Export PNG";
     pngBtn.addEventListener("click", function() {
-        var link = document.createElement("a");
+        const link = document.createElement("a");
         link.download = (data.title || "chart").replace(/[^a-z0-9]/gi, "_") + ".png";
         link.href = canvas.toDataURL("image/png");
         link.click();
     });
 
-    var csvBtn = document.createElement("button");
+    const csvBtn = document.createElement("button");
     csvBtn.className = "chart-export-btn";
     csvBtn.textContent = "Export CSV";
     csvBtn.addEventListener("click", function() {
-        var rows = ["Label," + data.datasets.map(function(ds) { return ds.label; }).join(",")];
+        const rows = ["Label," + data.datasets.map(function(ds) { return ds.label; }).join(",")];
         data.labels.forEach(function(label, i) {
-            var vals = data.datasets.map(function(ds) { return ds.data[i]; });
+            const vals = data.datasets.map(function(ds) { return ds.data[i]; });
             rows.push(label + "," + vals.join(","));
         });
-        var blob = new Blob([rows.join("\n")], { type: "text/csv" });
-        var link = document.createElement("a");
+        const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+        const link = document.createElement("a");
         link.download = (data.title || "chart").replace(/[^a-z0-9]/gi, "_") + ".csv";
         link.href = URL.createObjectURL(blob);
         link.click();
@@ -1364,36 +1364,36 @@ function renderChart(data) {
 }
 
 function createResponseExportBar(messageEl) {
-    var bar = document.createElement("div");
+    const bar = document.createElement("div");
     bar.className = "response-export-bar";
 
-    var toolResults = messageEl._exportToolResults || [];
+    const toolResults = messageEl._exportToolResults || [];
 
     if (toolResults.length > 0) {
-        var csvBtn = document.createElement("button");
+        const csvBtn = document.createElement("button");
         csvBtn.className = "response-export-btn";
         csvBtn.textContent = "Export CSV";
         csvBtn.addEventListener("click", function() { exportResponseAsCSV(messageEl); });
         bar.appendChild(csvBtn);
 
-        var jsonBtn = document.createElement("button");
+        const jsonBtn = document.createElement("button");
         jsonBtn.className = "response-export-btn";
         jsonBtn.textContent = "Export JSON";
         jsonBtn.addEventListener("click", function() { exportResponseAsJSON(messageEl); });
         bar.appendChild(jsonBtn);
     }
 
-    var mdBtn = document.createElement("button");
+    const mdBtn = document.createElement("button");
     mdBtn.className = "response-export-btn";
     mdBtn.textContent = "Export MD";
     mdBtn.addEventListener("click", function() { exportResponseAsMarkdown(messageEl); });
 
-    var pdfBtn = document.createElement("button");
+    const pdfBtn = document.createElement("button");
     pdfBtn.className = "response-export-btn";
     pdfBtn.textContent = "Export PDF";
     pdfBtn.addEventListener("click", function() { exportResponseAsPDF(messageEl); });
 
-    var shareBtn = document.createElement("button");
+    const shareBtn = document.createElement("button");
     shareBtn.className = "response-export-btn";
     shareBtn.textContent = "Share";
     shareBtn.addEventListener("click", async function() {
@@ -1401,18 +1401,18 @@ function createResponseExportBar(messageEl) {
         shareBtn.disabled = true;
         shareBtn.textContent = "Sharing...";
         try {
-            var resp = await fetch("/api/share", {
+            const resp = await fetch("/api/share", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ messages: conversationHistory }),
             });
             if (!resp.ok) {
-                var err = await resp.json().catch(function() { return {}; });
+                const err = await resp.json().catch(function() { return {}; });
                 alert(err.detail || "Failed to create share link");
                 return;
             }
-            var data = await resp.json();
-            var shareUrl = window.location.origin + "/?share=" + data.id;
+            const data = await resp.json();
+            const shareUrl = window.location.origin + "/?share=" + data.id;
             document.getElementById("share-link-input").value = shareUrl;
             document.getElementById("share-modal").style.display = "flex";
         } catch (e) {
@@ -1430,26 +1430,26 @@ function createResponseExportBar(messageEl) {
 }
 
 function exportResponseAsMarkdown(messageEl) {
-    var md = messageEl._exportMarkdown || "";
-    var charts = messageEl._exportCharts || [];
+    let md = messageEl._exportMarkdown || "";
+    const charts = messageEl._exportCharts || [];
 
     // Append chart images as base64 inline images
     charts.forEach(function(c) {
-        var dataUrl = c.canvas.toDataURL("image/png");
+        const dataUrl = c.canvas.toDataURL("image/png");
         md += "\n\n![" + c.title + "](" + dataUrl + ")\n";
     });
 
-    var blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
-    var link = document.createElement("a");
-    var timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const link = document.createElement("a");
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
     link.download = "parsec-" + timestamp + ".md";
     link.href = URL.createObjectURL(blob);
     link.click();
 }
 
 function exportResponseAsPDF(messageEl) {
-    var contentEl = messageEl.querySelector(".content");
-    var clone = contentEl.cloneNode(true);
+    const contentEl = messageEl.querySelector(".content");
+    const clone = contentEl.cloneNode(true);
 
     // Remove export bars and tool summaries from clone
     clone.querySelectorAll(".response-export-bar, .chart-export-bar, .tool-calls-summary").forEach(function(el) {
@@ -1457,10 +1457,10 @@ function exportResponseAsPDF(messageEl) {
     });
 
     // Replace canvases with static images
-    var origCanvases = contentEl.querySelectorAll("canvas");
-    var cloneCanvases = clone.querySelectorAll("canvas");
-    for (var i = 0; i < origCanvases.length; i++) {
-        var img = document.createElement("img");
+    const origCanvases = contentEl.querySelectorAll("canvas");
+    const cloneCanvases = clone.querySelectorAll("canvas");
+    for (let i = 0; i < origCanvases.length; i++) {
+        const img = document.createElement("img");
         img.src = origCanvases[i].toDataURL("image/png");
         img.style.maxWidth = "100%";
         cloneCanvases[i].parentNode.replaceChild(img, cloneCanvases[i]);
@@ -1499,55 +1499,55 @@ function exportResponseAsPDF(messageEl) {
     html2canvas(clone, { scale: 2, useCORS: true }).then(function(canvas) {
         document.body.removeChild(clone);
 
-        var jsPDF = window.jspdf.jsPDF;
+        const jsPDF = window.jspdf.jsPDF;
 
         // A4 dimensions in pt
-        var pageW = 595.28;
-        var pageH = 841.89;
-        var margin = 20;
-        var contentW = pageW - margin * 2;
-        var contentH = pageH - margin * 2;
+        const pageW = 595.28;
+        const pageH = 841.89;
+        const margin = 20;
+        const contentW = pageW - margin * 2;
+        const contentH = pageH - margin * 2;
 
         // How many source pixels correspond to one page of content
-        var scale = canvas.width / contentW;
-        var sliceH = Math.floor(contentH * scale);
+        const scale = canvas.width / contentW;
+        const sliceH = Math.floor(contentH * scale);
 
-        var doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
-        var yPx = 0;
-        var pageNum = 0;
+        const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+        let yPx = 0;
+        let pageNum = 0;
 
         while (yPx < canvas.height) {
             if (pageNum > 0) doc.addPage();
-            var h = Math.min(sliceH, canvas.height - yPx);
+            const h = Math.min(sliceH, canvas.height - yPx);
 
             // Crop this page's slice from the full canvas
-            var pageCanvas = document.createElement("canvas");
+            const pageCanvas = document.createElement("canvas");
             pageCanvas.width = canvas.width;
             pageCanvas.height = h;
-            var ctx = pageCanvas.getContext("2d");
+            const ctx = pageCanvas.getContext("2d");
             ctx.drawImage(canvas, 0, yPx, canvas.width, h, 0, 0, canvas.width, h);
 
-            var pageImg = pageCanvas.toDataURL("image/png");
-            var drawH = h / scale;
+            const pageImg = pageCanvas.toDataURL("image/png");
+            const drawH = h / scale;
             doc.addImage(pageImg, "PNG", margin, margin, contentW, drawH);
 
             yPx += sliceH;
             pageNum++;
         }
 
-        var timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
         doc.save("parsec-" + timestamp + ".pdf");
     });
 }
 
 function exportResponseAsJSON(messageEl) {
-    var toolResults = messageEl._exportToolResults || [];
+    const toolResults = messageEl._exportToolResults || [];
     if (toolResults.length === 0) return;
 
-    var json = JSON.stringify(toolResults, null, 2);
-    var blob = new Blob([json], { type: "application/json;charset=utf-8" });
-    var link = document.createElement("a");
-    var timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+    const json = JSON.stringify(toolResults, null, 2);
+    const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+    const link = document.createElement("a");
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
     link.download = "parsec-" + timestamp + ".json";
     link.href = URL.createObjectURL(blob);
     link.click();
@@ -1555,7 +1555,7 @@ function exportResponseAsJSON(messageEl) {
 
 function csvEscapeField(value) {
     if (value === null || value === undefined) return "";
-    var str = String(value);
+    const str = String(value);
     if (str.indexOf(",") >= 0 || str.indexOf('"') >= 0 || str.indexOf("\n") >= 0) {
         return '"' + str.replace(/"/g, '""') + '"';
     }
@@ -1564,17 +1564,17 @@ function csvEscapeField(value) {
 
 function parseMarkdownTable(str) {
     // Parse a markdown table string into an array of objects
-    var lines = str.split("\n").filter(function(l) { return l.trim().indexOf("|") === 0; });
+    const lines = str.split("\n").filter(function(l) { return l.trim().indexOf("|") === 0; });
     if (lines.length < 3) return null; // need header + separator + at least one row
     // Check that the second line is a separator (| --- | --- |)
     if (!/^\|[\s\-:|]+\|$/.test(lines[1].trim())) return null;
-    var headers = lines[0].split("|").slice(1, -1).map(function(h) { return h.trim(); });
+    const headers = lines[0].split("|").slice(1, -1).map(function(h) { return h.trim(); });
     if (headers.length === 0) return null;
-    var rows = [];
-    for (var i = 2; i < lines.length; i++) {
-        var cells = lines[i].split("|").slice(1, -1).map(function(c) { return c.trim(); });
+    const rows = [];
+    for (let i = 2; i < lines.length; i++) {
+        const cells = lines[i].split("|").slice(1, -1).map(function(c) { return c.trim(); });
         if (cells.length !== headers.length) continue;
-        var obj = {};
+        const obj = {};
         headers.forEach(function(h, idx) { obj[h] = cells[idx]; });
         rows.push(obj);
     }
@@ -1586,19 +1586,19 @@ function parseAllMarkdownTables(str) {
     // Returns an array of {title: string, rows: array} objects
     if (typeof str !== "string") return [];
 
-    var allLines = str.split("\n");
-    var tables = [];
-    var i = 0;
+    const allLines = str.split("\n");
+    const tables = [];
+    let i = 0;
 
     while (i < allLines.length) {
-        var line = allLines[i].trim();
+        const line = allLines[i].trim();
 
         // Look for table start (line with |)
         if (line.indexOf("|") === 0) {
             // Try to find preceding header (lines starting with ##)
-            var title = null;
-            for (var j = i - 1; j >= Math.max(0, i - 5); j--) {
-                var prevLine = allLines[j].trim();
+            let title = null;
+            for (let j = i - 1; j >= Math.max(0, i - 5); j--) {
+                const prevLine = allLines[j].trim();
                 if (prevLine.match(/^#{1,6}\s+(.+)$/)) {
                     title = prevLine.replace(/^#{1,6}\s+/, "");
                     break;
@@ -1611,15 +1611,15 @@ function parseAllMarkdownTables(str) {
             }
 
             // Collect all consecutive table lines
-            var tableLines = [];
+            const tableLines = [];
             while (i < allLines.length && allLines[i].trim().indexOf("|") === 0) {
                 tableLines.push(allLines[i]);
                 i++;
             }
 
             // Parse this table
-            var tableStr = tableLines.join("\n");
-            var parsed = parseMarkdownTable(tableStr);
+            const tableStr = tableLines.join("\n");
+            const parsed = parseMarkdownTable(tableStr);
             if (parsed && parsed.length > 0) {
                 tables.push({
                     title: title || "Table " + (tables.length + 1),
@@ -1641,18 +1641,18 @@ function findTabularData(result) {
     }
     if (typeof result !== "object" || result === null) return null;
     // Search top-level fields for the first array of objects
-    var keys = Object.keys(result);
-    for (var i = 0; i < keys.length; i++) {
-        var val = result[keys[i]];
+    const keys = Object.keys(result);
+    for (let i = 0; i < keys.length; i++) {
+        const val = result[keys[i]];
         if (Array.isArray(val) && val.length > 0 && typeof val[0] === "object" && val[0] !== null) {
             return val;
         }
     }
     // Fallback: try to parse markdown tables from string fields
-    for (var j = 0; j < keys.length; j++) {
-        var sval = result[keys[j]];
+    for (let j = 0; j < keys.length; j++) {
+        const sval = result[keys[j]];
         if (typeof sval === "string" && sval.indexOf("|") >= 0) {
-            var parsed = parseMarkdownTable(sval);
+            const parsed = parseMarkdownTable(sval);
             if (parsed) return parsed;
         }
     }
@@ -1660,23 +1660,23 @@ function findTabularData(result) {
 }
 
 function exportResponseAsCSV(messageEl) {
-    var toolResults = messageEl._exportToolResults || [];
+    const toolResults = messageEl._exportToolResults || [];
     if (toolResults.length === 0) return;
 
-    var csvSections = [];
+    const csvSections = [];
 
     toolResults.forEach(function(tr) {
         // First try to find tabular data in the result
-        var rows = findTabularData(tr.result);
+        const rows = findTabularData(tr.result);
 
         // For report generation tools, also check input.content for markdown tables
         if (!rows && tr.tool === "generate_report" && tr.input && tr.input.content) {
-            var tables = parseAllMarkdownTables(tr.input.content);
+            const tables = parseAllMarkdownTables(tr.input.content);
             if (tables.length > 0) {
                 // Export each table as a separate CSV section
                 tables.forEach(function(table) {
-                    var headers = [];
-                    var headerSet = {};
+                    const headers = [];
+                    const headerSet = {};
                     table.rows.forEach(function(row) {
                         Object.keys(row).forEach(function(key) {
                             if (!headerSet[key]) {
@@ -1686,12 +1686,12 @@ function exportResponseAsCSV(messageEl) {
                         });
                     });
 
-                    var lines = [];
+                    const lines = [];
                     lines.push("# " + table.title);
                     lines.push(headers.map(csvEscapeField).join(","));
                     table.rows.forEach(function(row) {
-                        var vals = headers.map(function(h) {
-                            var val = row[h];
+                        const vals = headers.map(function(h) {
+                            let val = row[h];
                             if (typeof val === "object" && val !== null) val = JSON.stringify(val);
                             return csvEscapeField(val);
                         });
@@ -1707,8 +1707,8 @@ function exportResponseAsCSV(messageEl) {
         // If we found rows in the result, export them
         if (rows) {
             // Collect all unique column headers across all rows
-            var headers = [];
-            var headerSet = {};
+            const headers = [];
+            const headerSet = {};
             rows.forEach(function(row) {
                 Object.keys(row).forEach(function(key) {
                     if (!headerSet[key]) {
@@ -1718,15 +1718,15 @@ function exportResponseAsCSV(messageEl) {
                 });
             });
 
-            var lines = [];
+            const lines = [];
             // Section header comment
             lines.push("# " + (tr.tool || "results"));
             // Column headers
             lines.push(headers.map(csvEscapeField).join(","));
             // Data rows
             rows.forEach(function(row) {
-                var vals = headers.map(function(h) {
-                    var val = row[h];
+                const vals = headers.map(function(h) {
+                    let val = row[h];
                     if (typeof val === "object" && val !== null) val = JSON.stringify(val);
                     return csvEscapeField(val);
                 });
@@ -1740,11 +1740,11 @@ function exportResponseAsCSV(messageEl) {
     // Fallback: if no tabular data found, export as key-value pairs
     if (csvSections.length === 0) {
         toolResults.forEach(function(tr) {
-            var lines = [];
+            const lines = [];
             lines.push("# " + (tr.tool || "results"));
             lines.push("key,value");
             Object.keys(tr.result || {}).forEach(function(key) {
-                var val = tr.result[key];
+                let val = tr.result[key];
                 if (typeof val === "object" && val !== null) val = JSON.stringify(val);
                 lines.push(csvEscapeField(key) + "," + csvEscapeField(val));
             });
@@ -1752,18 +1752,18 @@ function exportResponseAsCSV(messageEl) {
         });
     }
 
-    var csv = csvSections.join("\n\n");
-    var blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    var link = document.createElement("a");
-    var timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+    const csv = csvSections.join("\n\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const link = document.createElement("a");
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
     link.download = "parsec-" + timestamp + ".csv";
     link.href = URL.createObjectURL(blob);
     link.click();
 }
 
 function renderSharedMessages(messages, interactive) {
-    // Build tool_use_id → tool_result map for reconstructing reports/charts
-    var toolResultMap = {};
+    // Build tool_use_id → tool_result map for reconst ructing reports/charts
+    const toolResultMap = {};
     messages.forEach(function(msg) {
         if (msg.role !== "user" || !Array.isArray(msg.content)) return;
         msg.content.forEach(function(block) {
@@ -1780,29 +1780,29 @@ function renderSharedMessages(messages, interactive) {
     // Pre-process: collapse fast-path sub-agent intermediate messages.
     // Pattern: assistant(tool_use) → user(tool_result only) → assistant(tool_use) → ...
     // Collapse into one combined message, keeping only the final assistant text.
-    var collapsed = [];
-    var i = 0;
+    const collapsed = [];
+    let i = 0;
     while (i < messages.length) {
-        var msg = messages[i];
+        const msg = messages[i];
         if (msg.role === "assistant" && Array.isArray(msg.content)) {
-            var hasToolUse = msg.content.some(function(b) { return b.type === "tool_use"; });
+            const hasToolUse = msg.content.some(function(b) { return b.type === "tool_use"; });
             if (hasToolUse) {
                 // Look ahead: is the next message a tool_result-only user message?
-                var groupToolCalls = [];
-                var groupToolUseIds = [];
-                var finalText = [];
-                var j = i;
+                const groupToolCalls = [];
+                const groupToolUseIds = [];
+                let finalText = [];
+                let j = i;
                 while (j < messages.length) {
-                    var cur = messages[j];
+                    const cur = messages[j];
                     if (cur.role === "assistant" && Array.isArray(cur.content)) {
-                        var curTools = cur.content.filter(function(b) { return b.type === "tool_use"; });
-                        var curText = cur.content.filter(function(b) { return b.type === "text" && b.text; });
+                        const curTools = cur.content.filter(function(b) { return b.type === "tool_use"; });
+                        const curText = cur.content.filter(function(b) { return b.type === "text" && b.text; });
                         curTools.forEach(function(t) { groupToolCalls.push(t); groupToolUseIds.push(t.id); });
                         if (curText.length > 0) finalText = curText;
                         // Check if next is tool_result-only user message
-                        var next = messages[j + 1];
+                        const next = messages[j + 1];
                         if (next && next.role === "user" && Array.isArray(next.content)) {
-                            var hasRealText = next.content.some(function(b) {
+                            const hasRealText = next.content.some(function(b) {
                                 return b.type !== "tool_result" && b.text && b.text.trim();
                             });
                             if (!hasRealText) {
@@ -1815,7 +1815,7 @@ function renderSharedMessages(messages, interactive) {
                 }
                 if (j > i) {
                     // We collapsed multiple messages — create a combined one
-                    var combinedContent = [];
+                    const combinedContent = [];
                     groupToolCalls.forEach(function(t) { combinedContent.push(t); });
                     finalText.forEach(function(t) { combinedContent.push(t); });
                     collapsed.push({ role: "assistant", content: combinedContent, _collapsedToolIds: groupToolUseIds });
@@ -1830,31 +1830,31 @@ function renderSharedMessages(messages, interactive) {
 
     collapsed.forEach(function(msg, msgIdx) {
         if (msg.role === "user") {
-            var text = msg.content;
+            let text = msg.content;
             if (Array.isArray(text)) {
-                var userParts = text.filter(function(b) { return b.type !== "tool_result"; });
+                const userParts = text.filter(function(b) { return b.type !== "tool_result"; });
                 text = userParts.map(function(b) { return b.text || ""; }).join("");
             }
             if (!text.trim()) return;
             addMessage("user", text);
         } else if (msg.role === "assistant") {
-            var el = addMessage("assistant", "");
-            var contentEl = el.querySelector(".content");
-            var content = msg.content;
-            var restoredText = "";
-            var restoredCharts = [];
-            var restoredToolResults = [];
+            const el = addMessage("assistant", "");
+            const contentEl = el.querySelector(".content");
+            const content = msg.content;
+            let restoredText = "";
+            const restoredCharts = [];
+            const restoredToolResults = [];
 
             if (typeof content === "string") {
                 restoredText = content;
-                var textDiv = document.createElement("div");
+                const textDiv = document.createElement("div");
                 textDiv.className = "md-text";
                 textDiv.innerHTML = marked.parse(content);
                 contentEl.appendChild(textDiv);
             } else if (Array.isArray(content)) {
-                var toolCalls = [];
-                var textParts = [];
-                var delegations = [];
+                const toolCalls = [];
+                const textParts = [];
+                let delegations = [];
 
                 content.forEach(function(block) {
                     if (block.type === "text" && block.text) {
@@ -1867,21 +1867,21 @@ function renderSharedMessages(messages, interactive) {
                 // Show tool calls as collapsed summary
                 if (toolCalls.length > 0) {
                     // Count total queries including sub-agent tool calls
-                    var agentNames = {
+                    const agentNames = {
                         cost: "Cost Investigation", aap2: "AAP2 Investigation",
                         babylon: "Babylon Investigation", security: "Security Investigation",
                         ocpv: "OCPV Investigation", icinga: "Icinga Investigation"
                     };
-                    var delegationTools = {
+                    const delegationTools = {
                         investigate_costs: "cost", investigate_aap2_job: "aap2",
                         investigate_babylon: "babylon", investigate_security: "security",
                         investigate_ocpv: "ocpv", investigate_icinga: "icinga"
                     };
-                    var totalQueries = 0;
-                    var delegations = [];
+                    let totalQueries = 0;
+                    delegations = [];
                     toolCalls.forEach(function(tc) {
-                        var result = toolResultMap[tc.id];
-                        var isDelegation = tc.name in delegationTools;
+                        const result = toolResultMap[tc.id];
+                        const isDelegation = tc.name in delegationTools;
                         if (isDelegation && result && result.tool_calls) {
                             totalQueries += result.tool_calls;
                             delegations.push({ tc: tc, result: result, agentType: delegationTools[tc.name] });
@@ -1893,9 +1893,9 @@ function renderSharedMessages(messages, interactive) {
                         }
                     });
 
-                    var wrapper = document.createElement("details");
+                    const wrapper = document.createElement("details");
                     wrapper.className = "tool-calls-summary";
-                    var tcSummaryEl = document.createElement("summary");
+                    const tcSummaryEl = document.createElement("summary");
                     tcSummaryEl.textContent = totalQueries === 1
                         ? "1 query executed"
                         : totalQueries + " queries executed";
@@ -1903,28 +1903,28 @@ function renderSharedMessages(messages, interactive) {
                         addExpandCollapseToggle(tcSummaryEl, wrapper);
                     }
                     wrapper.appendChild(tcSummaryEl);
-                    var inner = document.createElement("div");
+                    const inner = document.createElement("div");
                     inner.className = "tool-calls-inner";
                     toolCalls.forEach(function(tc) {
                         if (tc.name in delegationTools) return;
-                        var tcEl = document.createElement("details");
+                        const tcEl = document.createElement("details");
                         tcEl.className = "tool-call";
-                        var tcSummary = document.createElement("summary");
-                        var nameSpan = document.createElement("span");
+                        const tcSummary = document.createElement("summary");
+                        const nameSpan = document.createElement("span");
                         nameSpan.className = "tool-name";
                         nameSpan.textContent = tc.name || "tool";
-                        var statusSpan = document.createElement("span");
+                        const statusSpan = document.createElement("span");
                         statusSpan.className = "tool-status done";
                         statusSpan.textContent = "done";
                         tcSummary.appendChild(nameSpan);
                         tcSummary.appendChild(statusSpan);
                         tcEl.appendChild(tcSummary);
-                        var body = document.createElement("div");
+                        const body = document.createElement("div");
                         body.className = "tool-body";
                         body.textContent = JSON.stringify(tc.input || {}, null, 2);
 
                         // Append tool result if available
-                        var result = toolResultMap[tc.id];
+                        const result = toolResultMap[tc.id];
                         if (result && typeof result === "object") {
                             body.textContent += "\n\n--- Result ---\n" + JSON.stringify(result, null, 2);
                         }
@@ -1937,19 +1937,19 @@ function renderSharedMessages(messages, interactive) {
 
                     // Render sub-agent banners and findings for delegations
                     delegations.forEach(function(d) {
-                        var agentType = d.agentType || d.result.agent || "unknown";
-                        var agentLabel = agentNames[agentType] || agentType;
+                        const agentType = d.agentType || d.result.agent || "unknown";
+                        const agentLabel = agentNames[agentType] || agentType;
 
-                        var agentBanner = document.createElement("div");
+                        const agentBanner = document.createElement("div");
                         agentBanner.className = "agent-banner agent-done";
                         agentBanner.dataset.agent = agentType;
-                        var iconSpan = document.createElement("span");
+                        const iconSpan = document.createElement("span");
                         iconSpan.className = "agent-icon";
                         iconSpan.textContent = "\u2699";
-                        var labelSpan = document.createElement("span");
+                        const labelSpan = document.createElement("span");
                         labelSpan.className = "agent-label";
                         labelSpan.textContent = agentLabel;
-                        var statusSpan2 = document.createElement("span");
+                        const statusSpan2 = document.createElement("span");
                         statusSpan2.className = "agent-status";
                         statusSpan2.textContent = "done";
                         agentBanner.appendChild(iconSpan);
@@ -1960,15 +1960,15 @@ function renderSharedMessages(messages, interactive) {
                         contentEl.appendChild(agentBanner);
 
                         // Render sub-agent summary as markdown (server-generated, not user input)
-                        var summaryText = d.result.summary || "";
+                        let summaryText = d.result.summary || "";
                         if (!summaryText.trim()) {
-                            var findings = d.result.findings || [];
+                            const findings = d.result.findings || [];
                             summaryText = findings.filter(function(f) {
                                 return typeof f === "string" && !f.startsWith("[Tool:");
                             }).join("\n\n");
                         }
                         if (summaryText.trim()) {
-                            var findingsDiv = document.createElement("div");
+                            const findingsDiv = document.createElement("div");
                             findingsDiv.className = "md-text";
                             findingsDiv.innerHTML = marked.parse(summaryText); // safe: server-generated markdown
                             contentEl.appendChild(findingsDiv);
@@ -1976,13 +1976,13 @@ function renderSharedMessages(messages, interactive) {
                         }
                     });
 
-                    // Reconstruct report download links and charts
+                    // Reconst ruct report download links and charts
                     toolCalls.forEach(function(tc) {
-                        var result = toolResultMap[tc.id];
+                        const result = toolResultMap[tc.id];
                         if (!result || typeof result !== "object" || result.error) return;
 
                         if (tc.name === "generate_report" && result.filename) {
-                            var link = document.createElement("a");
+                            const link = document.createElement("a");
                             link.className = "report-download";
                             link.href = "/api/reports/" + result.filename;
                             link.download = result.filename;
@@ -1990,14 +1990,14 @@ function renderSharedMessages(messages, interactive) {
                             contentEl.appendChild(link);
                         } else if (tc.name === "render_chart" && result.datasets) {
                             try {
-                                var chartEl = renderChart(result);
+                                const chartEl = renderChart(result);
                                 contentEl.appendChild(chartEl);
-                                var chartCanvas = chartEl.querySelector("canvas");
+                                const chartCanvas = chartEl.querySelector("canvas");
                                 if (chartCanvas) {
                                     restoredCharts.push({ title: result.title || "chart", canvas: chartCanvas });
                                 }
                             } catch (e) {
-                                console.warn("Failed to reconstruct chart:", e);
+                                console.warn("Failed to reconst ruct chart:", e);
                             }
                         }
                     });
@@ -2006,18 +2006,18 @@ function renderSharedMessages(messages, interactive) {
                 // Render text content (skip if delegations already rendered summaries)
                 restoredText = textParts.join("");
                 if (restoredText.trim() && delegations.length === 0) {
-                    var sharedChoices = extractChoices(restoredText);
-                    var renderText = sharedChoices ? sharedChoices.cleanedText : restoredText;
-                    var textDiv2 = document.createElement("div");
+                    const sharedChoices = extractChoices(restoredText);
+                    const renderText = sharedChoices ? sharedChoices.cleanedText : restoredText;
+                    const textDiv2 = document.createElement("div");
                     textDiv2.className = "md-text";
                     textDiv2.innerHTML = marked.parse(renderText);  // safe: server-generated markdown
                     contentEl.appendChild(textDiv2);
                     if (sharedChoices) {
-                        var isLastMsg = (msgIdx === messages.length - 1);
+                        const isLastMsg = (msgIdx === messages.length - 1);
                         if (interactive && isLastMsg) {
                             contentEl.appendChild(renderChoices(sharedChoices.options, sharedChoices.multi));
                         } else {
-                            var choicesSummary = document.createElement("div");
+                            const choicesSummary = document.createElement("div");
                             choicesSummary.className = "choices-summary";
                             choicesSummary.textContent = "Choices were presented";
                             contentEl.appendChild(choicesSummary);
@@ -2045,9 +2045,9 @@ function scrollToBottom() {
 
 // ─── Debug Automation ───
 
-var debugViewEl = document.getElementById("debug-view");
-var chatEl = document.getElementById("chat");
-var footerEl = document.querySelector("footer");
+const debugViewEl = document.getElementById("debug-view");
+const chatEl = document.getElementById("chat");
+const footerEl = document.querySelector("footer");
 
 function showDebugView() {
     chatEl.style.display = "none";
@@ -2063,20 +2063,20 @@ function showChatView() {
 }
 
 // Debug state
-var debugResult = null;
-var debugCorrelation = null;
-var debugEEInfo = null;
-var debugActiveTab = "triage";
-var debugUrl = "";
+let debugResult = null;
+let debugCorrelation = null;
+let debugEEInfo = null;
+let debugActiveTab = "triage";
+let debugUrl = "";
 
-var debugUrlInput = document.getElementById("debug-url");
-var debugDiagnoseBtn = document.getElementById("debug-diagnose-btn");
-var debugErrorEl = document.getElementById("debug-error");
-var debugLoadingEl = document.getElementById("debug-loading");
-var debugResultEl = document.getElementById("debug-result");
-var debugSummaryEl = document.getElementById("debug-summary");
-var debugTabContentEl = document.getElementById("debug-tab-content");
-var debugFixPreviewEl = document.getElementById("debug-fix-preview");
+const debugUrlInput = document.getElementById("debug-url");
+const debugDiagnoseBtn = document.getElementById("debug-diagnose-btn");
+const debugErrorEl = document.getElementById("debug-error");
+const debugLoadingEl = document.getElementById("debug-loading");
+const debugResultEl = document.getElementById("debug-result");
+const debugSummaryEl = document.getElementById("debug-summary");
+const debugTabContentEl = document.getElementById("debug-tab-content");
+const debugFixPreviewEl = document.getElementById("debug-fix-preview");
 
 debugDiagnoseBtn.addEventListener("click", runDiagnosis);
 debugUrlInput.addEventListener("keydown", function(e) {
@@ -2084,7 +2084,7 @@ debugUrlInput.addEventListener("keydown", function(e) {
 });
 
 function runDiagnosis() {
-    var url = debugUrlInput.value.trim();
+    const url = debugUrlInput.value.trim();
     if (!url) return;
 
     debugUrl = url;
@@ -2125,12 +2125,12 @@ function formatElapsed(seconds) {
     if (!seconds) return "\u2014";
     if (seconds < 60) return Math.round(seconds) + "s";
     if (seconds < 3600) {
-        var mins = Math.floor(seconds / 60);
-        var secs = Math.round(seconds % 60);
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.round(seconds % 60);
         return secs > 0 ? mins + "m " + secs + "s" : mins + "m";
     }
-    var hours = Math.floor(seconds / 3600);
-    var mins2 = Math.floor((seconds % 3600) / 60);
+    const hours = Math.floor(seconds / 3600);
+    const mins2 = Math.floor((seconds % 3600) / 60);
     return mins2 > 0 ? hours + "h " + mins2 + "m" : hours + "h";
 }
 
@@ -2140,14 +2140,14 @@ function statusColor(status) {
 
 function escHtml(s) {
     if (!s) return "";
-    var d = document.createElement("div");
+    const d = document.createElement("div");
     d.textContent = s;
     return d.innerHTML;
 }
 
 function renderDebugResult() {
     if (!debugResult) return;
-    var m = debugResult.metadata;
+    const m = debugResult.metadata;
 
     debugSummaryEl.innerHTML =
         '<span class="debug-status-label ' + statusColor(m.status) + '">' + escHtml(m.status) + '</span>' +
@@ -2156,7 +2156,7 @@ function renderDebugResult() {
         '<span>' + formatElapsed(m.elapsed) + '</span>';
 
     debugResultEl.style.display = "block";
-    var tabs = debugResultEl.querySelectorAll(".debug-tab");
+    const tabs = debugResultEl.querySelectorAll(".debug-tab");
     tabs.forEach(function(tab) {
         tab.onclick = function() {
             debugActiveTab = tab.getAttribute("data-tab");
@@ -2185,8 +2185,8 @@ function renderDebugTab() {
 }
 
 function renderTriageTab() {
-    var m = debugResult.metadata;
-    var html = '<dl class="debug-dl">';
+    const m = debugResult.metadata;
+    let html = '<dl class="debug-dl">';
     html += '<dt>Status</dt><dd>' + escHtml(m.status) + '</dd>';
     html += '<dt>Action</dt><dd>' + escHtml(m.action) + '</dd>';
     html += '<dt>Started</dt><dd>' + (m.started ? new Date(m.started).toLocaleString() : "\u2014") + '</dd>';
@@ -2202,34 +2202,34 @@ function renderTriageTab() {
 }
 
 function renderFailingTaskTab() {
-    var ft = debugResult.failingTask;
+    const ft = debugResult.failingTask;
     if (!ft) {
         debugTabContentEl.innerHTML = '<p class="debug-empty">No failing task information available.</p>';
         return;
     }
-    var html = '<dl class="debug-dl">';
+    let html = '<dl class="debug-dl">';
     html += '<dt>Task</dt><dd>' + escHtml(ft.taskName) + '</dd>';
     if (ft.roleFqcn) html += '<dt>Role</dt><dd>' + escHtml(ft.roleFqcn) + '</dd>';
     if (ft.hostPattern) html += '<dt>Host</dt><dd>' + escHtml(ft.hostPattern) + '</dd>';
     if (ft.filePath) html += '<dt>File</dt><dd><code>' + escHtml(ft.filePath) + '</code></dd>';
 
-    var pi = debugResult.projectInfo;
+    const pi = debugResult.projectInfo;
     if (pi) {
-        var ref = pi.scmBranch || pi.scmRevision || "\u2014";
-        var link = "";
+        const ref = pi.scmBranch || pi.scmRevision || "\u2014";
+        let link = "";
         if (pi.scmUrl) {
-            var repoMatch = pi.scmUrl.match(/github\.com[:/]([^/]+\/[^/.]+)/);
+            const repoMatch = pi.scmUrl.match(/github\.com[:/]([^/]+\/[^/.]+)/);
             if (repoMatch) {
-                var ghRef = pi.scmBranch || pi.scmRevision || "main";
+                const ghRef = pi.scmBranch || pi.scmRevision || "main";
                 link = ' <a href="https://github.com/' + repoMatch[1] + '/tree/' + ghRef + '" target="_blank" rel="noopener" class="debug-link">View in GitHub</a>';
             }
         }
         html += '<dt>SCM Ref</dt><dd><code>' + escHtml(ref) + '</code>' + link + '</dd>';
     }
     html += '</dl>';
-    var errorText = ft.errorMessage;
+    let errorText = ft.errorMessage;
     try {
-        var parsed = JSON.parse(errorText);
+        const parsed = JSON.parse(errorText);
         errorText = JSON.stringify(parsed, null, 2);
     } catch (e) {}
     html += '<div class="debug-code">' + escHtml(errorText) + '</div>';
@@ -2237,15 +2237,15 @@ function renderFailingTaskTab() {
 }
 
 function renderFixTab() {
-    var fix = debugResult.fix;
+    const fix = debugResult.fix;
     if (!fix) {
         debugTabContentEl.innerHTML = '<p class="debug-empty">No fix recommendation available.</p>';
         return;
     }
-    var labelColor = fix.source === "pattern" ? "green" : "blue";
-    var labelText = fix.source === "pattern" ? "Pattern Match" : "AI Generated";
+    const labelColor = fix.source === "pattern" ? "green" : "blue";
+    const labelText = fix.source === "pattern" ? "Pattern Match" : "AI Generated";
 
-    var html = '<div style="margin-bottom:16px"><span class="debug-status-label ' + labelColor + '">' + labelText + '</span></div>';
+    let html = '<div style="margin-bottom:16px"><span class="debug-status-label ' + labelColor + '">' + labelText + '</span></div>';
     html += '<dl class="debug-dl">';
     html += '<dt>Repository</dt><dd>' + escHtml(fix.repo) + '</dd>';
     html += '<dt>File</dt><dd>' + escHtml(fix.file) + '</dd>';
@@ -2256,14 +2256,14 @@ function renderFixTab() {
     html += '</dl>';
 
     // Format explanation as paragraphs — split on double newlines, or sentences
-    var rawExpl = fix.explanation || "";
-    var paragraphs = rawExpl.indexOf("\n\n") >= 0
+    const rawExpl = fix.explanation || "";
+    const paragraphs = rawExpl.indexOf("\n\n") >= 0
         ? rawExpl.split(/\n\n+/)
         : rawExpl.split(/(?<=\.)\s+(?=[A-Z])/);
     html += '<div class="debug-section-title">Explanation</div>';
     html += '<div class="debug-explanation">';
     paragraphs.forEach(function(p) {
-        var trimmed = p.trim();
+        const trimmed = p.trim();
         if (trimmed) html += '<p>' + escHtml(trimmed) + '</p>';
     });
     html += '</div>';
@@ -2308,8 +2308,8 @@ function renderCorrelationTab() {
 }
 
 function renderCorrelationData() {
-    var c = debugCorrelation;
-    var html = '<div class="debug-section-title">' + c.totalFailures + ' other failures of this job template</div>';
+    const c = debugCorrelation;
+    let html = '<div class="debug-section-title">' + c.totalFailures + ' other failures of this job template</div>';
 
     if (c.byError && c.byError.length > 0) {
         html += '<div class="debug-section-title">By Error</div>';
@@ -2372,11 +2372,11 @@ function renderEEInfoTab() {
 }
 
 function renderEEInfoData() {
-    var ee = debugEEInfo;
-    var html = '<dl class="debug-dl">';
+    const ee = debugEEInfo;
+    let html = '<dl class="debug-dl">';
     html += '<dt>Image</dt><dd><code>' + escHtml(ee.image) + '</code></dd>';
     if (ee.sourceRepo) {
-        var srcLink = 'https://github.com/' + ee.sourceRepo + '/tree/main/' + (ee.sourceDir || '');
+        const srcLink = 'https://github.com/' + ee.sourceRepo + '/tree/main/' + (ee.sourceDir || '');
         html += '<dt>Source</dt><dd><a href="' + srcLink + '" target="_blank" rel="noopener" class="debug-link">' + escHtml(ee.sourceRepo + '/' + (ee.sourceDir || '')) + '</a></dd>';
     }
     html += '</dl>';
@@ -2384,7 +2384,7 @@ function renderEEInfoData() {
     if (ee.sourceFiles && ee.sourceFiles.length > 0) {
         html += '<div class="debug-section-title">EE Definition Files</div>';
         ee.sourceFiles.forEach(function(file) {
-            var fileId = "ee-file-" + file.name.replace(/\W/g, "-");
+            const fileId = "ee-file-" + file.name.replace(/\W/g, "-");
             html += '<div class="debug-card">';
             html += '<button class="debug-ee-file-btn" onclick="toggleEEFile(\'' + fileId + '\', this)">\u25b6 ' + escHtml(file.name) + '</button>';
             html += '<div id="' + fileId + '" style="display:none;margin-top:8px"><div class="debug-code">' + escHtml(file.content) + '</div></div>';
@@ -2396,7 +2396,7 @@ function renderEEInfoData() {
 }
 
 window.toggleEEFile = function(id, btn) {
-    var el = document.getElementById(id);
+    const el = document.getElementById(id);
     if (el.style.display === "none") {
         el.style.display = "block";
         btn.innerHTML = "\u25bc " + btn.textContent.trim().slice(2);
@@ -2411,9 +2411,9 @@ function renderFixPreview() {
         debugFixPreviewEl.style.display = "none";
         return;
     }
-    var fix = debugResult.fix;
-    var labelColor = fix.source === "pattern" ? "green" : "blue";
-    var labelText = fix.source === "pattern" ? "Pattern Match" : "AI Generated";
+    const fix = debugResult.fix;
+    const labelColor = fix.source === "pattern" ? "green" : "blue";
+    const labelText = fix.source === "pattern" ? "Pattern Match" : "AI Generated";
 
     debugFixPreviewEl.innerHTML =
         '<div style="flex:1">' +
@@ -2428,30 +2428,30 @@ function renderFixPreview() {
 
 function extractChoices(text) {
     // Match {{choices}} or {{choices multi}} ... {{/choices}}
-    var match = text.match(/\{\{choices(\s+multi)?\}\}\s*\n([\s\S]*?)\{\{\/choices\}\}/);
+    const match = text.match(/\{\{choices(\s+multi)?\}\}\s*\n([\s\S]*?)\{\{\/choices\}\}/);
     if (!match) return null;
 
-    var multi = !!match[1];
-    var block = match[2];
-    var options = [];
+    const multi = !!match[1];
+    const block = match[2];
+    const options = [];
     block.split("\n").forEach(function(line) {
-        var trimmed = line.replace(/^\s*-\s*/, "").trim();
+        const trimmed = line.replace(/^\s*-\s*/, "").trim();
         if (trimmed) options.push(trimmed);
     });
 
     if (options.length === 0) return null;
 
-    var cleanedText = text.replace(/\{\{choices(\s+multi)?\}\}\s*\n[\s\S]*?\{\{\/choices\}\}/, "").trim();
+    const cleanedText = text.replace(/\{\{choices(\s+multi)?\}\}\s*\n[\s\S]*?\{\{\/choices\}\}/, "").trim();
     return { options: options, multi: multi, cleanedText: cleanedText };
 }
 
 function renderChoices(options, multi) {
-    var container = document.createElement("div");
+    const container = document.createElement("div");
     container.className = "choices-container";
     container.setAttribute("data-active", "true");
 
     options.forEach(function(opt) {
-        var btn = document.createElement("button");
+        const btn = document.createElement("button");
         btn.className = "choice-btn";
         btn.textContent = opt;
         btn.addEventListener("click", function() {
@@ -2469,17 +2469,17 @@ function renderChoices(options, multi) {
     });
 
     if (multi) {
-        var submitBtn = document.createElement("button");
+        const submitBtn = document.createElement("button");
         submitBtn.className = "choices-submit";
         submitBtn.textContent = "Submit";
         submitBtn.addEventListener("click", function() {
             if (container.getAttribute("data-active") !== "true") return;
-            var selected = [];
+            const selected = [];
             container.querySelectorAll(".choice-btn.selected").forEach(function(b) {
                 selected.push(b.textContent);
             });
             if (selected.length === 0) return;
-            var text = selected.join(", ");
+            const text = selected.join(", ");
             collapseChoices(container, text);
             input.value = text;
             form.requestSubmit();
@@ -2492,7 +2492,7 @@ function renderChoices(options, multi) {
 
 function collapseChoices(container, selectedText) {
     container.setAttribute("data-active", "false");
-    var summary = document.createElement("div");
+    const summary = document.createElement("div");
     summary.className = "choices-summary";
     summary.innerHTML = 'Selected: <span class="choices-selected-values"></span>';
     summary.querySelector(".choices-selected-values").textContent = selectedText;
@@ -2501,7 +2501,7 @@ function collapseChoices(container, selectedText) {
 
 function collapseActiveChoices(label) {
     document.querySelectorAll('.choices-container[data-active="true"]').forEach(function(c) {
-        var summary = document.createElement("div");
+        const summary = document.createElement("div");
         summary.className = "choices-summary";
         summary.textContent = label;
         c.replaceWith(summary);

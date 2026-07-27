@@ -7,6 +7,7 @@ import os
 import re
 import uuid
 from datetime import UTC, datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
@@ -15,6 +16,9 @@ from src.agent.learnings import is_admin_user_async
 from src.routes.query import _check_user_allowed
 
 logger = logging.getLogger(__name__)
+
+_ERR_INVALID_CONV_ID = "Invalid conversation ID format"
+_ERR_NOT_YOUR_CONV = "Not your conversation"
 
 router = APIRouter(prefix="/api", tags=["conversations"])
 
@@ -92,8 +96,8 @@ def _write_json(fpath: str, data: dict) -> None:
 async def save_conversation(
     body: SaveConversationRequest,
     request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """Save or update a conversation."""
     user = x_forwarded_email or x_forwarded_user
@@ -104,13 +108,13 @@ async def save_conversation(
     conv_id = body.id or str(uuid.uuid4())
 
     if not _UUID_RE.match(conv_id):
-        raise HTTPException(status_code=422, detail="Invalid conversation ID format")
+        raise HTTPException(status_code=422, detail=_ERR_INVALID_CONV_ID)
 
     fpath = os.path.join(CONVERSATIONS_DIR, f"{conv_id}.json")
     if os.path.isfile(fpath):
         existing = await asyncio.to_thread(_read_json, fpath)
         if existing.get("owner") != owner:
-            raise HTTPException(status_code=403, detail="Not your conversation")
+            raise HTTPException(status_code=403, detail=_ERR_NOT_YOUR_CONV)
         created_at = existing.get("created_at", now)
     else:
         created_at = now
@@ -188,8 +192,8 @@ def _list_conversations_sync(owner: str, *, all_users: bool = False) -> list[dic
 async def list_conversations(
     request: Request,
     all_users: bool = False,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """List conversations for the current user (or all users for admins)."""
     user = x_forwarded_email or x_forwarded_user
@@ -209,8 +213,8 @@ async def list_conversations(
 @router.get("/conversations/export")
 async def export_conversations(
     request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """Export all conversations with full messages (admin only)."""
     user = x_forwarded_email or x_forwarded_user
@@ -248,8 +252,8 @@ def _export_all_conversations_sync() -> list[dict]:
 async def get_conversation(
     conv_id: str,
     request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """Load a specific conversation."""
     user = x_forwarded_email or x_forwarded_user
@@ -257,7 +261,7 @@ async def get_conversation(
     owner = user or "anonymous"
 
     if not _UUID_RE.match(conv_id):
-        raise HTTPException(status_code=422, detail="Invalid conversation ID format")
+        raise HTTPException(status_code=422, detail=_ERR_INVALID_CONV_ID)
 
     fpath = os.path.join(CONVERSATIONS_DIR, f"{conv_id}.json")
     if not os.path.isfile(fpath):
@@ -266,7 +270,7 @@ async def get_conversation(
     data = await asyncio.to_thread(_read_json, fpath)
 
     if data.get("owner") != owner and not await is_admin_user_async(user):
-        raise HTTPException(status_code=403, detail="Not your conversation")
+        raise HTTPException(status_code=403, detail=_ERR_NOT_YOUR_CONV)
 
     return data
 
@@ -275,8 +279,8 @@ async def get_conversation(
 async def delete_conversation(
     conv_id: str,
     request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """Delete a conversation."""
     user = x_forwarded_email or x_forwarded_user
@@ -284,7 +288,7 @@ async def delete_conversation(
     owner = user or "anonymous"
 
     if not _UUID_RE.match(conv_id):
-        raise HTTPException(status_code=422, detail="Invalid conversation ID format")
+        raise HTTPException(status_code=422, detail=_ERR_INVALID_CONV_ID)
 
     fpath = os.path.join(CONVERSATIONS_DIR, f"{conv_id}.json")
     if not os.path.isfile(fpath):
@@ -293,7 +297,7 @@ async def delete_conversation(
     data = await asyncio.to_thread(_read_json, fpath)
 
     if data.get("owner") != owner:
-        raise HTTPException(status_code=403, detail="Not your conversation")
+        raise HTTPException(status_code=403, detail=_ERR_NOT_YOUR_CONV)
 
     os.remove(fpath)
     return {"deleted": True}

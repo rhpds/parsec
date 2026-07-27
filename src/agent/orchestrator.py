@@ -7,6 +7,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import sys
 import time as _time
 import uuid
@@ -658,7 +659,7 @@ def _dump_api_request(
     os.makedirs(debug_dir, exist_ok=True)
 
     ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
-    safe_label = label.replace(" ", "_").lower()
+    safe_label = re.sub(r"[^a-z0-9_-]", "", label.replace(" ", "_").lower())
     filepath = os.path.join(debug_dir, f"{safe_label}_{ts}.json")
 
     try:

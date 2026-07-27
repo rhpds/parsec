@@ -7,6 +7,7 @@ import os
 import re
 import uuid
 from datetime import UTC, datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
@@ -97,8 +98,8 @@ def _cleanup_old_shares() -> None:
 async def create_share(
     body: ShareRequest,
     request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """Create a read-only snapshot of a conversation."""
     user = x_forwarded_email or x_forwarded_user
@@ -134,8 +135,8 @@ async def create_share(
 async def get_share(
     share_id: str,
     request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """Retrieve a shared conversation snapshot."""
     user = x_forwarded_email or x_forwarded_user

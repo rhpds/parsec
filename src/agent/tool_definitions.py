@@ -11,6 +11,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+_DATE_START_DESC = "Start date in YYYY-MM-DD format."
+_DATE_END_DESC = "End date in YYYY-MM-DD format."
+
 # Verdict tool for alert investigations (not included in the default TOOLS list —
 # only appended during alert investigation mode).
 SUBMIT_ALERT_VERDICT_TOOL = {
@@ -97,11 +100,11 @@ TOOLS = [
                 },
                 "start_date": {
                     "type": "string",
-                    "description": "Start date in YYYY-MM-DD format.",
+                    "description": _DATE_START_DESC,
                 },
                 "end_date": {
                     "type": "string",
-                    "description": "End date in YYYY-MM-DD format.",
+                    "description": _DATE_END_DESC,
                 },
                 "group_by": {
                     "type": "string",
@@ -135,11 +138,11 @@ TOOLS = [
                 },
                 "start_date": {
                     "type": "string",
-                    "description": "Start date in YYYY-MM-DD format.",
+                    "description": _DATE_START_DESC,
                 },
                 "end_date": {
                     "type": "string",
-                    "description": "End date in YYYY-MM-DD format.",
+                    "description": _DATE_END_DESC,
                 },
                 "meter_filter": {
                     "type": "string",
@@ -164,11 +167,11 @@ TOOLS = [
             "properties": {
                 "start_date": {
                     "type": "string",
-                    "description": "Start date in YYYY-MM-DD format.",
+                    "description": _DATE_START_DESC,
                 },
                 "end_date": {
                     "type": "string",
-                    "description": "End date in YYYY-MM-DD format.",
+                    "description": _DATE_END_DESC,
                 },
                 "group_by": {
                     "type": "string",
@@ -324,11 +327,11 @@ TOOLS = [
                 },
                 "start_date": {
                     "type": "string",
-                    "description": "Start date in YYYY-MM-DD format.",
+                    "description": _DATE_START_DESC,
                 },
                 "end_date": {
                     "type": "string",
-                    "description": "End date in YYYY-MM-DD format.",
+                    "description": _DATE_END_DESC,
                 },
                 "providers": {
                     "type": "string",
