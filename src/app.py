@@ -30,6 +30,7 @@ from src.routes.query import router as query_router
 from src.routes.share import ensure_shares_dir
 from src.routes.share import router as share_router
 from src.routes.skills import router as skills_router
+from src.skills import SkillLoader, sync_sdk_skill_root
 
 logging.basicConfig(
     level=logging.INFO,
@@ -73,6 +74,16 @@ async def lifespan(app: FastAPI):
     # Ensure data directories exist
     ensure_conversations_dir()
     ensure_shares_dir()
+
+    # Publish discovered skills into the Agent SDK's discovery root. The loader
+    # and the SDK look in different places (skills.plugin_paths vs
+    # <cwd>/.claude/skills), so without this a skill mounted from an external
+    # repo shows up in the Skills tab and can never actually run.
+    try:
+        manifests = SkillLoader.from_config(cfg).load_all()
+        sync_sdk_skill_root(manifests, cwd=cfg.get("agent", {}).get("sdk", {}).get("cwd") or None)
+    except Exception:
+        logger.exception("Failed to publish skills to the SDK root — SDK skills may be missing")
 
     logger.info("Startup complete")
     yield
