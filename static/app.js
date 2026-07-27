@@ -641,7 +641,7 @@ function _ensureStreamStarted(state) {
 }
 
 function _renderCurrentChunk(state) {
-    var textEl = state.contentEl.querySelector(".md-text-live");
+    let textEl = state.contentEl.querySelector(".md-text-live");
     if (!textEl) {
         textEl = document.createElement("div");
         textEl.className = "md-text-live";
@@ -652,7 +652,7 @@ function _renderCurrentChunk(state) {
 
 function _handleTextEvent(data, state) {
     _ensureStreamStarted(state);
-    var si = state.contentEl.querySelector(".status-indicator");
+    const si = state.contentEl.querySelector(".status-indicator");
     if (si) si.remove();
     state.fullText += data.content;
     state.currentChunk += data.content;
@@ -675,8 +675,8 @@ function _createLiveToolWrapper(state) {
 function _handleToolStartEvent(data, state) {
     _ensureStreamStarted(state);
     if (state.currentToolEl) {
-        var prevStatus = state.currentToolEl.querySelector(".tool-status");
-        if (prevStatus && prevStatus.classList.contains("running")) {
+        const prevStatus = state.currentToolEl.querySelector(".tool-status");
+        if (prevStatus?.classList.contains("running")) {
             prevStatus.className = "tool-status done";
             prevStatus.textContent = "done";
         }
@@ -685,7 +685,7 @@ function _handleToolStartEvent(data, state) {
         state.textChunks.push(state.currentChunk);
     }
     state.currentChunk = "";
-    var liveTextEl = state.contentEl.querySelector(".md-text-live");
+    const liveTextEl = state.contentEl.querySelector(".md-text-live");
     if (liveTextEl) liveTextEl.remove();
     if (!state.liveWrapper) {
         _createLiveToolWrapper(state);
@@ -704,7 +704,7 @@ function _handleToolStartEvent(data, state) {
 
 function _handleCacheHitEvent(state) {
     if (!state.currentToolEl) return;
-    var cacheStatus = state.currentToolEl.querySelector(".tool-status");
+    const cacheStatus = state.currentToolEl.querySelector(".tool-status");
     if (cacheStatus) {
         cacheStatus.className = "tool-status cached";
         cacheStatus.textContent = "cached";
@@ -727,9 +727,9 @@ function _handleToolResultEvent(data, state) {
 
 function _handleChartEvent(data, state) {
     _ensureStreamStarted(state);
-    var chartEl = renderChart(data);
+    const chartEl = renderChart(data);
     state.contentEl.appendChild(chartEl);
-    var chartCanvas = chartEl.querySelector("canvas");
+    const chartCanvas = chartEl.querySelector("canvas");
     if (chartCanvas) {
         state.chartCanvases.push({ title: data.title || "chart", canvas: chartCanvas });
     }
@@ -737,7 +737,7 @@ function _handleChartEvent(data, state) {
 }
 
 function _handleReportEvent(data, contentEl) {
-    var link = document.createElement("a");
+    const link = document.createElement("a");
     link.className = "report-download";
     link.href = data.url;
     link.download = data.filename;
@@ -748,7 +748,7 @@ function _handleReportEvent(data, contentEl) {
 
 function _handleAgentStartEvent(data, state) {
     _ensureStreamStarted(state);
-    var agentBanner = document.createElement("div");
+    const agentBanner = document.createElement("div");
     agentBanner.className = "agent-banner agent-running";
     agentBanner.dataset.agent = data.agent;
     agentBanner.innerHTML = '<span class="agent-icon">&#9881;</span> ' +
@@ -759,20 +759,20 @@ function _handleAgentStartEvent(data, state) {
 }
 
 function _handleAgentDoneEvent(data, contentEl) {
-    var banners = contentEl.querySelectorAll('.agent-banner[data-agent="' + data.agent + '"]');
+    const banners = contentEl.querySelectorAll('.agent-banner[data-agent="' + data.agent + '"]');
     banners.forEach(function(b) {
         b.classList.remove("agent-running");
         b.classList.add("agent-done");
-        var statusSpan = b.querySelector(".agent-status");
+        const statusSpan = b.querySelector(".agent-status");
         if (statusSpan) statusSpan.textContent = "done";
     });
 }
 
 function _handleStatusEvent(data, state) {
     _ensureStreamStarted(state);
-    var oldStatus = state.contentEl.querySelector(".status-indicator");
+    const oldStatus = state.contentEl.querySelector(".status-indicator");
     if (oldStatus) oldStatus.remove();
-    var si = document.createElement("div");
+    const si = document.createElement("div");
     si.className = "status-indicator";
     si.innerHTML = '<div class="spinner"></div> ' + data.message;
     state.contentEl.appendChild(si);
@@ -781,7 +781,7 @@ function _handleStatusEvent(data, state) {
 
 function _handleErrorEvent(data, state) {
     _ensureStreamStarted(state);
-    var errEl = document.createElement("div");
+    const errEl = document.createElement("div");
     errEl.className = "error-message";
     errEl.textContent = data.message;
     state.contentEl.appendChild(errEl);
@@ -791,12 +791,12 @@ function _handleErrorEvent(data, state) {
 function _handleConfidenceEvent(data, state) {
     _ensureStreamStarted(state);
     if (data.level !== "medium" && data.level !== "low") return;
-    var callout = document.createElement("div");
+    const callout = document.createElement("div");
     callout.className = "confidence-callout " + data.level;
-    var title = data.level === "low" ? "Low confidence" : "Medium confidence";
-    var icon = data.level === "low" ? "⚠️" : "⚠";
-    var html = '<div class="confidence-title">' + icon + " " + title + "</div>";
-    var reasons = data.reasons || [];
+    const title = data.level === "low" ? "Low confidence" : "Medium confidence";
+    const icon = data.level === "low" ? "⚠️" : "⚠";
+    let html = '<div class="confidence-title">' + icon + " " + title + "</div>";
+    const reasons = data.reasons || [];
     if (reasons.length > 0) {
         html += "<ul>";
         reasons.forEach(function(r) {
@@ -810,7 +810,7 @@ function _handleConfidenceEvent(data, state) {
 }
 
 function _cleanupStatusIndicators(contentEl) {
-    var remainingStatus = contentEl.querySelector(".status-indicator");
+    const remainingStatus = contentEl.querySelector(".status-indicator");
     if (remainingStatus) remainingStatus.remove();
 }
 
@@ -822,16 +822,16 @@ function _finalizeRunningToolStatuses(contentEl) {
 }
 
 function _appendThinkingText(container, text) {
-    var thinkEl = document.createElement("div");
+    const thinkEl = document.createElement("div");
     thinkEl.className = "thinking-text";
     thinkEl.innerHTML = marked.parse(text);
     container.appendChild(thinkEl);
 }
 
 function _rebuildToolWrapperInner(state) {
-    var toolEls = Array.from(state.liveInner.querySelectorAll(".tool-call"));
+    const toolEls = Array.from(state.liveInner.querySelectorAll(".tool-call"));
     state.liveInner.replaceChildren();
-    var chunkIdx = 0;
+    let chunkIdx = 0;
     toolEls.forEach(function(tc) {
         if (chunkIdx < state.textChunks.length) {
             _appendThinkingText(state.liveInner, state.textChunks[chunkIdx]);
@@ -846,7 +846,7 @@ function _rebuildToolWrapperInner(state) {
 }
 
 function _finalizeLiveToolWrapper(state) {
-    var qCount = state.liveToolCount;
+    const qCount = state.liveToolCount;
     state.liveSummary.textContent = qCount === 1
         ? "1 query executed"
         : qCount + " queries executed";
@@ -864,24 +864,24 @@ function _mergeConfidenceMarker(existing, level, reason) {
         existing.classList.add("low");
         existing.querySelector(".confidence-title").innerHTML = '⚠️ Low confidence';
     }
-    var ul = existing.querySelector("ul");
+    const ul = existing.querySelector("ul");
     if (ul) {
-        var li = document.createElement("li");
+        const li = document.createElement("li");
         li.textContent = reason;
         ul.appendChild(li);
     }
 }
 
 function _createConfidenceCallout(contentEl, level, reason) {
-    var mc = document.createElement("div");
+    const mc = document.createElement("div");
     mc.className = "confidence-callout " + level;
-    var mTitle = level === "low" ? "Low confidence" : "Medium confidence";
+    const mTitle = level === "low" ? "Low confidence" : "Medium confidence";
     mc.innerHTML = '<div class="confidence-title">⚠ ' + mTitle + "</div><ul><li>" + reason.replaceAll("<", "&lt;") + "</li></ul>";
     contentEl.appendChild(mc);
 }
 
 function _applyConfidenceMarker(contentEl, level, reason) {
-    var existing = contentEl.querySelector(".confidence-callout");
+    const existing = contentEl.querySelector(".confidence-callout");
     if (existing) {
         _mergeConfidenceMarker(existing, level, reason);
     } else {
@@ -890,11 +890,11 @@ function _applyConfidenceMarker(contentEl, level, reason) {
 }
 
 function _processInlineConfidenceMarkers(contentEl) {
-    var allTextEls = contentEl.querySelectorAll(".md-text, .md-text-live");
+    const allTextEls = contentEl.querySelectorAll(".md-text, .md-text-live");
     allTextEls.forEach(function(el) {
-        var html = el.innerHTML;
-        var markerRegex = /\[confidence:\s*(medium|low)\s*\|\s*([^\]]+)\]/gi;
-        var match;
+        const html = el.innerHTML;
+        const markerRegex = /\[confidence:\s*(medium|low)\s*\|\s*([^\]]+)\]/gi;
+        let match;
         while ((match = markerRegex.exec(html)) !== null) {
             _applyConfidenceMarker(contentEl, match[1].toLowerCase(), match[2].trim());
         }
@@ -903,12 +903,12 @@ function _processInlineConfidenceMarkers(contentEl) {
 }
 
 function _renderFinalText(contentEl, currentChunk, fullText) {
-    var finalText = currentChunk || fullText;
-    var choicesResult = extractChoices(finalText);
+    let finalText = currentChunk || fullText;
+    const choicesResult = extractChoices(finalText);
     if (choicesResult) {
         finalText = choicesResult.cleanedText;
     }
-    var liveEl = contentEl.querySelector(".md-text-live");
+    const liveEl = contentEl.querySelector(".md-text-live");
     if (liveEl) {
         if (choicesResult) {
             liveEl.innerHTML = marked.parse(finalText);
@@ -990,7 +990,7 @@ function processStreamEvent(eventType, data, state) {
 // ─── renderSharedMessages helpers ───
 
 function _buildToolResultMap(messages) {
-    var map = {};
+    const map = {};
     messages.forEach(function(msg) {
         if (msg.role !== "user" || !Array.isArray(msg.content)) return;
         msg.content.forEach(function(block) {
@@ -1007,21 +1007,21 @@ function _buildToolResultMap(messages) {
 }
 
 function _tryCollapseToolChain(messages, startIdx) {
-    var groupToolCalls = [];
-    var groupToolUseIds = [];
-    var finalText = [];
-    var j = startIdx;
+    const groupToolCalls = [];
+    const groupToolUseIds = [];
+    let finalText = [];
+    let j = startIdx;
     while (j < messages.length) {
-        var cur = messages[j];
+        const cur = messages[j];
         if (cur.role !== "assistant" || !Array.isArray(cur.content)) break;
-        var curTools = cur.content.filter(function(b) { return b.type === "tool_use"; });
-        var curText = cur.content.filter(function(b) { return b.type === "text" && b.text; });
+        const curTools = cur.content.filter(function(b) { return b.type === "tool_use"; });
+        const curText = cur.content.filter(function(b) { return b.type === "text" && b.text; });
         curTools.forEach(function(t) { groupToolCalls.push(t); groupToolUseIds.push(t.id); });
         if (curText.length > 0) finalText = curText;
-        var next = messages[j + 1];
-        if (next && next.role === "user" && Array.isArray(next.content)) {
-            var hasRealText = next.content.some(function(b) {
-                return b.type !== "tool_result" && b.text && b.text.trim();
+        const next = messages[j + 1];
+        if (next?.role === "user" && Array.isArray(next.content)) {
+            const hasRealText = next.content.some(function(b) {
+                return b.type !== "tool_result" && b.text?.trim();
             });
             if (!hasRealText) {
                 j += 2;
@@ -1031,7 +1031,7 @@ function _tryCollapseToolChain(messages, startIdx) {
         break;
     }
     if (j <= startIdx) return { collapsed: false };
-    var combinedContent = [];
+    const combinedContent = [];
     groupToolCalls.forEach(function(t) { combinedContent.push(t); });
     finalText.forEach(function(t) { combinedContent.push(t); });
     return {
@@ -1042,14 +1042,14 @@ function _tryCollapseToolChain(messages, startIdx) {
 }
 
 function _collapseSubAgentMessages(messages) {
-    var collapsed = [];
-    var i = 0;
+    const collapsed = [];
+    let i = 0;
     while (i < messages.length) {
-        var msg = messages[i];
+        const msg = messages[i];
         if (msg.role === "assistant" && Array.isArray(msg.content)) {
-            var hasToolUse = msg.content.some(function(b) { return b.type === "tool_use"; });
+            const hasToolUse = msg.content.some(function(b) { return b.type === "tool_use"; });
             if (hasToolUse) {
-                var result = _tryCollapseToolChain(messages, i);
+                const result = _tryCollapseToolChain(messages, i);
                 if (result.collapsed) {
                     collapsed.push(result.msg);
                     i = result.nextIndex;
@@ -1064,33 +1064,33 @@ function _collapseSubAgentMessages(messages) {
 }
 
 function _renderRestoredUserMessage(msg) {
-    var text = msg.content;
+    let text = msg.content;
     if (Array.isArray(text)) {
-        var userParts = text.filter(function(b) { return b.type !== "tool_result"; });
+        const userParts = text.filter(function(b) { return b.type !== "tool_result"; });
         text = userParts.map(function(b) { return b.text || ""; }).join("");
     }
-    if (text && text.trim()) {
+    if (text?.trim()) {
         addMessage("user", text);
     }
 }
 
 function _appendRestoredToolCall(inner, tc, toolResultMap) {
-    var tcEl = document.createElement("details");
+    const tcEl = document.createElement("details");
     tcEl.className = "tool-call";
-    var tcSummary = document.createElement("summary");
-    var nameSpan = document.createElement("span");
+    const tcSummary = document.createElement("summary");
+    const nameSpan = document.createElement("span");
     nameSpan.className = "tool-name";
     nameSpan.textContent = tc.name || "tool";
-    var statusSpan = document.createElement("span");
+    const statusSpan = document.createElement("span");
     statusSpan.className = "tool-status done";
     statusSpan.textContent = "done";
     tcSummary.appendChild(nameSpan);
     tcSummary.appendChild(statusSpan);
     tcEl.appendChild(tcSummary);
-    var body = document.createElement("div");
+    const body = document.createElement("div");
     body.className = "tool-body";
     body.textContent = JSON.stringify(tc.input || {}, null, 2);
-    var result = toolResultMap[tc.id];
+    const result = toolResultMap[tc.id];
     if (result && typeof result === "object") {
         body.textContent += "\n\n--- Result ---\n" + JSON.stringify(result, null, 2);
     }
@@ -1099,24 +1099,24 @@ function _appendRestoredToolCall(inner, tc, toolResultMap) {
 }
 
 function _renderRestoredToolCalls(toolCalls, toolResultMap, contentEl) {
-    var agentNames = {
+    const agentNames = {
         cost: "Cost Investigation", aap2: "AAP2 Investigation",
         babylon: "Babylon Investigation", security: "Security Investigation",
         ocpv: "OCPV Investigation", icinga: "Icinga Investigation"
     };
-    var delegationTools = {
+    const delegationTools = {
         investigate_costs: "cost", investigate_aap2_job: "aap2",
         investigate_babylon: "babylon", investigate_security: "security",
         investigate_ocpv: "ocpv", investigate_icinga: "icinga"
     };
-    var totalQueries = 0;
-    var delegations = [];
-    var restoredToolResults = [];
+    let totalQueries = 0;
+    const delegations = [];
+    const restoredToolResults = [];
 
     toolCalls.forEach(function(tc) {
-        var result = toolResultMap[tc.id];
-        var isDelegation = tc.name in delegationTools;
-        if (isDelegation && result && result.tool_calls) {
+        const result = toolResultMap[tc.id];
+        const isDelegation = tc.name in delegationTools;
+        if (isDelegation && result?.tool_calls) {
             totalQueries += result.tool_calls;
             delegations.push({ tc: tc, result: result, agentType: delegationTools[tc.name] });
         } else {
@@ -1127,9 +1127,9 @@ function _renderRestoredToolCalls(toolCalls, toolResultMap, contentEl) {
         }
     });
 
-    var wrapper = document.createElement("details");
+    const wrapper = document.createElement("details");
     wrapper.className = "tool-calls-summary";
-    var tcSummaryEl = document.createElement("summary");
+    const tcSummaryEl = document.createElement("summary");
     tcSummaryEl.textContent = totalQueries === 1
         ? "1 query executed"
         : totalQueries + " queries executed";
@@ -1137,7 +1137,7 @@ function _renderRestoredToolCalls(toolCalls, toolResultMap, contentEl) {
         addExpandCollapseToggle(tcSummaryEl, wrapper);
     }
     wrapper.appendChild(tcSummaryEl);
-    var inner = document.createElement("div");
+    const inner = document.createElement("div");
     inner.className = "tool-calls-inner";
     toolCalls.forEach(function(tc) {
         if (tc.name in delegationTools) return;
@@ -1150,16 +1150,16 @@ function _renderRestoredToolCalls(toolCalls, toolResultMap, contentEl) {
 }
 
 function _appendAgentBanner(contentEl, agentType, agentLabel) {
-    var agentBanner = document.createElement("div");
+    const agentBanner = document.createElement("div");
     agentBanner.className = "agent-banner agent-done";
     agentBanner.dataset.agent = agentType;
-    var iconSpan = document.createElement("span");
+    const iconSpan = document.createElement("span");
     iconSpan.className = "agent-icon";
     iconSpan.textContent = "⚙";
-    var labelSpan = document.createElement("span");
+    const labelSpan = document.createElement("span");
     labelSpan.className = "agent-label";
     labelSpan.textContent = agentLabel;
-    var statusSpan = document.createElement("span");
+    const statusSpan = document.createElement("span");
     statusSpan.className = "agent-status";
     statusSpan.textContent = "done";
     agentBanner.appendChild(iconSpan);
@@ -1171,15 +1171,15 @@ function _appendAgentBanner(contentEl, agentType, agentLabel) {
 }
 
 function _appendDelegationSummary(d, contentEl, textParts) {
-    var summaryText = d.result.summary || "";
+    let summaryText = d.result.summary || "";
     if (!summaryText.trim()) {
-        var findings = d.result.findings || [];
+        const findings = d.result.findings || [];
         summaryText = findings.filter(function(f) {
             return typeof f === "string" && !f.startsWith("[Tool:");
         }).join("\n\n");
     }
     if (summaryText.trim()) {
-        var findingsDiv = document.createElement("div");
+        const findingsDiv = document.createElement("div");
         findingsDiv.className = "md-text";
         findingsDiv.innerHTML = marked.parse(summaryText);
         contentEl.appendChild(findingsDiv);
@@ -1189,20 +1189,20 @@ function _appendDelegationSummary(d, contentEl, textParts) {
 
 function _renderRestoredDelegations(delegations, agentNames, contentEl, textParts) {
     delegations.forEach(function(d) {
-        var agentType = d.agentType || d.result.agent || "unknown";
-        var agentLabel = agentNames[agentType] || agentType;
+        const agentType = d.agentType || d.result.agent || "unknown";
+        const agentLabel = agentNames[agentType] || agentType;
         _appendAgentBanner(contentEl, agentType, agentLabel);
         _appendDelegationSummary(d, contentEl, textParts);
     });
 }
 
 function _reconstructReportsAndCharts(toolCalls, toolResultMap, contentEl) {
-    var restoredCharts = [];
+    const restoredCharts = [];
     toolCalls.forEach(function(tc) {
-        var result = toolResultMap[tc.id];
+        const result = toolResultMap[tc.id];
         if (!result || typeof result !== "object" || result.error) return;
         if (tc.name === "generate_report" && result.filename) {
-            var link = document.createElement("a");
+            const link = document.createElement("a");
             link.className = "report-download";
             link.href = "/api/reports/" + result.filename;
             link.download = result.filename;
@@ -1210,9 +1210,9 @@ function _reconstructReportsAndCharts(toolCalls, toolResultMap, contentEl) {
             contentEl.appendChild(link);
         } else if (tc.name === "render_chart" && result.datasets) {
             try {
-                var chartEl = renderChart(result);
+                const chartEl = renderChart(result);
                 contentEl.appendChild(chartEl);
-                var chartCanvas = chartEl.querySelector("canvas");
+                const chartCanvas = chartEl.querySelector("canvas");
                 if (chartCanvas) {
                     restoredCharts.push({ title: result.title || "chart", canvas: chartCanvas });
                 }
@@ -1225,18 +1225,18 @@ function _reconstructReportsAndCharts(toolCalls, toolResultMap, contentEl) {
 }
 
 function _renderRestoredTextWithChoices(text, contentEl, msgIdx, collapsed, interactive) {
-    var sharedChoices = extractChoices(text);
-    var renderText = sharedChoices ? sharedChoices.cleanedText : text;
-    var textDiv = document.createElement("div");
+    const sharedChoices = extractChoices(text);
+    const renderText = sharedChoices ? sharedChoices.cleanedText : text;
+    const textDiv = document.createElement("div");
     textDiv.className = "md-text";
     textDiv.innerHTML = marked.parse(renderText);
     contentEl.appendChild(textDiv);
     if (!sharedChoices) return;
-    var isLastMsg = (msgIdx === collapsed.length - 1);
+    const isLastMsg = (msgIdx === collapsed.length - 1);
     if (interactive && isLastMsg) {
         contentEl.appendChild(renderChoices(sharedChoices.options, sharedChoices.multi));
     } else {
-        var choicesSummary = document.createElement("div");
+        const choicesSummary = document.createElement("div");
         choicesSummary.className = "choices-summary";
         choicesSummary.textContent = "Choices were presented";
         contentEl.appendChild(choicesSummary);
@@ -1244,11 +1244,11 @@ function _renderRestoredTextWithChoices(text, contentEl, msgIdx, collapsed, inte
 }
 
 function _renderRestoredArrayContent(content, toolResultMap, contentEl, msgIdx, collapsed, interactive) {
-    var toolCalls = [];
-    var textParts = [];
-    var delegations = [];
-    var restoredToolResults = [];
-    var restoredCharts = [];
+    const toolCalls = [];
+    const textParts = [];
+    let delegations = [];
+    let restoredToolResults = [];
+    let restoredCharts = [];
 
     content.forEach(function(block) {
         if (block.type === "text" && block.text) {
@@ -1259,14 +1259,14 @@ function _renderRestoredArrayContent(content, toolResultMap, contentEl, msgIdx, 
     });
 
     if (toolCalls.length > 0) {
-        var tcResult = _renderRestoredToolCalls(toolCalls, toolResultMap, contentEl);
+        const tcResult = _renderRestoredToolCalls(toolCalls, toolResultMap, contentEl);
         delegations = tcResult.delegations;
         restoredToolResults = tcResult.restoredToolResults;
         _renderRestoredDelegations(delegations, tcResult.agentNames, contentEl, textParts);
         restoredCharts = _reconstructReportsAndCharts(toolCalls, toolResultMap, contentEl);
     }
 
-    var restoredText = textParts.join("");
+    const restoredText = textParts.join("");
     if (restoredText.trim() && delegations.length === 0) {
         _renderRestoredTextWithChoices(restoredText, contentEl, msgIdx, collapsed, interactive);
     }
@@ -1275,21 +1275,21 @@ function _renderRestoredArrayContent(content, toolResultMap, contentEl, msgIdx, 
 }
 
 function _renderRestoredAssistantMessage(msg, msgIdx, collapsed, toolResultMap, interactive) {
-    var el = addMessage("assistant", "");
-    var contentEl = el.querySelector(".content");
-    var content = msg.content;
-    var restoredText = "";
-    var restoredCharts = [];
-    var restoredToolResults = [];
+    const el = addMessage("assistant", "");
+    const contentEl = el.querySelector(".content");
+    const content = msg.content;
+    let restoredText = "";
+    let restoredCharts = [];
+    let restoredToolResults = [];
 
     if (typeof content === "string") {
         restoredText = content;
-        var textDiv = document.createElement("div");
+        const textDiv = document.createElement("div");
         textDiv.className = "md-text";
         textDiv.innerHTML = marked.parse(content);
         contentEl.appendChild(textDiv);
     } else if (Array.isArray(content)) {
-        var result = _renderRestoredArrayContent(content, toolResultMap, contentEl, msgIdx, collapsed, interactive);
+        const result = _renderRestoredArrayContent(content, toolResultMap, contentEl, msgIdx, collapsed, interactive);
         restoredText = result.restoredText;
         restoredCharts = result.restoredCharts;
         restoredToolResults = result.restoredToolResults;
@@ -1306,8 +1306,8 @@ function _renderRestoredAssistantMessage(msg, msgIdx, collapsed, toolResultMap, 
 // ─── parseAllMarkdownTables helpers ───
 
 function _findTableTitle(lines, tableStartIndex) {
-    for (var j = tableStartIndex - 1; j >= Math.max(0, tableStartIndex - 5); j--) {
-        var prevLine = lines[j].trim();
+    for (let j = tableStartIndex - 1; j >= Math.max(0, tableStartIndex - 5); j--) {
+        const prevLine = lines[j].trim();
         if (prevLine.match(/^#{1,6}\s+(.+)$/)) {
             return prevLine.replace(/^#{1,6}\s+/, "");
         }
@@ -1319,8 +1319,8 @@ function _findTableTitle(lines, tableStartIndex) {
 }
 
 function _collectTableLines(lines, startIndex) {
-    var tableLines = [];
-    var i = startIndex;
+    const tableLines = [];
+    let i = startIndex;
     while (i < lines.length && lines[i].trim().startsWith("|")) {
         tableLines.push(lines[i]);
         i++;
@@ -1331,8 +1331,8 @@ function _collectTableLines(lines, startIndex) {
 // ─── exportResponseAsCSV helpers ───
 
 function _collectUniqueHeaders(rows) {
-    var headers = [];
-    var headerSet = {};
+    const headers = [];
+    const headerSet = {};
     rows.forEach(function(row) {
         Object.keys(row).forEach(function(key) {
             if (!headerSet[key]) {
@@ -1345,11 +1345,11 @@ function _collectUniqueHeaders(rows) {
 }
 
 function _formatRowsAsCSV(title, headers, rows) {
-    var lines = [];
+    const lines = [];
     lines.push("# " + title, headers.map(csvEscapeField).join(","));
     rows.forEach(function(row) {
-        var vals = headers.map(function(h) {
-            var val = row[h];
+        const vals = headers.map(function(h) {
+            let val = row[h];
             if (typeof val === "object" && val !== null) val = JSON.stringify(val);
             return csvEscapeField(val);
         });
@@ -1359,20 +1359,20 @@ function _formatRowsAsCSV(title, headers, rows) {
 }
 
 function _processToolResultForCSV(tr) {
-    var sections = [];
-    var rows = findTabularData(tr.result);
+    const sections = [];
+    const rows = findTabularData(tr.result);
 
-    if (!rows && tr.tool === "generate_report" && tr.input && tr.input.content) {
-        var tables = parseAllMarkdownTables(tr.input.content);
+    if (!rows && tr.tool === "generate_report" && tr.input?.content) {
+        const tables = parseAllMarkdownTables(tr.input.content);
         tables.forEach(function(table) {
-            var headers = _collectUniqueHeaders(table.rows);
+            const headers = _collectUniqueHeaders(table.rows);
             sections.push(_formatRowsAsCSV(table.title, headers, table.rows));
         });
         return sections;
     }
 
     if (rows) {
-        var headers = _collectUniqueHeaders(rows);
+        const headers = _collectUniqueHeaders(rows);
         sections.push(_formatRowsAsCSV(tr.tool || "results", headers, rows));
     }
 
@@ -1405,20 +1405,20 @@ function _applyPDFPrintStyles(clone) {
 }
 
 function _renderCanvasToMultiPagePDF(doc, canvas, margin, contentW, contentH) {
-    var scale = canvas.width / contentW;
-    var sliceH = Math.floor(contentH * scale);
-    var yPx = 0;
-    var pageNum = 0;
+    const scale = canvas.width / contentW;
+    const sliceH = Math.floor(contentH * scale);
+    let yPx = 0;
+    let pageNum = 0;
     while (yPx < canvas.height) {
         if (pageNum > 0) doc.addPage();
-        var h = Math.min(sliceH, canvas.height - yPx);
-        var pageCanvas = document.createElement("canvas");
+        const h = Math.min(sliceH, canvas.height - yPx);
+        const pageCanvas = document.createElement("canvas");
         pageCanvas.width = canvas.width;
         pageCanvas.height = h;
-        var ctx = pageCanvas.getContext("2d");
+        const ctx = pageCanvas.getContext("2d");
         ctx.drawImage(canvas, 0, yPx, canvas.width, h, 0, 0, canvas.width, h);
-        var pageImg = pageCanvas.toDataURL("image/png");
-        var drawH = h / scale;
+        const pageImg = pageCanvas.toDataURL("image/png");
+        const drawH = h / scale;
         doc.addImage(pageImg, "PNG", margin, margin, contentW, drawH);
         yPx += sliceH;
         pageNum++;
@@ -1428,9 +1428,9 @@ function _renderCanvasToMultiPagePDF(doc, canvas, margin, contentW, contentH) {
 // ─── finalizeToolCall helper ───
 
 function _getToolResultStatusText(result, wasCached) {
-    var prefix = wasCached ? "cached: " : "";
+    const prefix = wasCached ? "cached: " : "";
     if (result.bytes_scanned !== undefined && result.row_count !== undefined) {
-        var mb = (result.bytes_scanned / 1024 / 1024).toFixed(0);
+        const mb = (result.bytes_scanned / 1024 / 1024).toFixed(0);
         return prefix + result.row_count + " rows (" + mb + " MB scanned)";
     }
     if (result.row_count !== undefined) return prefix + result.row_count + " rows";
@@ -1768,7 +1768,7 @@ function renderChart(data) {
         }
     }
 
-    new Chart(canvas, {
+    void new Chart(canvas, {
         type: data.chart_type,
         data: {
             labels: data.labels,
@@ -2012,15 +2012,15 @@ function parseMarkdownTable(str) {
 
 function parseAllMarkdownTables(str) {
     if (typeof str !== "string") return [];
-    var allLines = str.split("\n");
-    var tables = [];
-    var i = 0;
+    const allLines = str.split("\n");
+    const tables = [];
+    let i = 0;
     while (i < allLines.length) {
         if (allLines[i].trim().startsWith("|")) {
-            var title = _findTableTitle(allLines, i);
-            var collected = _collectTableLines(allLines, i);
+            const title = _findTableTitle(allLines, i);
+            const collected = _collectTableLines(allLines, i);
             i = collected.nextIndex;
-            var parsed = parseMarkdownTable(collected.lines.join("\n"));
+            const parsed = parseMarkdownTable(collected.lines.join("\n"));
             if (parsed && parsed.length > 0) {
                 tables.push({ title: title || "Table " + (tables.length + 1), rows: parsed });
             }
@@ -2062,17 +2062,17 @@ function exportResponseAsCSV(messageEl) {
 
     const csvSections = [];
     toolResults.forEach(function(tr) {
-        var sections = _processToolResultForCSV(tr);
+        const sections = _processToolResultForCSV(tr);
         sections.forEach(function(s) { csvSections.push(s); });
     });
 
     // Fallback: if no tabular data found, export as key-value pairs
     if (csvSections.length === 0) {
         toolResults.forEach(function(tr) {
-            var headers = Object.keys(tr.result || {});
-            var lines = ["# " + (tr.tool || "results"), "key,value"];
+            const headers = Object.keys(tr.result || {});
+            const lines = ["# " + (tr.tool || "results"), "key,value"];
             headers.forEach(function(key) {
-                var val = tr.result[key];
+                let val = tr.result[key];
                 if (typeof val === "object" && val !== null) val = JSON.stringify(val);
                 lines.push(csvEscapeField(key) + "," + csvEscapeField(val));
             });
@@ -2090,8 +2090,8 @@ function exportResponseAsCSV(messageEl) {
 }
 
 function renderSharedMessages(messages, interactive) {
-    var toolResultMap = _buildToolResultMap(messages);
-    var collapsed = _collapseSubAgentMessages(messages);
+    const toolResultMap = _buildToolResultMap(messages);
+    const collapsed = _collapseSubAgentMessages(messages);
     collapsed.forEach(function(msg, msgIdx) {
         if (msg.role === "user") {
             _renderRestoredUserMessage(msg);

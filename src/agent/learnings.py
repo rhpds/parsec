@@ -210,7 +210,7 @@ def _summarize_assistant_content(content: object) -> list[str]:
             parts.append(f"Assistant: {block['text'][:300]}")
         elif block.get("type") == "tool_use":
             parts.append(
-                f"Tool call: {block.get('name')}(" f"{json.dumps(block.get('input', {}))[:150]})"
+                f"Tool call: {block.get('name')}({json.dumps(block.get('input', {}))[:150]})"
             )
     return parts
 
