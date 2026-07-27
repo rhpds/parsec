@@ -752,7 +752,7 @@ TOOLS = [
             "IMPORTANT: If you don't know the exact path, use search_github_repo "
             "first to find it — do NOT list directories one by one. "
             "Supports fetching specific git refs (branches, tags, commit SHAs). "
-            "Secrets in file content are automatically redacted."
+            "Secrets in file content are redacted on the legacy runtime."
         ),
         "input_schema": {
             "type": "object",

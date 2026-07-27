@@ -37,7 +37,7 @@ COPY skills/ skills/
 COPY data/ec2_pricing.json data-seed/ec2_pricing.json
 COPY scripts/refresh_pricing.py scripts/refresh_pricing.py
 COPY scripts/refresh_azure_billing.py scripts/refresh_azure_billing.py
-COPY skills/ skills/
+COPY scripts/verify_sdk_cli.py scripts/verify_sdk_cli.py
 
 # Skills-layout bridge: the SDK's "project" setting source discovers skills at
 # <cwd>/.claude/skills/, but Parsec ships them under skills/. Symlink so the
@@ -63,6 +63,7 @@ USER 1001
 RUN python3 -c "import dynaconf, fastapi, uvicorn; print('Dependencies OK')" && \
     node --version && claude --version && \
     python3 -c "import claude_agent_sdk; print('claude-agent-sdk OK')" && \
+    python3 /app/scripts/verify_sdk_cli.py && \
     test -f /app/.claude/skills/icinga-triage/SKILL.md && echo "icinga-triage skill baked"
 
 EXPOSE 8000

@@ -62,23 +62,68 @@ def build_icinga_sdk_profile(config: Any) -> dict[str, Any]:
     profile: dict[str, Any] = {"skills": [ICINGA_SKILL]}
     if mcp_servers:
         profile["mcp_servers"] = mcp_servers
-        profile["allowed_tools"] = _allowed_tools(mcp_servers)
+        profile["allowed_tools"] = _allowed_tools(mcp_servers, icinga_cfg)
 
-    logger.debug("Icinga SDK profile: skill=%s servers=%s", ICINGA_SKILL, list(mcp_servers))
+    logger.info(
+        "Icinga SDK profile: skill=%s servers=%s allowed_tools=%s",
+        ICINGA_SKILL,
+        list(mcp_servers),
+        profile.get("allowed_tools", []),
+    )
     return profile
 
 
-def _allowed_tools(mcp_servers: dict[str, Any]) -> list[str]:
-    """Whitelist all tools from the configured MCP servers.
+#: Read-only Icinga/GitHub tools the ``icinga-triage`` skill uses. Names match
+#: the monitoring-mcp sidecar surface the SKILL.md was reconciled against in the
+#: #34 review.
+_READ_ONLY_TOOLS = (
+    "mcp__icinga__get_problems",
+    "mcp__icinga__get_services",
+    "mcp__icinga__get_hosts",
+    "mcp__icinga__get_downtimes",
+    "mcp__icinga__get_comments",
+    "mcp__github__get_file_contents",
+)
 
-    Per the Claude Code permission rules, a bare ``mcp__<server>`` entry matches
-    *any* tool provided by that server — it is the canonical "all tools from this
-    server" form, equivalent to the wildcard ``mcp__<server>__*``. So
-    ``["mcp__icinga", "mcp__github"]`` admits every ``mcp__icinga__*`` /
-    ``mcp__github__*`` call the SKILL.md uses, without listing each tool.
-    See https://code.claude.com/docs/en/permissions (section "MCP").
+#: State-mutating Icinga tools. The SKILL.md marks these "gated write — only
+#: when the user explicitly requests them", but that is prose addressed to the
+#: model, not an enforced control. They are omitted from ``allowed_tools``
+#: unless ``icinga.sdk_allow_writes`` is set, so the gate is real.
+_WRITE_TOOLS = (
+    "mcp__icinga__acknowledge_problem",
+    "mcp__icinga__schedule_downtime",
+    "mcp__icinga__reschedule_check",
+    "mcp__icinga__add_comment",
+    "mcp__icinga__remove_comment",
+    "mcp__icinga__remove_downtime",
+)
+
+
+def _allowed_tools(mcp_servers: dict[str, Any], icinga_cfg: dict[str, Any]) -> list[str]:
+    """Enumerate the tools the Icinga SDK agent may call.
+
+    Previously this returned bare ``["mcp__icinga", "mcp__github"]``. Per the
+    Claude Code permission rules a bare ``mcp__<server>`` entry matches *any*
+    tool that server provides, so it also admitted the six state-mutating Icinga
+    operations — acknowledging problems, scheduling and removing downtime, and
+    adding or removing comments — on a monitoring system RHDP ops relies on.
+    This addresses the #32 review finding "enumerate read-only tools explicitly
+    and require a separate confirmation flow for write actions".
+
+    Only servers that are actually configured contribute tools, so a partial
+    config still degrades gracefully. ``icinga.sdk_allowed_tools`` overrides the
+    list outright, so a sidecar that names its tools differently is a config fix
+    rather than a redeploy.
     """
-    return [f"mcp__{name}" for name in mcp_servers]
+    override = icinga_cfg.get("sdk_allowed_tools") or []
+    if override:
+        return [str(t) for t in override]
+
+    names = [t for t in _READ_ONLY_TOOLS if t.split("__")[1] in mcp_servers]
+    if icinga_cfg.get("sdk_allow_writes"):
+        names += [t for t in _WRITE_TOOLS if t.split("__")[1] in mcp_servers]
+        logger.warning("Icinga SDK profile: WRITE actions enabled (icinga.sdk_allow_writes)")
+    return names
 
 
 # NOTE: `_section` duplicates `_get_section` in `agent_sdk_client.py`. PR #31

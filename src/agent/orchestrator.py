@@ -428,19 +428,42 @@ async def _execute_tool(tool_name: str, tool_input: dict) -> dict:
 
 
 def _save_report(tool_input: dict) -> dict:
-    """Save a report to disk and return metadata."""
+    """Save a report to disk and return metadata.
+
+    ``filename`` is model-controlled (``generate_report`` is in every agent's
+    tool list), so it is reduced to a bare basename and the resolved path is
+    asserted to stay inside ``REPORTS_DIR`` — the same containment the download
+    route already applies (``src/routes/query.py``).
+
+    Without it this is an arbitrary-write primitive: ``filename`` was joined
+    onto ``REPORTS_DIR`` unsanitised, and the extension is forced to
+    ``.md``/``.adoc``, so ``"../../skills/icinga-triage/SKILL"`` resolves to
+    ``/app/skills/icinga-triage/SKILL.md``. ``dockerfiles/Dockerfile`` symlinks
+    ``/app/skills`` to ``/app/.claude/skills``, which is the Agent SDK's only
+    skill-discovery root, and ``/app`` is group-0 writable for the arbitrary
+    OpenShift UID — so a model could persist instructions into every later SDK
+    run. The download path was hardened in ce9bbc8; the write path was not.
+    """
     title = tool_input["title"]
     content = tool_input["content"]
     fmt = tool_input.get("format", "markdown")
     filename = tool_input.get("filename", "")
 
     ext = ".adoc" if fmt == "asciidoc" else ".md"
-    if not filename:
+    # Strip any directory component the model supplied before using the name.
+    stem = os.path.basename(str(filename)).strip()
+    if not stem or stem in {".", ".."}:
         date_str = datetime.now(UTC).strftime("%Y-%m-%d")
-        filename = f"investigation_report_{date_str}"
+        stem = f"investigation_report_{date_str}"
 
-    full_filename = f"{filename}{ext}"
-    filepath = os.path.join(REPORTS_DIR, full_filename)
+    full_filename = f"{stem}{ext}"
+    reports_root = os.path.realpath(REPORTS_DIR)
+    filepath = os.path.realpath(os.path.join(reports_root, full_filename))
+    # Defence in depth: basename() already blocks traversal, but this also
+    # catches a symlink planted inside REPORTS_DIR that points elsewhere.
+    if not filepath.startswith(reports_root + os.sep):
+        logger.warning("Rejected report write outside REPORTS_DIR: %r", filename)
+        return {"error": "Invalid filename"}
 
     with open(filepath, "w") as f:
         f.write(content)

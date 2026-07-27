@@ -21,6 +21,8 @@ dependencies = [
     "azure-identity>=1.15.0",
     "azure-storage-blob>=12.19.0",
     "google-cloud-bigquery>=3.4.0",
+    # Version-locked deliberately — see the note in requirements.txt.
+    "claude-agent-sdk==0.2.106",
 ]
 
 [project.optional-dependencies]
