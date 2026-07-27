@@ -24,6 +24,7 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install black ruff mypy bandit types-PyYAML
+          pip install pytest pytest-asyncio pytest-mock
 
       - name: Black (formatting)
         run: black --check --line-length=100 src/
@@ -33,6 +34,9 @@ jobs:
 
       - name: MyPy (type checking)
         run: mypy src/ --ignore-missing-imports
+
+      - name: Pytest (unit tests)
+        run: pytest -q
 
       - name: Bandit (security)
         run: bandit -r src/ -s B101 -f json -o bandit-report.json || true

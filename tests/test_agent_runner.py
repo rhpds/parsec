@@ -24,6 +24,54 @@ from src.agent.runner import (
 )
 from src.llm import RUNTIME_LEGACY, RUNTIME_SDK, AgentSdkUnavailableError, SdkResult, SdkUsage
 
+# ------------------------------------------------------------- create_task fake
+
+
+class _FakeTask:
+    """Stand-in for ``asyncio.Task`` that supports the S7502 strong-reference idiom.
+
+    ``runner._record_sdk_metrics`` keeps a hard reference to every background
+    flush and drops it on completion::
+
+        task = asyncio.create_task(...)
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+
+    A fake ``create_task`` that returns ``None`` makes that line raise
+    ``AttributeError``, so the fake has to return something task-shaped.
+    """
+
+    def __init__(self, coro: Any) -> None:
+        self.coro = coro
+        self.done_callbacks: list[Any] = []
+
+    def add_done_callback(self, cb: Any) -> None:
+        self.done_callbacks.append(cb)
+
+    def finish(self) -> None:
+        """Run the done-callbacks, as the event loop would on completion."""
+        for cb in self.done_callbacks:
+            cb(self)
+
+    def __hash__(self) -> int:  # must be set-insertable like a real Task
+        return id(self)
+
+
+def _fake_create_task(scheduled: list[Any]) -> Any:
+    """Build a ``create_task`` replacement that records tasks into ``scheduled``.
+
+    Closes the coroutine so pytest does not warn "coroutine was never awaited".
+    """
+
+    def _create_task(coro: Any) -> _FakeTask:
+        coro.close()
+        task = _FakeTask(coro)
+        scheduled.append(task)
+        return task
+
+    return _create_task
+
+
 # --------------------------------------------------------------- runtime wiring
 
 
@@ -334,7 +382,7 @@ def test_record_sdk_metrics_shared_collector_does_not_flush(
     from src.metrics.collector import MetricsCollector
 
     scheduled: list[Any] = []
-    monkeypatch.setattr(runner_mod.asyncio, "create_task", lambda coro: scheduled.append(coro))
+    monkeypatch.setattr(runner_mod.asyncio, "create_task", _fake_create_task(scheduled))
 
     collector = MetricsCollector(conversation_id="conv-1")
     _record_sdk_metrics("icinga", _sdk_result(), 4.2, None, collector)
@@ -353,12 +401,7 @@ def test_record_sdk_metrics_self_emits_when_enabled(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(runner_mod, "_tracing_enabled", lambda: True)
 
     scheduled: list[Any] = []
-
-    def _fake_create_task(coro: Any) -> None:
-        coro.close()  # we never run it; avoid "coroutine was never awaited"
-        scheduled.append(coro)
-
-    monkeypatch.setattr(runner_mod.asyncio, "create_task", _fake_create_task)
+    monkeypatch.setattr(runner_mod.asyncio, "create_task", _fake_create_task(scheduled))
 
     built: list[Any] = []
     real_cls = collector_mod.MetricsCollector
@@ -383,6 +426,36 @@ def test_record_sdk_metrics_self_emits_when_enabled(monkeypatch: pytest.MonkeyPa
     assert c.resolved_cost_usd() == pytest.approx(0.140644)
 
 
+def test_self_emitted_flush_is_gc_protected_then_released(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The background flush is strongly referenced until it completes (S7502).
+
+    ``asyncio.create_task`` only holds a weak reference to the task, so a
+    fire-and-forget flush can be garbage-collected mid-write and silently lose
+    the MLflow run. ``runner`` guards that with a module-level ``_background_tasks``
+    set plus a done-callback that discards. This pins both halves: without the
+    ``add``, metrics vanish under GC pressure; without the ``discard``, the set
+    grows unboundedly for the life of the process.
+    """
+    import src.agent.runner as runner_mod
+    from src.agent.runner import _background_tasks, _record_sdk_metrics
+
+    monkeypatch.setattr(runner_mod, "_tracing_enabled", lambda: True)
+
+    scheduled: list[Any] = []
+    monkeypatch.setattr(runner_mod.asyncio, "create_task", _fake_create_task(scheduled))
+
+    before = set(_background_tasks)
+    _record_sdk_metrics("icinga", _sdk_result(), 1.5, None, None)
+
+    task = scheduled[0]
+    assert task in _background_tasks, "flush task is not protected from GC"
+
+    task.finish()  # the event loop would fire the done-callback here
+    assert set(_background_tasks) == before, "completed task was never released"
+
+
 def test_record_sdk_metrics_self_emit_noop_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """owns=True AND tracing disabled: emit nothing (no collector, no flush)."""
     import src.agent.runner as runner_mod
@@ -390,7 +463,7 @@ def test_record_sdk_metrics_self_emit_noop_when_disabled(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(runner_mod, "_tracing_enabled", lambda: False)
     scheduled: list[Any] = []
-    monkeypatch.setattr(runner_mod.asyncio, "create_task", lambda coro: scheduled.append(coro))
+    monkeypatch.setattr(runner_mod.asyncio, "create_task", _fake_create_task(scheduled))
 
     _record_sdk_metrics("icinga", _sdk_result(), 1.5, None, None)
 
