@@ -11,9 +11,7 @@ test-python:
   stage: test
   image: python:3.11
   rules:
-    - changes:
-        - src/**
-        - tests/**
+    - when: always
   script:
     - pip install --upgrade pip
     - pip install -r requirements.txt

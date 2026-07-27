@@ -1768,7 +1768,8 @@ function renderChart(data) {
         }
     }
 
-    void new Chart(canvas, {
+    /* eslint-disable-next-line no-new -- Chart.js renders via constructor side-effect */
+    new Chart(canvas, {
         type: data.chart_type,
         data: {
             labels: data.labels,

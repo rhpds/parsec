@@ -111,18 +111,21 @@ def _simplify_directory_listing(content: str) -> str:
     return "\n".join(sorted(lines))
 
 
+_SKIP_DIRS = frozenset({"includes", "tests", "EXAMPLE_ACCOUNT"})
+
+
+def _is_catalog_dir_candidate(parts: list[str]) -> bool:
+    """Check if a tree entry's path parts represent a valid catalog directory."""
+    return not (parts[0].startswith(".") or parts[0] in _SKIP_DIRS)
+
+
 def _find_catalog_dirs(tree: list[dict]) -> dict[str, list[str]]:
     """Find catalog item directories from a git tree listing."""
     catalog_dirs: dict[str, list[str]] = {}
     for entry in tree:
         parts = entry["path"].split("/")
         if len(parts) >= 2 and entry["type"] == "tree":
-            # Skip hidden/special directories
-            if parts[0].startswith(".") or parts[0] in (
-                "includes",
-                "tests",
-                "EXAMPLE_ACCOUNT",
-            ):
+            if not _is_catalog_dir_candidate(parts):
                 continue
             if len(parts) == 2:
                 catalog_dirs.setdefault(entry["path"], [])
