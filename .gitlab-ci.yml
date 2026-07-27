@@ -17,7 +17,8 @@ test-python:
     - pip install -r requirements.txt
     - pip install ".[dev]"
     - pytest tests/ --cov=src --cov-report=xml:coverage.xml
-    - sed -i 's|<source>.*/src</source>|<source>./src</source>|' coverage.xml
+    - sed -i "s|<source>.*</source>|<source>src</source>|g" coverage.xml
+    - head -8 coverage.xml
   artifacts:
     paths:
       - coverage.xml
@@ -31,5 +32,8 @@ sonarqube:
   needs:
     - job: test-python
       optional: true
+      artifacts: true
+  dependencies:
+    - test-python
   tags:
     - itup-alm-x86
