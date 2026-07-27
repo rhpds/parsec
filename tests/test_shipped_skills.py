@@ -20,6 +20,7 @@ EXPECTED_SKILLS = {
     "cost-spike-investigation",
     "abuse-account-detection",
     "aap2-job-failure-triage",
+    "icinga-triage",
 }
 
 

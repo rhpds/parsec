@@ -354,9 +354,14 @@ def test_record_sdk_metrics_self_emits_when_enabled(monkeypatch: pytest.MonkeyPa
 
     scheduled: list[Any] = []
 
-    def _fake_create_task(coro: Any) -> None:
-        coro.close()  # we never run it; avoid "coroutine was never awaited"
+    class _FakeTask:
+        def add_done_callback(self, _cb: Any) -> None:
+            pass
+
+    def _fake_create_task(coro: Any) -> _FakeTask:
+        coro.close()
         scheduled.append(coro)
+        return _FakeTask()
 
     monkeypatch.setattr(runner_mod.asyncio, "create_task", _fake_create_task)
 
