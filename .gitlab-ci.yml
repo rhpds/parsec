@@ -15,7 +15,7 @@ test-python:
   script:
     - pip install --upgrade pip
     - pip install -r requirements.txt
-    - pip install ".[dev]"
+    - pip install -e ".[dev]"
     - pytest tests/ --cov=src --cov-report=xml:coverage.xml
     - sed -i "s|<source>.*</source>|<source>src</source>|g" coverage.xml
     - head -8 coverage.xml
