@@ -11,6 +11,8 @@ from src.config import get_config
 
 logger = logging.getLogger(__name__)
 
+_AGNOSTICD_V2_REPO = "agnosticd/agnosticd-v2"
+
 ANSIBLE_BEST_PRACTICES = """
 CRITICAL: All modules in before/after code MUST use FQCN (Fully Qualified Collection Name).
   CORRECT: ansible.builtin.uri, ansible.builtin.raw, kubernetes.core.k8s
@@ -66,7 +68,7 @@ KNOWN_PATTERNS: list[PatternMatch] = [
             "passes runner args to ansible-playbook. Fix: detect KUBERNETES_SERVICE_HOST "
             "env var in entrypoint.sh and install the ansible-playbook wrapper."
         ),
-        repo="agnosticd/agnosticd-v2",
+        repo=_AGNOSTICD_V2_REPO,
         file="tools/execution_environments/ee-multicloud-public/entrypoint.sh",
     ),
     PatternMatch(
@@ -89,7 +91,7 @@ KNOWN_PATTERNS: list[PatternMatch] = [
             "misconfigured. Verify ansible.cfg collections_path includes "
             "/runner/requirements_collections."
         ),
-        repo="agnosticd/agnosticd-v2",
+        repo=_AGNOSTICD_V2_REPO,
         file="ansible.cfg",
     ),
     PatternMatch(
@@ -100,7 +102,7 @@ KNOWN_PATTERNS: list[PatternMatch] = [
             "specific invalid line. Common causes: entrypoint crash, image pull failure, "
             "receptor communication issue."
         ),
-        repo="agnosticd/agnosticd-v2",
+        repo=_AGNOSTICD_V2_REPO,
         file="tools/execution_environments/ee-multicloud-public/entrypoint.sh",
     ),
 ]

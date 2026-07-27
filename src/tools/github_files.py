@@ -25,6 +25,8 @@ _AGNOSTICV_REPOS: list[tuple[str, str]] = [
     ("rhpds", "zt-rhelbu-agnosticv"),
 ]
 
+_GITHUB_ACCEPT_HEADER = "application/vnd.github+json"
+
 _SECRET_PATTERNS = re.compile(
     r"(access_key|secret_key|password|token|pull_secret|hmac_key|eab_key|"
     r"ssh_pass|secret_access|api_key|client_secret|activationkey)",
@@ -122,7 +124,7 @@ async def _build_catalog_index() -> None:
 
     headers = {
         "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
+        "Accept": _GITHUB_ACCEPT_HEADER,
     }
 
     async with httpx.AsyncClient(timeout=30) as client:
@@ -285,7 +287,7 @@ async def search_github_repo(
                 url,
                 headers={
                     "Authorization": f"Bearer {token}",
-                    "Accept": "application/vnd.github+json",
+                    "Accept": _GITHUB_ACCEPT_HEADER,
                 },
             )
             if resp.status_code != 200:
@@ -339,7 +341,7 @@ async def search_agnosticv_prs(
                     params={"state": state, "per_page": 50, "sort": "updated", "direction": "desc"},
                     headers={
                         "Authorization": f"Bearer {token}",
-                        "Accept": "application/vnd.github+json",
+                        "Accept": _GITHUB_ACCEPT_HEADER,
                     },
                 )
                 if resp.status_code == 403:
@@ -375,7 +377,7 @@ async def search_agnosticv_prs(
                                 params={"per_page": 100},
                                 headers={
                                     "Authorization": f"Bearer {token}",
-                                    "Accept": "application/vnd.github+json",
+                                    "Accept": _GITHUB_ACCEPT_HEADER,
                                 },
                             )
                             if files_resp.status_code == 200:
@@ -394,7 +396,7 @@ async def search_agnosticv_prs(
                                 params={"per_page": 100},
                                 headers={
                                     "Authorization": f"Bearer {token}",
-                                    "Accept": "application/vnd.github+json",
+                                    "Accept": _GITHUB_ACCEPT_HEADER,
                                 },
                             )
                             if files_resp.status_code == 200:

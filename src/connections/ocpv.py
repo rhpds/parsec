@@ -123,7 +123,9 @@ async def _get_client(cluster_name: str) -> httpx.AsyncClient:
 
         ctx = ssl.create_default_context()
         ca_bytes = b64decode(cluster_cfg["ca_data"])
-        with tempfile.NamedTemporaryFile(suffix=".crt", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            suffix=".crt", delete=False
+        ) as f:  # NOSONAR — near-instant local I/O, not a blocking network call
             f.write(ca_bytes)
             ca_path = f.name
         ctx.load_verify_locations(ca_path)

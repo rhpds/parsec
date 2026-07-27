@@ -126,7 +126,9 @@ class AgentSdkClient:
         allowed_tools: list[str] | None = None,
         mcp_servers: dict[str, Any] | None = None,
         max_turns: int | None = None,
-        timeout: float | None = None,
+        timeout: (
+            float | None
+        ) = None,  # NOSONAR — config parameter, not an httpx call; used with asyncio.timeout() below
     ) -> SdkResult:
         """Run a single agentic task via ``claude_agent_sdk.query()``.
 

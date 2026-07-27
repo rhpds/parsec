@@ -131,7 +131,10 @@ async def create_share(
     return ShareResponse(id=share_id, url=url)
 
 
-@router.get("/share/{share_id}")
+@router.get(
+    "/share/{share_id}",
+    responses={404: {"description": "Not Found"}, 422: {"description": "Unprocessable Entity"}},
+)
 async def get_share(
     share_id: str,
     request: Request,

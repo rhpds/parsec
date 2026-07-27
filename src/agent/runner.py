@@ -30,6 +30,9 @@ from src.llm import RUNTIME_SDK, RuntimeName, get_runtime
 
 logger = logging.getLogger(__name__)
 
+# Background tasks must be saved to prevent garbage collection (S7502)
+_background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
 
 class AgentRunner:
     """Dispatches a sub-agent task to the configured runtime.
@@ -397,7 +400,9 @@ def _record_sdk_metrics(
         # Self-emitted run: stamp the real wall-clock latency (this collector's
         # own timer was never started) and flush our own run.
         collector.total_latency_ms = duration * 1000
-        asyncio.create_task(collector.flush_to_mlflow())
+        task = asyncio.create_task(collector.flush_to_mlflow())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
 
 
 def _mark_sdk_unavailable(metrics: Any) -> None:

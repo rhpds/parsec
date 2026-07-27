@@ -34,7 +34,11 @@ class AlertResponse(BaseModel):
     duration_seconds: float
 
 
-@router.post("/investigate", response_model=AlertResponse)
+@router.post(
+    "/investigate",
+    response_model=AlertResponse,
+    responses={401: {"description": "Unauthorized"}, 503: {"description": "Service Unavailable"}},
+)
 async def investigate_alert(
     body: AlertRequest,
     x_api_key: Annotated[str | None, Header()] = None,

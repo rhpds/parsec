@@ -70,6 +70,9 @@ from src.tools.splunk import query_splunk
 
 logger = logging.getLogger(__name__)
 
+# Background tasks must be saved to prevent garbage collection (S7502)
+_background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
 # Directory for saved reports (on shared PVC so all pods can serve them)
 REPORTS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "reports"
@@ -973,7 +976,9 @@ async def run_agent(  # noqa: C901
                         pass
                 yield event
             collector.stop_timer()
-            asyncio.create_task(collector.flush_to_mlflow())
+            task = asyncio.create_task(collector.flush_to_mlflow())
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
             return
 
         # Full orchestrator mode
@@ -988,7 +993,9 @@ async def run_agent(  # noqa: C901
         except ValueError as e:
             yield sse_error(str(e))
             collector.stop_timer()
-            asyncio.create_task(collector.flush_to_mlflow())
+            task = asyncio.create_task(collector.flush_to_mlflow())
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
             yield sse_done()
             return
 
@@ -1098,7 +1105,9 @@ async def run_agent(  # noqa: C901
                 logger.exception("Claude API error in orchestrator")
                 yield sse_error(f"Claude API error: {e}")
                 collector.stop_timer()
-                asyncio.create_task(collector.flush_to_mlflow())
+                task = asyncio.create_task(collector.flush_to_mlflow())
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
                 yield sse_done()
                 return
 
@@ -1112,7 +1121,9 @@ async def run_agent(  # noqa: C901
             if not tool_use_blocks:
                 yield sse_event("history", {"messages": _serialize_messages(messages)})
                 collector.stop_timer()
-                asyncio.create_task(collector.flush_to_mlflow())
+                task = asyncio.create_task(collector.flush_to_mlflow())
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
                 yield sse_done()
                 return
 
@@ -1158,7 +1169,9 @@ async def run_agent(  # noqa: C901
         )
         yield sse_event("history", {"messages": _serialize_messages(messages)})
         collector.stop_timer()
-        asyncio.create_task(collector.flush_to_mlflow())
+        task = asyncio.create_task(collector.flush_to_mlflow())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
         yield sse_done()
 
     finally:

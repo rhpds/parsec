@@ -17,8 +17,15 @@ from src.connections.babylon import (
 
 logger = logging.getLogger(__name__)
 
+# Shared Babylon API group domain
+_BABYLON_DOMAIN = "babylon.gpte.redhat.com"
+
+# Frequently-used label keys
+_LABEL_CATALOG_ITEM_NAME = f"{_BABYLON_DOMAIN}/catalogItemName"
+_LABEL_WORKSHOP_ID = f"{_BABYLON_DOMAIN}/workshop-id"
+
 # CRD coordinates
-CATALOG_ITEM_GROUP = "babylon.gpte.redhat.com"
+CATALOG_ITEM_GROUP = _BABYLON_DOMAIN
 CATALOG_ITEM_VERSION = "v1"
 CATALOG_ITEM_PLURAL = "catalogitems"
 CATALOG_NAMESPACES = ["babylon-catalog-prod", "babylon-catalog-event", "babylon-catalog-dev"]
@@ -45,11 +52,11 @@ RESOURCE_POOL_VERSION = "v1"
 RESOURCE_POOL_PLURAL = "resourcepools"
 RESOURCE_POOL_NAMESPACE = "poolboy"
 
-WORKSHOP_GROUP = "babylon.gpte.redhat.com"
+WORKSHOP_GROUP = _BABYLON_DOMAIN
 WORKSHOP_VERSION = "v1"
 WORKSHOP_PLURAL = "workshops"
 
-MULTI_WORKSHOP_GROUP = "babylon.gpte.redhat.com"
+MULTI_WORKSHOP_GROUP = _BABYLON_DOMAIN
 MULTI_WORKSHOP_VERSION = "v1"
 MULTI_WORKSHOP_PLURAL = "multiworkshops"
 
@@ -283,7 +290,7 @@ def _extract_deployment_info(resource_claim: dict) -> dict:
     result: dict[str, Any] = {
         "name": metadata.get("name", ""),
         "namespace": metadata.get("namespace", ""),
-        "catalog_item": labels.get("babylon.gpte.redhat.com/catalogItemName", ""),
+        "catalog_item": labels.get(_LABEL_CATALOG_ITEM_NAME, ""),
         "catalog_namespace": labels.get("babylon.gpte.redhat.com/catalogItemNamespace", ""),
         "asset_uuid": labels.get("gpte.redhat.com/asset-uuid", ""),
         "lifespan": spec.get("lifespan", {}),
@@ -506,8 +513,8 @@ def _extract_workshop_info(workshop: dict) -> dict:
     return {
         "name": metadata.get("name", ""),
         "namespace": metadata.get("namespace", ""),
-        "catalog_item": labels.get("babylon.gpte.redhat.com/catalogItemName", ""),
-        "workshop_id": labels.get("babylon.gpte.redhat.com/workshop-id", ""),
+        "catalog_item": labels.get(_LABEL_CATALOG_ITEM_NAME, ""),
+        "workshop_id": labels.get(_LABEL_WORKSHOP_ID, ""),
         "display_name": spec.get("displayName", ""),
         "description": spec.get("description", ""),
         "open_registration": spec.get("openRegistration", False),
@@ -1182,8 +1189,8 @@ async def _get_workshop(
         "name": ws_meta.get("name", ""),
         "namespace": ws_meta.get("namespace", ""),
         "display_name": ws_spec.get("displayName", ""),
-        "catalog_item": ws_labels.get("babylon.gpte.redhat.com/catalogItemName", ""),
-        "workshop_id": ws_labels.get("babylon.gpte.redhat.com/workshop-id", ""),
+        "catalog_item": ws_labels.get(_LABEL_CATALOG_ITEM_NAME, ""),
+        "workshop_id": ws_labels.get(_LABEL_WORKSHOP_ID, ""),
         "requester": ws_annotations.get("demo.redhat.com/requester", ""),
         "multiworkshop": ws_labels.get("babylon.gpte.redhat.com/multiworkshop", ""),
         "lifespan": ws_spec.get("lifespan", {}),
@@ -1482,8 +1489,8 @@ async def _get_multiworkshop(
         ws_info: dict[str, Any] = {
             "name": ws_meta.get("name", ""),
             "display_name": ws_spec.get("displayName", ""),
-            "catalog_item": ws_labels.get("babylon.gpte.redhat.com/catalogItemName", ""),
-            "workshop_id": ws_labels.get("babylon.gpte.redhat.com/workshop-id", ""),
+            "catalog_item": ws_labels.get(_LABEL_CATALOG_ITEM_NAME, ""),
+            "workshop_id": ws_labels.get(_LABEL_WORKSHOP_ID, ""),
             "provision_count": {
                 "ordered": provision_count.get("ordered", 0),
                 "active": active,

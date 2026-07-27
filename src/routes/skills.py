@@ -40,7 +40,7 @@ def _serialize(m: SkillManifest) -> dict:
     }
 
 
-@router.get("/skills")
+@router.get("/skills", responses={500: {"description": "Internal Server Error"}})
 async def list_skills():
     """Return all discoverable skills across configured sources."""
     try:

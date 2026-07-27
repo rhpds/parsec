@@ -295,9 +295,9 @@ function renderSkills(skills) {
         card.appendChild(desc);
 
         const bits = [];
-        if (s.parsec && s.parsec.version) bits.push("v" + s.parsec.version);
-        if (s.parsec && s.parsec.domain) bits.push(s.parsec.domain);
-        if (s.allowed_tools && s.allowed_tools.length) bits.push(s.allowed_tools.length + " tools");
+        if (s.parsec?.version) bits.push("v" + s.parsec.version);
+        if (s.parsec?.domain) bits.push(s.parsec.domain);
+        if (s.allowed_tools?.length) bits.push(s.allowed_tools.length + " tools");
         if (bits.length) {
             const meta = document.createElement("div");
             meta.className = "skill-meta";
@@ -521,9 +521,9 @@ document.getElementById("share-modal").addEventListener("click", function(e) {
 
 // Theme toggle — preference is applied in <head> to prevent flash
 document.getElementById("theme-toggle-btn").addEventListener("click", function() {
-    const current = document.documentElement.getAttribute("data-theme");
+    const current = document.documentElement.dataset.theme;
     const next = current === "light" ? "dark" : "light";
-    document.documentElement.setAttribute("data-theme", next);
+    document.documentElement.dataset.theme = next;
     localStorage.setItem("parsec_theme", next);
 });
 
@@ -2159,12 +2159,12 @@ function renderDebugResult() {
     const tabs = debugResultEl.querySelectorAll(".debug-tab");
     tabs.forEach(function(tab) {
         tab.onclick = function() {
-            debugActiveTab = tab.getAttribute("data-tab");
+            debugActiveTab = tab.dataset.tab;
             tabs.forEach(function(t) { t.classList.remove("active"); });
             tab.classList.add("active");
             renderDebugTab();
         };
-        if (tab.getAttribute("data-tab") === debugActiveTab) {
+        if (tab.dataset.tab === debugActiveTab) {
             tab.classList.add("active");
         } else {
             tab.classList.remove("active");
@@ -2448,14 +2448,14 @@ function extractChoices(text) {
 function renderChoices(options, multi) {
     const container = document.createElement("div");
     container.className = "choices-container";
-    container.setAttribute("data-active", "true");
+    container.dataset.active = "true";
 
     options.forEach(function(opt) {
         const btn = document.createElement("button");
         btn.className = "choice-btn";
         btn.textContent = opt;
         btn.addEventListener("click", function() {
-            if (container.getAttribute("data-active") !== "true") return;
+            if (container.dataset.active !== "true") return;
             if (multi) {
                 btn.classList.toggle("selected");
             } else {
@@ -2473,7 +2473,7 @@ function renderChoices(options, multi) {
         submitBtn.className = "choices-submit";
         submitBtn.textContent = "Submit";
         submitBtn.addEventListener("click", function() {
-            if (container.getAttribute("data-active") !== "true") return;
+            if (container.dataset.active !== "true") return;
             const selected = [];
             container.querySelectorAll(".choice-btn.selected").forEach(function(b) {
                 selected.push(b.textContent);
@@ -2491,7 +2491,7 @@ function renderChoices(options, multi) {
 }
 
 function collapseChoices(container, selectedText) {
-    container.setAttribute("data-active", "false");
+    container.dataset.active = "false";
     const summary = document.createElement("div");
     summary.className = "choices-summary";
     summary.innerHTML = 'Selected: <span class="choices-selected-values"></span>';

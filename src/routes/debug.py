@@ -38,7 +38,15 @@ class EERequest(BaseModel):
     ee_id: int
 
 
-@router.post("/diagnose")
+@router.post(
+    "/diagnose",
+    responses={
+        400: {"description": "Bad Request"},
+        401: {"description": "Unauthorized"},
+        404: {"description": "Not Found"},
+        500: {"description": "Internal Server Error"},
+    },
+)
 async def diagnose(body: DiagnoseRequest):
     """Diagnose an AAP2 job failure (Phases 1-3 + fix).
 
@@ -117,7 +125,10 @@ async def diagnose(body: DiagnoseRequest):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/correlation")
+@router.post(
+    "/correlation",
+    responses={400: {"description": "Bad Request"}, 500: {"description": "Internal Server Error"}},
+)
 async def correlation(body: CorrelationRequest):
     """Fetch correlation data for a job (Phase 4)."""
     try:
@@ -131,7 +142,10 @@ async def correlation(body: CorrelationRequest):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/ee")
+@router.post(
+    "/ee",
+    responses={400: {"description": "Bad Request"}, 500: {"description": "Internal Server Error"}},
+)
 async def ee_info(body: EERequest):
     """Fetch execution environment info (Phase 5)."""
     try:

@@ -92,7 +92,10 @@ def _write_json(fpath: str, data: dict) -> None:
         json.dump(data, f)
 
 
-@router.post("/conversations")
+@router.post(
+    "/conversations",
+    responses={403: {"description": "Forbidden"}, 422: {"description": "Unprocessable Entity"}},
+)
 async def save_conversation(
     body: SaveConversationRequest,
     request: Request,
@@ -188,7 +191,7 @@ def _list_conversations_sync(owner: str, *, all_users: bool = False) -> list[dic
     return conversations
 
 
-@router.get("/conversations")
+@router.get("/conversations", responses={403: {"description": "Forbidden"}})
 async def list_conversations(
     request: Request,
     all_users: bool = False,
@@ -210,7 +213,7 @@ async def list_conversations(
     return {"conversations": conversations}
 
 
-@router.get("/conversations/export")
+@router.get("/conversations/export", responses={403: {"description": "Forbidden"}})
 async def export_conversations(
     request: Request,
     x_forwarded_user: Annotated[str | None, Header()] = None,
@@ -248,7 +251,14 @@ def _export_all_conversations_sync() -> list[dict]:
     return conversations
 
 
-@router.get("/conversations/{conv_id}")
+@router.get(
+    "/conversations/{conv_id}",
+    responses={
+        403: {"description": "Forbidden"},
+        404: {"description": "Not Found"},
+        422: {"description": "Unprocessable Entity"},
+    },
+)
 async def get_conversation(
     conv_id: str,
     request: Request,
@@ -275,7 +285,14 @@ async def get_conversation(
     return data
 
 
-@router.delete("/conversations/{conv_id}")
+@router.delete(
+    "/conversations/{conv_id}",
+    responses={
+        403: {"description": "Forbidden"},
+        404: {"description": "Not Found"},
+        422: {"description": "Unprocessable Entity"},
+    },
+)
 async def delete_conversation(
     conv_id: str,
     request: Request,
