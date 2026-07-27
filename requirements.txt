@@ -13,4 +13,10 @@ google-cloud-bigquery>=3.4.0
 google-cloud-resource-manager>=1.12.0
 mcp>=1.8.0
 mlflow>=2.10.0
-claude-agent-sdk>=0.1.0
+# Pinned, not floated: the wheel ships its own `claude` binary under
+# claude_agent_sdk/_bundled/, and the SDK's _find_cli() prefers it over
+# anything on PATH. So this pin — not the `npm install -g
+# @anthropic-ai/claude-code@<version>` in dockerfiles/Dockerfile — decides
+# which CLI actually executes with the pod's credentials. Floating it meant
+# every image rebuild could silently change the runtime.
+claude-agent-sdk==0.2.106

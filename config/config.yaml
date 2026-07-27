@@ -108,6 +108,14 @@ icinga:
   # localhost (not the service name).
   # Set in config.local.yaml or PARSEC_ICINGA__MCP_URL.
   mcp_url: ""
+  # --- Agent SDK runtime only (agent.runtime: sdk) ---
+  # Under the SDK the Icinga backend is a raw MCP server, so `allowed_tools` is
+  # the only thing standing between the model and Icinga's write actions
+  # (acknowledge_problem, schedule_downtime, reschedule_check, add_comment,
+  # remove_comment, remove_downtime). The profile grants read-only tools only.
+  # sdk_allow_writes: false   # grant the six write actions as well
+  # sdk_allowed_tools: []     # override the tool list outright, for a sidecar
+  #                           # that names its tools differently
 
 splunk:
   # Red Hat Corporate Splunk REST API endpoint.
@@ -159,8 +167,19 @@ agent:
     # max_turns: 10      # falls back to anthropic.max_tool_rounds
     # cwd: ""            # working directory for the SDK subprocess (default: pwd)
     setting_sources: ["project"]   # where the SDK discovers SKILL.md files
-    env: {}              # extra env vars merged into the subprocess (e.g. OTel)
+    # Extra env vars merged into the subprocess (e.g. OTel). The subprocess
+    # inherits an ALLOWLIST of the app's environment, never all of it — see
+    # build_subprocess_env() in src/llm/agent_sdk_client.py. Anything outside
+    # that list (for example AWS credentials for a Bedrock backend) has to be
+    # granted here explicitly.
+    env: {}
     timeout: 300         # per-call wall-clock ceiling (seconds); null/0 disables
+    # cli_path: ""       # absolute path to the `claude` binary. Empty leaves the
+    #                    # choice to the SDK, whose _find_cli() prefers the CLI
+    #                    # bundled inside the claude-agent-sdk wheel over the
+    #                    # npm-installed one on PATH — so the Dockerfile's
+    #                    # `npm install -g @anthropic-ai/claude-code@<pin>` does
+    #                    # NOT decide which binary runs. Set this to make it do so.
 
 skills:
   # Discovery roots for agent skills (SKILL.md directories).
