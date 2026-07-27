@@ -9,6 +9,5 @@ stages:
 sonarqube:
   variables:
     SONAR_PROJECT_KEY: "com.redhat.rhpds.parsec"
-  needs: []
   tags:
     - itup-alm-x86
