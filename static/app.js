@@ -64,14 +64,14 @@ try {
     const saved = localStorage.getItem("parsec_history");
     if (saved) conversationHistory = JSON.parse(saved);
     currentConversationId = localStorage.getItem("parsec_conv_id") || null;
-} catch (e) {
-    // Ignore corrupt data
+} catch {
+    // Ignore corrupt localStorage data
 }
 
 // ─── File upload ───
 uploadBtn.addEventListener("click", function() { fileInput.click(); });
 
-fileInput.addEventListener("change", function() {
+fileInput.addEventListener("change", async function() {
     const file = fileInput.files[0];
     if (!file) return;
     if (file.size > MAX_UPLOAD_SIZE) {
@@ -79,14 +79,11 @@ fileInput.addEventListener("change", function() {
         fileInput.value = "";
         return;
     }
-    const reader = new FileReader();
-    reader.onload = function() {
-        pendingAttachment = { name: file.name, content: reader.result };
-        attachmentNameEl.textContent = file.name;
-        attachmentIndicator.style.display = "flex";
-        uploadBtn.classList.add("has-file");
-    };
-    reader.readAsText(file);
+    const content = await file.text();
+    pendingAttachment = { name: file.name, content: content };
+    attachmentNameEl.textContent = file.name;
+    attachmentIndicator.style.display = "flex";
+    uploadBtn.classList.add("has-file");
 });
 
 attachmentRemoveBtn.addEventListener("click", function() {
@@ -336,7 +333,7 @@ function renderSkills(skills) {
         isAdmin = true;
         tabHistory.style.display = "block";
         refreshLearningsCount();
-    }).catch(function() {});
+    }).catch(function() { /* expected: non-critical fetch */ });
 })();
 
 function refreshLearningsCount() {
@@ -352,7 +349,7 @@ function refreshLearningsCount() {
         } else {
             countEl.textContent = "empty";
         }
-    }).catch(function() {});
+    }).catch(function() { /* expected: non-critical fetch */ });
 }
 
 document.getElementById("learnings-view-btn").addEventListener("click", function() {
@@ -364,7 +361,7 @@ document.getElementById("learnings-view-btn").addEventListener("click", function
         const textarea = document.getElementById("learnings-text");
         textarea.value = data.content || "(no learnings yet)";
         document.getElementById("learnings-modal").style.display = "flex";
-    }).catch(function() {});
+    }).catch(function() { /* expected: non-critical fetch */ });
 });
 
 document.getElementById("learnings-copy-btn").addEventListener("click", function() {
@@ -400,7 +397,7 @@ function loadConversationList() {
     }).then(function(data) {
         if (!data) return;
         renderConversationList(data.conversations || []);
-    }).catch(function() {});
+    }).catch(function() { /* expected: non-critical fetch */ });
 }
 
 function renderConversationList(conversations) {
@@ -471,7 +468,7 @@ function loadConversation(convId) {
         try {
             localStorage.setItem("parsec_history", JSON.stringify(conversationHistory));
             localStorage.setItem("parsec_conv_id", currentConversationId);
-        } catch (e) {}
+        } catch { /* expected: localStorage may be unavailable */ }
         window.location.href = window.location.pathname;
     }).catch(function(err) {
         alert("Failed to load conversation: " + err.message);
@@ -494,11 +491,11 @@ function saveConversation() {
     }).then(function(data) {
         if (!data) return;
         currentConversationId = data.id;
-        try { localStorage.setItem("parsec_conv_id", data.id); } catch (e) {}
+        try { localStorage.setItem("parsec_conv_id", data.id); } catch { /* expected: localStorage may be unavailable */ }
         loadConversationList();
         // Refresh learnings count after background analysis has time to complete
         setTimeout(refreshLearningsCount, 20000);
-    }).catch(function() {});
+    }).catch(function() { /* expected: non-critical fetch */ });
 }
 
 // Share modal handlers
@@ -602,7 +599,7 @@ marked.setOptions({ renderer: renderer });
                 // Continue Investigation button
                 document.getElementById("continue-btn").addEventListener("click", function() {
                     conversationHistory = shareData.messages;
-                    try { localStorage.setItem("parsec_history", JSON.stringify(conversationHistory)); } catch (e) {}
+                    try { localStorage.setItem("parsec_history", JSON.stringify(conversationHistory)); } catch { /* expected: localStorage may be unavailable */ }
                     window.location.href = window.location.pathname;
                 });
                 return;
@@ -739,7 +736,7 @@ form.addEventListener("submit", async (e) => {
                 // Finalize any previous tool that didn't get a result
                 if (currentToolEl) {
                     const prevStatus = currentToolEl.querySelector(".tool-status");
-                    if (prevStatus && prevStatus.classList.contains("running")) {
+                    if (prevStatus?.classList.contains("running")) {
                         prevStatus.className = "tool-status done";
                         prevStatus.textContent = "done";
                     }
@@ -886,7 +883,7 @@ form.addEventListener("submit", async (e) => {
                     if (reasons.length > 0) {
                         html += "<ul>";
                         reasons.forEach(function(r) {
-                            html += "<li>" + r.replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</li>";
+                            html += "<li>" + r.replaceAll("<", "&lt;").replaceAll(">", "&gt;") + "</li>";
                         });
                         html += "</ul>";
                     }
@@ -900,7 +897,7 @@ form.addEventListener("submit", async (e) => {
             case "history":
                 // Store full message history (includes tool calls/results)
                 conversationHistory = data.messages;
-                try { localStorage.setItem("parsec_history", JSON.stringify(conversationHistory)); } catch (e) {}
+                try { localStorage.setItem("parsec_history", JSON.stringify(conversationHistory)); } catch { /* expected: localStorage may be unavailable */ }
                 // Auto-save conversation to server
                 saveConversation();
                 break;
@@ -965,13 +962,7 @@ form.addEventListener("submit", async (e) => {
                         const markerReason = match[2].trim();
                         // Create callout if not already present from SSE event
                         const existing = contentEl.querySelector(".confidence-callout");
-                        if (!existing) {
-                            const mc = document.createElement("div");
-                            mc.className = "confidence-callout " + markerLevel;
-                            const mTitle = markerLevel === "low" ? "Low confidence" : "Medium confidence";
-                            mc.innerHTML = '<div class="confidence-title">\u26A0 ' + mTitle + "</div><ul><li>" + markerReason.replace(/</g, "&lt;") + "</li></ul>";
-                            contentEl.appendChild(mc);
-                        } else {
+                        if (existing) {
                             // Merge: downgrade level if needed, add reason
                             if (markerLevel === "low" && existing.classList.contains("medium")) {
                                 existing.classList.remove("medium");
@@ -984,10 +975,16 @@ form.addEventListener("submit", async (e) => {
                                 li.textContent = markerReason;
                                 ul.appendChild(li);
                             }
+                        } else {
+                            const mc = document.createElement("div");
+                            mc.className = "confidence-callout " + markerLevel;
+                            const mTitle = markerLevel === "low" ? "Low confidence" : "Medium confidence";
+                            mc.innerHTML = '<div class="confidence-title">\u26A0 ' + mTitle + "</div><ul><li>" + markerReason.replaceAll("<", "&lt;") + "</li></ul>";
+                            contentEl.appendChild(mc);
                         }
                     }
                     // Strip markers from displayed text
-                    el.innerHTML = html.replace(/\[confidence:\s*(?:medium|low)\s*\|\s*[^\]]+\]/gi, "");
+                    el.innerHTML = html.replaceAll(/\[confidence:\s*(?:medium|low)\s*\|\s*[^\]]+\]/gi, "");
                 });
 
                 // Extract choice buttons from {{choices}} blocks before rendering final text
@@ -1033,7 +1030,7 @@ form.addEventListener("submit", async (e) => {
         }
         if (!currentConversationId) {
             currentConversationId = crypto.randomUUID();
-            try { localStorage.setItem("parsec_conv_id", currentConversationId); } catch (e) {}
+            try { localStorage.setItem("parsec_conv_id", currentConversationId); } catch { /* expected: localStorage may be unavailable */ }
         }
         const payload = {
             question: fullQuestion,
@@ -1292,7 +1289,7 @@ function renderChart(data) {
         }
     }
 
-    const chartInstance = new Chart(canvas, {
+    new Chart(canvas, {
         type: data.chart_type,
         data: {
             labels: data.labels,
@@ -1335,7 +1332,7 @@ function renderChart(data) {
     pngBtn.textContent = "Export PNG";
     pngBtn.addEventListener("click", function() {
         const link = document.createElement("a");
-        link.download = (data.title || "chart").replace(/[^a-z0-9]/gi, "_") + ".png";
+        link.download = (data.title || "chart").replaceAll(/[^a-z0-9]/gi, "_") + ".png";
         link.href = canvas.toDataURL("image/png");
         link.click();
     });
@@ -1351,7 +1348,7 @@ function renderChart(data) {
         });
         const blob = new Blob([rows.join("\n")], { type: "text/csv" });
         const link = document.createElement("a");
-        link.download = (data.title || "chart").replace(/[^a-z0-9]/gi, "_") + ".csv";
+        link.download = (data.title || "chart").replaceAll(/[^a-z0-9]/gi, "_") + ".csv";
         link.href = URL.createObjectURL(blob);
         link.click();
     });
@@ -1441,7 +1438,7 @@ function exportResponseAsMarkdown(messageEl) {
 
     const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
     const link = document.createElement("a");
-    const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+    const timestamp = new Date().toISOString().slice(0, 19).replaceAll(/[T:]/g, "-");
     link.download = "parsec-" + timestamp + ".md";
     link.href = URL.createObjectURL(blob);
     link.click();
@@ -1463,7 +1460,7 @@ function exportResponseAsPDF(messageEl) {
         const img = document.createElement("img");
         img.src = origCanvases[i].toDataURL("image/png");
         img.style.maxWidth = "100%";
-        cloneCanvases[i].parentNode.replaceChild(img, cloneCanvases[i]);
+        cloneCanvases[i].replaceWith(img);
     }
 
     // Apply light theme inline styles for readable PDF
@@ -1497,7 +1494,7 @@ function exportResponseAsPDF(messageEl) {
     document.body.appendChild(clone);
 
     html2canvas(clone, { scale: 2, useCORS: true }).then(function(canvas) {
-        document.body.removeChild(clone);
+        clone.remove();
 
         const jsPDF = window.jspdf.jsPDF;
 
@@ -1535,7 +1532,7 @@ function exportResponseAsPDF(messageEl) {
             pageNum++;
         }
 
-        const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+        const timestamp = new Date().toISOString().slice(0, 19).replaceAll(/[T:]/g, "-");
         doc.save("parsec-" + timestamp + ".pdf");
     });
 }
@@ -1547,7 +1544,7 @@ function exportResponseAsJSON(messageEl) {
     const json = JSON.stringify(toolResults, null, 2);
     const blob = new Blob([json], { type: "application/json;charset=utf-8" });
     const link = document.createElement("a");
-    const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+    const timestamp = new Date().toISOString().slice(0, 19).replaceAll(/[T:]/g, "-");
     link.download = "parsec-" + timestamp + ".json";
     link.href = URL.createObjectURL(blob);
     link.click();
@@ -1556,15 +1553,15 @@ function exportResponseAsJSON(messageEl) {
 function csvEscapeField(value) {
     if (value === null || value === undefined) return "";
     const str = String(value);
-    if (str.indexOf(",") >= 0 || str.indexOf('"') >= 0 || str.indexOf("\n") >= 0) {
-        return '"' + str.replace(/"/g, '""') + '"';
+    if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+        return '"' + str.replaceAll('"', '""') + '"';
     }
     return str;
 }
 
 function parseMarkdownTable(str) {
     // Parse a markdown table string into an array of objects
-    const lines = str.split("\n").filter(function(l) { return l.trim().indexOf("|") === 0; });
+    const lines = str.split("\n").filter(function(l) { return l.trim().startsWith("|"); });
     if (lines.length < 3) return null; // need header + separator + at least one row
     // Check that the second line is a separator (| --- | --- |)
     if (!/^\|[\s\-:|]+\|$/.test(lines[1].trim())) return null;
@@ -1594,7 +1591,7 @@ function parseAllMarkdownTables(str) {
         const line = allLines[i].trim();
 
         // Look for table start (line with |)
-        if (line.indexOf("|") === 0) {
+        if (line.startsWith("|")) {
             // Try to find preceding header (lines starting with ##)
             let title = null;
             for (let j = i - 1; j >= Math.max(0, i - 5); j--) {
@@ -1603,7 +1600,7 @@ function parseAllMarkdownTables(str) {
                     title = prevLine.replace(/^#{1,6}\s+/, "");
                     break;
                 }
-                if (prevLine.length > 0 && prevLine.indexOf("|") < 0) {
+                if (prevLine.length > 0 && !prevLine.includes("|")) {
                     // Use first non-empty, non-table line as title
                     if (!title) title = prevLine;
                     break;
@@ -1612,7 +1609,7 @@ function parseAllMarkdownTables(str) {
 
             // Collect all consecutive table lines
             const tableLines = [];
-            while (i < allLines.length && allLines[i].trim().indexOf("|") === 0) {
+            while (i < allLines.length && allLines[i].trim().startsWith("|")) {
                 tableLines.push(allLines[i]);
                 i++;
             }
@@ -1620,7 +1617,7 @@ function parseAllMarkdownTables(str) {
             // Parse this table
             const tableStr = tableLines.join("\n");
             const parsed = parseMarkdownTable(tableStr);
-            if (parsed && parsed.length > 0) {
+            if (parsed?.length > 0) {
                 tables.push({
                     title: title || "Table " + (tables.length + 1),
                     rows: parsed
@@ -1642,16 +1639,16 @@ function findTabularData(result) {
     if (typeof result !== "object" || result === null) return null;
     // Search top-level fields for the first array of objects
     const keys = Object.keys(result);
-    for (let i = 0; i < keys.length; i++) {
-        const val = result[keys[i]];
+    for (const key of keys) {
+        const val = result[key];
         if (Array.isArray(val) && val.length > 0 && typeof val[0] === "object" && val[0] !== null) {
             return val;
         }
     }
     // Fallback: try to parse markdown tables from string fields
-    for (let j = 0; j < keys.length; j++) {
-        const sval = result[keys[j]];
-        if (typeof sval === "string" && sval.indexOf("|") >= 0) {
+    for (const key of keys) {
+        const sval = result[key];
+        if (typeof sval === "string" && sval.includes("|")) {
             const parsed = parseMarkdownTable(sval);
             if (parsed) return parsed;
         }
@@ -1670,7 +1667,7 @@ function exportResponseAsCSV(messageEl) {
         const rows = findTabularData(tr.result);
 
         // For report generation tools, also check input.content for markdown tables
-        if (!rows && tr.tool === "generate_report" && tr.input && tr.input.content) {
+        if (!rows && tr.tool === "generate_report" && tr.input?.content) {
             const tables = parseAllMarkdownTables(tr.input.content);
             if (tables.length > 0) {
                 // Export each table as a separate CSV section
@@ -1687,8 +1684,7 @@ function exportResponseAsCSV(messageEl) {
                     });
 
                     const lines = [];
-                    lines.push("# " + table.title);
-                    lines.push(headers.map(csvEscapeField).join(","));
+                    lines.push("# " + table.title, headers.map(csvEscapeField).join(","));
                     table.rows.forEach(function(row) {
                         const vals = headers.map(function(h) {
                             let val = row[h];
@@ -1719,10 +1715,8 @@ function exportResponseAsCSV(messageEl) {
             });
 
             const lines = [];
-            // Section header comment
-            lines.push("# " + (tr.tool || "results"));
-            // Column headers
-            lines.push(headers.map(csvEscapeField).join(","));
+            // Section header + column headers
+            lines.push("# " + (tr.tool || "results"), headers.map(csvEscapeField).join(","));
             // Data rows
             rows.forEach(function(row) {
                 const vals = headers.map(function(h) {
@@ -1741,8 +1735,7 @@ function exportResponseAsCSV(messageEl) {
     if (csvSections.length === 0) {
         toolResults.forEach(function(tr) {
             const lines = [];
-            lines.push("# " + (tr.tool || "results"));
-            lines.push("key,value");
+            lines.push("# " + (tr.tool || "results"), "key,value");
             Object.keys(tr.result || {}).forEach(function(key) {
                 let val = tr.result[key];
                 if (typeof val === "object" && val !== null) val = JSON.stringify(val);
@@ -1755,7 +1748,7 @@ function exportResponseAsCSV(messageEl) {
     const csv = csvSections.join("\n\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const link = document.createElement("a");
-    const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+    const timestamp = new Date().toISOString().slice(0, 19).replaceAll(/[T:]/g, "-");
     link.download = "parsec-" + timestamp + ".csv";
     link.href = URL.createObjectURL(blob);
     link.click();
@@ -1801,9 +1794,9 @@ function renderSharedMessages(messages, interactive) {
                         if (curText.length > 0) finalText = curText;
                         // Check if next is tool_result-only user message
                         const next = messages[j + 1];
-                        if (next && next.role === "user" && Array.isArray(next.content)) {
+                        if (next?.role === "user" && Array.isArray(next.content)) {
                             const hasRealText = next.content.some(function(b) {
-                                return b.type !== "tool_result" && b.text && b.text.trim();
+                                return b.type !== "tool_result" && b.text?.trim();
                             });
                             if (!hasRealText) {
                                 j += 2; // skip tool_result user msg + continue to next assistant
@@ -1882,7 +1875,7 @@ function renderSharedMessages(messages, interactive) {
                     toolCalls.forEach(function(tc) {
                         const result = toolResultMap[tc.id];
                         const isDelegation = tc.name in delegationTools;
-                        if (isDelegation && result && result.tool_calls) {
+                        if (isDelegation && result?.tool_calls) {
                             totalQueries += result.tool_calls;
                             delegations.push({ tc: tc, result: result, agentType: delegationTools[tc.name] });
                         } else {
@@ -2218,7 +2211,7 @@ function renderFailingTaskTab() {
         const ref = pi.scmBranch || pi.scmRevision || "\u2014";
         let link = "";
         if (pi.scmUrl) {
-            const repoMatch = pi.scmUrl.match(/github\.com[:/]([^/]+\/[^/.]+)/);
+            const repoMatch = /github\.com[:/]([^/]+\/[^/.]+)/.exec(pi.scmUrl);
             if (repoMatch) {
                 const ghRef = pi.scmBranch || pi.scmRevision || "main";
                 link = ' <a href="https://github.com/' + repoMatch[1] + '/tree/' + ghRef + '" target="_blank" rel="noopener" class="debug-link">View in GitHub</a>';
@@ -2231,7 +2224,7 @@ function renderFailingTaskTab() {
     try {
         const parsed = JSON.parse(errorText);
         errorText = JSON.stringify(parsed, null, 2);
-    } catch (e) {}
+    } catch { /* expected: errorText may not be valid JSON */ }
     html += '<div class="debug-code">' + escHtml(errorText) + '</div>';
     debugTabContentEl.innerHTML = html;
 }
@@ -2257,7 +2250,7 @@ function renderFixTab() {
 
     // Format explanation as paragraphs — split on double newlines, or sentences
     const rawExpl = fix.explanation || "";
-    const paragraphs = rawExpl.indexOf("\n\n") >= 0
+    const paragraphs = rawExpl.includes("\n\n")
         ? rawExpl.split(/\n\n+/)
         : rawExpl.split(/(?<=\.)\s+(?=[A-Z])/);
     html += '<div class="debug-section-title">Explanation</div>';
@@ -2384,7 +2377,7 @@ function renderEEInfoData() {
     if (ee.sourceFiles && ee.sourceFiles.length > 0) {
         html += '<div class="debug-section-title">EE Definition Files</div>';
         ee.sourceFiles.forEach(function(file) {
-            const fileId = "ee-file-" + file.name.replace(/\W/g, "-");
+            const fileId = "ee-file-" + file.name.replaceAll(/\W/g, "-");
             html += '<div class="debug-card">';
             html += '<button class="debug-ee-file-btn" onclick="toggleEEFile(\'' + fileId + '\', this)">\u25b6 ' + escHtml(file.name) + '</button>';
             html += '<div id="' + fileId + '" style="display:none;margin-top:8px"><div class="debug-code">' + escHtml(file.content) + '</div></div>';
@@ -2428,7 +2421,7 @@ function renderFixPreview() {
 
 function extractChoices(text) {
     // Match {{choices}} or {{choices multi}} ... {{/choices}}
-    const match = text.match(/\{\{choices(\s+multi)?\}\}\s*\n([\s\S]*?)\{\{\/choices\}\}/);
+    const match = /\{\{choices(\s+multi)?\}\}\s*\n([\s\S]*?)\{\{\/choices\}\}/.exec(text);
     if (!match) return null;
 
     const multi = !!match[1];

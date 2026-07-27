@@ -218,7 +218,7 @@ def resolve_cluster_from_comment(comment: str) -> str:
     # The cluster API server is at "https://api.<cluster-domain>:6443"
     import re
 
-    url_match = re.search(r"https?://console-openshift-console\.apps\.(.+?)(?:\s|$)", comment)
+    url_match = re.search(r"https?://console-openshift-console\.apps\.(\S+)", comment)
     if not url_match:
         return ""
 

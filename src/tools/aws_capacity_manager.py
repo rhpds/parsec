@@ -12,6 +12,8 @@ from src.connections.aws import get_aws_session
 
 logger = logging.getLogger(__name__)
 
+_ISO_DATETIME_FMT = "%Y-%m-%dT%H:%M:%SZ"
+
 # Metric presets
 _UTILIZATION_METRICS = [
     "reservation-avg-utilization-inst",
@@ -323,15 +325,15 @@ def _parse_available_range(error_msg: str) -> tuple[datetime, datetime] | None:
     )
     if not match:
         return None
-    avail_start = datetime.strptime(match.group(1), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
-    avail_end = datetime.strptime(match.group(2), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    avail_start = datetime.strptime(match.group(1), _ISO_DATETIME_FMT).replace(tzinfo=UTC)
+    avail_end = datetime.strptime(match.group(2), _ISO_DATETIME_FMT).replace(tzinfo=UTC)
     return avail_start, avail_end
 
 
 async def _clamp_to_available_range(
     ec2_client,
-    metric: str,
-    filters: list[dict],
+    _metric: str,
+    _filters: list[dict],
     start_time: datetime,
     end_time: datetime,
 ) -> tuple[datetime, datetime]:
@@ -439,8 +441,8 @@ async def query_aws_capacity_manager(
         return {
             "metric": metric,
             "period": {
-                "start": start_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "end": end_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "start": start_time.strftime(_ISO_DATETIME_FMT),
+                "end": end_time.strftime(_ISO_DATETIME_FMT),
             },
             "group_by": effective_group_by,
             "results": results,

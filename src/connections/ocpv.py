@@ -1,5 +1,6 @@
 """OCPV cluster connections — httpx-based K8s API clients for CNV infrastructure."""
 
+import asyncio
 import logging
 import os
 import ssl
@@ -119,15 +120,17 @@ async def _get_client(cluster_name: str) -> httpx.AsyncClient:
     if not cluster_cfg["verify_ssl"]:
         verify = False
     elif cluster_cfg.get("ca_data"):
-        import tempfile
-
         ctx = ssl.create_default_context()
         ca_bytes = b64decode(cluster_cfg["ca_data"])
-        with tempfile.NamedTemporaryFile(
-            suffix=".crt", delete=False
-        ) as f:  # NOSONAR — near-instant local I/O, not a blocking network call
-            f.write(ca_bytes)
-            ca_path = f.name
+
+        def _load_ca() -> str:
+            import tempfile
+
+            with tempfile.NamedTemporaryFile(suffix=".crt", delete=False) as f:
+                f.write(ca_bytes)
+                return f.name
+
+        ca_path = await asyncio.to_thread(_load_ca)
         ctx.load_verify_locations(ca_path)
         os.unlink(ca_path)
         verify = ctx
@@ -165,7 +168,7 @@ def resolve_cluster_from_comment(comment: str) -> str:
 
     import re
 
-    url_match = re.search(r"https?://console-openshift-console\.apps\.(.+?)(?:\s|$)", comment)
+    url_match = re.search(r"https?://console-openshift-console\.apps\.(\S+)", comment)
     if not url_match:
         return ""
 

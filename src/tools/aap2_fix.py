@@ -141,9 +141,7 @@ def match_pattern(
                 catalog_path = extract_catalog_item_path(extra_vars, job_template_name)
                 if catalog_path:
                     file = file.replace("<catalog_item>", catalog_path)
-                    github_url = (
-                        f"https://github.com/{repo}/blob/master/" f"{catalog_path}/common.yaml"
-                    )
+                    github_url = f"https://github.com/{repo}/blob/master/{catalog_path}/common.yaml"
 
             return {
                 "source": "pattern",

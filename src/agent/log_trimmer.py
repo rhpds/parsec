@@ -49,7 +49,7 @@ def _extract_json_errors(line: str) -> str | None:
     json_str = line[start + 3 :].strip()
     try:
         data = json.loads(json_str)
-    except (json.JSONDecodeError, ValueError):
+    except ValueError:
         return None
 
     parts: list[str] = []
@@ -86,7 +86,7 @@ def _extract_k8s_pod_status(line: str) -> str | None:
     json_str = line[start + 3 :].strip()
     try:
         data = json.loads(json_str)
-    except (json.JSONDecodeError, ValueError):
+    except ValueError:
         return None
 
     resources = data.get("resources")

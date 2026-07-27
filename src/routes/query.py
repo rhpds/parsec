@@ -1,7 +1,9 @@
 """Query endpoint — POST /api/query with SSE streaming."""
 
+import asyncio
 import logging
 import os
+import pathlib
 import ssl
 import time
 from typing import Annotated
@@ -39,8 +41,8 @@ async def _fetch_openshift_groups() -> list[dict]:
         return []
 
     try:
-        with open(_SA_TOKEN_PATH) as f:
-            token = f.read().strip()
+        token = await asyncio.to_thread(pathlib.Path(_SA_TOKEN_PATH).read_text)
+        token = token.strip()
 
         ssl_ctx = ssl.create_default_context(cafile=_SA_CA_PATH)
         async with httpx.AsyncClient(verify=ssl_ctx) as client:
@@ -169,7 +171,10 @@ async def _check_user_allowed(request: Request, user: str | None) -> None:
         )
 
 
-@router.get("/auth/check")
+@router.get(
+    "/auth/check",
+    responses={403: {"description": "Forbidden"}},
+)
 async def auth_check(
     request: Request,
     x_forwarded_user: Annotated[str | None, Header()] = None,
@@ -181,7 +186,10 @@ async def auth_check(
     return {"authorized": True, "user": user}
 
 
-@router.post("/query")
+@router.post(
+    "/query",
+    responses={403: {"description": "Forbidden"}},
+)
 async def query(
     body: QueryRequest,
     request: Request,
@@ -226,7 +234,14 @@ async def query(
     )
 
 
-@router.get("/reports/{filename}")
+@router.get(
+    "/reports/{filename}",
+    responses={
+        400: {"description": "Bad Request"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Not Found"},
+    },
+)
 async def download_report(
     filename: str,
     request: Request,

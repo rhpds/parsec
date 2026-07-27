@@ -224,7 +224,7 @@ def _summarize_conversation(messages: list) -> str:
     return result
 
 
-async def _ai_analyze(messages: list, tool_calls: list[dict]) -> list[dict]:
+async def _ai_analyze(messages: list, _tool_calls: list[dict]) -> list[dict]:
     """Use Claude to analyze a conversation and extract learnings."""
     cfg = get_config()
     backend = cfg.anthropic.get("backend", "direct")

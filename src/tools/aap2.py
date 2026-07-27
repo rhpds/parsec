@@ -456,7 +456,7 @@ async def query_aap2(
     except httpx.ConnectError as e:
         return {"error": f"Cannot reach AAP2 controller: {e}"}
     except httpx.HTTPStatusError as e:
-        return {"error": f"AAP2 API error: {e.response.status_code} " f"{e.response.reason_phrase}"}
+        return {"error": f"AAP2 API error: {e.response.status_code} {e.response.reason_phrase}"}
     except Exception:
         logger.exception("Unexpected error in query_aap2")
         return {"error": "Internal error querying AAP2 — check logs"}
