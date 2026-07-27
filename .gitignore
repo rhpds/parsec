@@ -33,5 +33,8 @@ reports/
 .coverage
 htmlcov/
 
+node_modules/
+coverage-js/
+
 data/.pricing_etags.json
 data/debug/

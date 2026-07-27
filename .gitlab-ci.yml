@@ -1,0 +1,58 @@
+---
+include:
+  - project: enterprise-pipelines/gitlab-ci/includes
+    file: SAST/sonarqube.yml
+
+stages:
+  - test
+  - static-analysis
+
+test-python:
+  stage: test
+  image: python:3.11
+  rules:
+    - when: always
+  script:
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+    - pip install -e ".[dev]"
+    - pytest tests/ --cov=src --cov-report=xml:coverage.xml
+    - sed -i "s|<source>.*</source>|<source>src</source>|g" coverage.xml
+    - head -8 coverage.xml
+  artifacts:
+    paths:
+      - coverage.xml
+    expire_in: 1 hour
+  tags:
+    - itup-alm-x86
+
+test-javascript:
+  stage: test
+  image: node:20
+  rules:
+    - when: always
+  script:
+    - npm ci
+    - npx vitest run --coverage
+  artifacts:
+    paths:
+      - coverage-js/lcov.info
+    expire_in: 1 hour
+  tags:
+    - itup-alm-x86
+
+sonarqube:
+  variables:
+    SONAR_PROJECT_KEY: "com.redhat.rhpds.parsec"
+  needs:
+    - job: test-python
+      optional: true
+      artifacts: true
+    - job: test-javascript
+      optional: true
+      artifacts: true
+  dependencies:
+    - test-python
+    - test-javascript
+  tags:
+    - itup-alm-x86

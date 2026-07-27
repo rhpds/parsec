@@ -1,6 +1,7 @@
 """Learnings admin API — view/delete agent learnings (admin users only)."""
 
 import logging
+from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
@@ -18,11 +19,11 @@ async def _require_admin(user: str | None) -> None:
         raise HTTPException(status_code=403, detail="Admin access required")
 
 
-@router.get("/learnings")
+@router.get("/learnings", responses={403: {"description": "Forbidden"}})
 async def get_learnings_api(
     request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """Get the current learnings content (admin only)."""
     user = x_forwarded_email or x_forwarded_user
@@ -33,11 +34,11 @@ async def get_learnings_api(
     return {"content": content, "has_learnings": bool(content.strip())}
 
 
-@router.delete("/learnings")
+@router.delete("/learnings", responses={403: {"description": "Forbidden"}})
 async def delete_learnings_api(
     request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """Clear the learnings file (admin only)."""
     user = x_forwarded_email or x_forwarded_user
@@ -52,8 +53,8 @@ async def delete_learnings_api(
 @router.get("/learnings/check")
 async def check_learnings_admin(
     request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """Check if the current user is an admin (used by the UI to show/hide the panel)."""
     user = x_forwarded_email or x_forwarded_user

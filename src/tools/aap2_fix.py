@@ -11,6 +11,8 @@ from src.config import get_config
 
 logger = logging.getLogger(__name__)
 
+_AGNOSTICD_V2_REPO = "agnosticd/agnosticd-v2"
+
 ANSIBLE_BEST_PRACTICES = """
 CRITICAL: All modules in before/after code MUST use FQCN (Fully Qualified Collection Name).
   CORRECT: ansible.builtin.uri, ansible.builtin.raw, kubernetes.core.k8s
@@ -66,7 +68,7 @@ KNOWN_PATTERNS: list[PatternMatch] = [
             "passes runner args to ansible-playbook. Fix: detect KUBERNETES_SERVICE_HOST "
             "env var in entrypoint.sh and install the ansible-playbook wrapper."
         ),
-        repo="agnosticd/agnosticd-v2",
+        repo=_AGNOSTICD_V2_REPO,
         file="tools/execution_environments/ee-multicloud-public/entrypoint.sh",
     ),
     PatternMatch(
@@ -89,7 +91,7 @@ KNOWN_PATTERNS: list[PatternMatch] = [
             "misconfigured. Verify ansible.cfg collections_path includes "
             "/runner/requirements_collections."
         ),
-        repo="agnosticd/agnosticd-v2",
+        repo=_AGNOSTICD_V2_REPO,
         file="ansible.cfg",
     ),
     PatternMatch(
@@ -100,7 +102,7 @@ KNOWN_PATTERNS: list[PatternMatch] = [
             "specific invalid line. Common causes: entrypoint crash, image pull failure, "
             "receptor communication issue."
         ),
-        repo="agnosticd/agnosticd-v2",
+        repo=_AGNOSTICD_V2_REPO,
         file="tools/execution_environments/ee-multicloud-public/entrypoint.sh",
     ),
 ]
@@ -139,9 +141,7 @@ def match_pattern(
                 catalog_path = extract_catalog_item_path(extra_vars, job_template_name)
                 if catalog_path:
                     file = file.replace("<catalog_item>", catalog_path)
-                    github_url = (
-                        f"https://github.com/{repo}/blob/master/" f"{catalog_path}/common.yaml"
-                    )
+                    github_url = f"https://github.com/{repo}/blob/master/{catalog_path}/common.yaml"
 
             return {
                 "source": "pattern",
@@ -172,6 +172,165 @@ async def _fetch_source_file(repo: str, path: str, ref: str = "main") -> str | N
     return None
 
 
+def _filter_sensitive_vars(extra_vars: dict | None) -> dict:
+    """Filter sensitive and oversized vars from extra_vars."""
+    if not extra_vars:
+        return {}
+    safe_vars = {}
+    for k, v in extra_vars.items():
+        if any(s in k for s in ("password", "secret", "token", "key")):
+            continue
+        if isinstance(v, str) and len(v) > 200:
+            continue
+        safe_vars[k] = v
+    return safe_vars
+
+
+async def _resolve_agnosticd_role(parts: list[str]) -> tuple[str, str]:
+    """Resolve an agnosticd role's repo and source file.
+
+    Returns (role_repo_hint, source_section).
+    """
+    role_fqcn = ".".join(parts)
+    collection_fqcn = parts[1]
+    collection_hyphen = collection_fqcn.replace("_", "-")
+    role_name = ".".join(parts[2:])
+    role_file = f"roles/{role_name}/tasks/main.yml"
+
+    repo_name = collection_fqcn
+    source_content = await _fetch_source_file(f"agnosticd/{collection_fqcn}", role_file)
+    if not source_content and collection_hyphen != collection_fqcn:
+        source_content = await _fetch_source_file(f"agnosticd/{collection_hyphen}", role_file)
+        if source_content:
+            repo_name = collection_hyphen
+
+    hint = (
+        f'\nIMPORTANT: The role "{role_fqcn}" is in '
+        f'GitHub repo "agnosticd/{repo_name}".\n'
+        f'The file path is "{role_file}".\n'
+        f'Use repo "agnosticd/{repo_name}" in your response, '
+        f'NOT "redhat-cop/agnosticd".\n'
+    )
+    source_section = ""
+    if source_content:
+        source_section = (
+            f"\nSource file (agnosticd/{repo_name}/{role_file}):\n"
+            f"```yaml\n{source_content[:3000]}\n```\n"
+            f"Reference line numbers from this source in your response.\n"
+        )
+    return hint, source_section
+
+
+async def _resolve_role_source(role_fqcn: str) -> tuple[str, str]:
+    """Resolve role FQCN to repo hint and source section for AI prompt.
+
+    Returns (role_repo_hint, source_section).
+    """
+    if not role_fqcn:
+        return "", ""
+
+    parts = role_fqcn.split(".")
+    if len(parts) >= 3 and parts[0] == "agnosticd":
+        return await _resolve_agnosticd_role(parts)
+    if len(parts) >= 2:
+        ns = parts[0]
+        collection = parts[1]
+        role_name = ".".join(parts[2:]) if len(parts) > 2 else ""
+        hint = (
+            f'\nThe role "{role_fqcn}" is in namespace "{ns}", '
+            f'collection "{collection}".\n'
+            f'The file path is likely "roles/{role_name}/tasks/main.yml".\n'
+            f'Try repo "{ns}/{collection}" on GitHub.\n'
+        )
+        return hint, ""
+    return "", ""
+
+
+def _create_vertex_client(cfg):
+    """Create Anthropic Vertex AI client."""
+    import anthropic
+    from google.oauth2 import service_account
+
+    project_id = cfg.anthropic.get("vertex_project_id", "") or cfg.gcp.get("project_id", "")
+    region = cfg.anthropic.get("vertex_region", "us-east5")
+    kwargs: dict = {"project_id": project_id, "region": region}
+    creds_path = cfg.anthropic.get("vertex_credentials_path", "")
+    if creds_path and os.path.isfile(creds_path):
+        credentials = service_account.Credentials.from_service_account_file(
+            creds_path,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+        kwargs["credentials"] = credentials
+    return anthropic.AnthropicVertex(**kwargs)
+
+
+def _create_anthropic_client(cfg):
+    """Create the appropriate Anthropic client based on backend config.
+
+    Returns the client or None if not available.
+    """
+    import anthropic
+
+    backend = cfg.anthropic.get("backend", "api")
+
+    if backend == "vertex":
+        return _create_vertex_client(cfg)
+    if backend == "bedrock":
+        region = cfg.anthropic.get("bedrock_region", "us-east-1")
+        return anthropic.AnthropicBedrock(aws_region=region)
+
+    api_key = cfg.anthropic.get("api_key", "") or os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return None
+    return anthropic.Anthropic(api_key=api_key)
+
+
+def _parse_ai_fix_response(text: str) -> dict | None:
+    """Parse AI fix recommendation from response text."""
+    # Strip markdown code fences
+    text = re.sub(r"```json\s*", "", text)
+    text = re.sub(r"```\s*$", "", text)
+
+    json_match = re.search(r"\{[\s\S]*\}", text)
+    if not json_match:
+        logger.warning("AI response did not contain JSON: %s", text[:200])
+        return {
+            "source": "ai",
+            "file": "N/A",
+            "repo": "unknown",
+            "line": None,
+            "before": None,
+            "after": None,
+            "explanation": f"AI analysis returned non-JSON response: {text[:500]}",
+            "githubUrl": "",
+            "lintWarning": None,
+        }
+
+    parsed = json.loads(json_match.group(0))
+    logger.info("AI fix: %s", parsed.get("explanation", "")[:100])
+
+    line_num = parsed.get("line")
+    line_suffix = f"#L{line_num}" if isinstance(line_num, int) else ""
+    file_val = parsed.get("file", "N/A")
+    repo_val = parsed.get("repo", "unknown")
+
+    return {
+        "source": "ai",
+        "file": file_val,
+        "repo": repo_val,
+        "line": line_num if isinstance(line_num, int) else None,
+        "before": parsed.get("before"),
+        "after": parsed.get("after"),
+        "explanation": parsed.get("explanation", ""),
+        "githubUrl": (
+            f"https://github.com/{repo_val}/blob/main/{file_val}{line_suffix}"
+            if file_val and file_val != "N/A"
+            else f"https://github.com/{repo_val}"
+        ),
+        "lintWarning": None,
+    }
+
+
 async def ai_analyze_fix(
     failing_task: dict,
     extra_vars: dict | None = None,
@@ -185,62 +344,10 @@ async def ai_analyze_fix(
     backend = cfg.anthropic.get("backend", "api")
     model = cfg.anthropic.get("model", "claude-sonnet-4-6")
 
-    # Filter sensitive vars
-    safe_vars = {}
-    if extra_vars:
-        for k, v in extra_vars.items():
-            if any(s in k for s in ("password", "secret", "token", "key")):
-                continue
-            if isinstance(v, str) and len(v) > 200:
-                continue
-            safe_vars[k] = v
+    safe_vars = _filter_sensitive_vars(extra_vars)
 
-    # Derive repo + file path from role FQCN and fetch source
-    role_repo_hint = ""
-    source_section = ""
     role_fqcn = failing_task.get("roleFqcn") or ""
-    if role_fqcn:
-        parts = role_fqcn.split(".")
-        if len(parts) >= 3 and parts[0] == "agnosticd":
-            collection_fqcn = parts[1]
-            collection_hyphen = collection_fqcn.replace("_", "-")
-            role_name = ".".join(parts[2:])
-            role_file = f"roles/{role_name}/tasks/main.yml"
-
-            repo_name = collection_fqcn
-            source_content = await _fetch_source_file(f"agnosticd/{collection_fqcn}", role_file)
-            if not source_content and collection_hyphen != collection_fqcn:
-                source_content = await _fetch_source_file(
-                    f"agnosticd/{collection_hyphen}", role_file
-                )
-                if source_content:
-                    repo_name = collection_hyphen
-
-            role_repo_hint = (
-                f'\nIMPORTANT: The role "{role_fqcn}" is in '
-                f'GitHub repo "agnosticd/{repo_name}".\n'
-                f'The file path is "{role_file}".\n'
-                f'Use repo "agnosticd/{repo_name}" in your response, '
-                f'NOT "redhat-cop/agnosticd".\n'
-            )
-            if source_content:
-                source_section = (
-                    f"\nSource file "
-                    f"(agnosticd/{repo_name}/{role_file}):\n"
-                    f"```yaml\n{source_content[:3000]}\n```\n"
-                    f"Reference line numbers from this source "
-                    f"in your response.\n"
-                )
-        elif len(parts) >= 2:
-            ns = parts[0]
-            collection = parts[1]
-            role_name = ".".join(parts[2:]) if len(parts) > 2 else ""
-            role_repo_hint = (
-                f'\nThe role "{role_fqcn}" is in namespace "{ns}", '
-                f'collection "{collection}".\n'
-                f'The file path is likely "roles/{role_name}/tasks/main.yml".\n'
-                f'Try repo "{ns}/{collection}" on GitHub.\n'
-            )
+    role_repo_hint, source_section = await _resolve_role_source(role_fqcn)
 
     action = (extra_vars or {}).get("ACTION", "unknown")
     prompt = f"""You are diagnosing a failed Ansible task from an AAP2 job.
@@ -278,32 +385,10 @@ The "before" field must show real code from the source, not a summary.
 The "after" field must show the corrected version with FQCN."""
 
     try:
-        import anthropic
-
-        client: anthropic.Anthropic | anthropic.AnthropicBedrock | anthropic.AnthropicVertex
-        if backend == "vertex":
-            from google.oauth2 import service_account
-
-            project_id = cfg.anthropic.get("vertex_project_id", "") or cfg.gcp.get("project_id", "")
-            region = cfg.anthropic.get("vertex_region", "us-east5")
-            kwargs: dict = {"project_id": project_id, "region": region}
-            creds_path = cfg.anthropic.get("vertex_credentials_path", "")
-            if creds_path and os.path.isfile(creds_path):
-                credentials = service_account.Credentials.from_service_account_file(
-                    creds_path,
-                    scopes=["https://www.googleapis.com/auth/cloud-platform"],
-                )
-                kwargs["credentials"] = credentials
-            client = anthropic.AnthropicVertex(**kwargs)
-        elif backend == "bedrock":
-            region = cfg.anthropic.get("bedrock_region", "us-east-1")
-            client = anthropic.AnthropicBedrock(aws_region=region)
-        else:
-            api_key = cfg.anthropic.get("api_key", "") or os.environ.get("ANTHROPIC_API_KEY", "")
-            if not api_key:
-                logger.info("AI not available: no API key configured")
-                return None
-            client = anthropic.Anthropic(api_key=api_key)
+        client = _create_anthropic_client(cfg)
+        if client is None:
+            logger.info("AI not available: no API key configured")
+            return None
 
         logger.info("Running AI fix analysis (backend=%s)...", backend)
         response = client.messages.create(
@@ -313,49 +398,7 @@ The "after" field must show the corrected version with FQCN."""
         )
 
         text = "".join(b.text for b in response.content if hasattr(b, "text"))
-
-        # Strip markdown code fences if present
-        text = re.sub(r"```json\s*", "", text)
-        text = re.sub(r"```\s*$", "", text)
-
-        json_match = re.search(r"\{[\s\S]*\}", text)
-        if not json_match:
-            logger.warning("AI response did not contain JSON: %s", text[:200])
-            return {
-                "source": "ai",
-                "file": "N/A",
-                "repo": "unknown",
-                "line": None,
-                "before": None,
-                "after": None,
-                "explanation": f"AI analysis returned non-JSON response: {text[:500]}",
-                "githubUrl": "",
-                "lintWarning": None,
-            }
-
-        parsed = json.loads(json_match.group(0))
-        logger.info("AI fix: %s", parsed.get("explanation", "")[:100])
-
-        line_num = parsed.get("line")
-        line_suffix = f"#L{line_num}" if isinstance(line_num, int) else ""
-        file_val = parsed.get("file", "N/A")
-        repo_val = parsed.get("repo", "unknown")
-
-        return {
-            "source": "ai",
-            "file": file_val,
-            "repo": repo_val,
-            "line": line_num if isinstance(line_num, int) else None,
-            "before": parsed.get("before"),
-            "after": parsed.get("after"),
-            "explanation": parsed.get("explanation", ""),
-            "githubUrl": (
-                f"https://github.com/{repo_val}/blob/main/{file_val}{line_suffix}"
-                if file_val and file_val != "N/A"
-                else f"https://github.com/{repo_val}"
-            ),
-            "lintWarning": None,
-        }
+        return _parse_ai_fix_response(text)
     except Exception as e:
         logger.warning("AI fix analysis failed: %s", e)
         return None

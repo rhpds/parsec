@@ -38,7 +38,60 @@ class EERequest(BaseModel):
     ee_id: int
 
 
-@router.post("/diagnose")
+async def _fetch_project_info_safe(cluster_name: str, project_id: int | None) -> dict | None:
+    """Fetch project info, returning None on failure."""
+    if not project_id:
+        return None
+    try:
+        return await fetch_project_info(cluster_name, project_id)
+    except Exception as e:
+        logger.warning("Failed to fetch project info: %s", e)
+        return None
+
+
+async def _diagnose_failed_job(
+    cluster_name: str, job_id: int, metadata: dict, result: dict
+) -> None:
+    """Phase 2-3: extract failing task from stdout and recommend a fix."""
+    stdout = await fetch_job_stdout(cluster_name, job_id)
+    if not stdout:
+        return
+    failing_task = extract_failing_task(stdout)
+    if not failing_task:
+        return
+    result["failingTask"] = failing_task
+    fix = await recommend_fix(
+        failing_task,
+        extra_vars=metadata["extraVars"],
+        job_template_name=metadata.get("jobTemplateName"),
+    )
+    if fix:
+        result["fix"] = fix
+
+
+async def _diagnose_error_job(cluster_name: str, metadata: dict, result: dict) -> None:
+    """Phase 5: pattern-match job_explanation and inspect EE for status=error."""
+    if metadata["jobExplanation"]:
+        fix = match_pattern(metadata["jobExplanation"])
+        if fix:
+            result["fix"] = fix
+    if not metadata["executionEnvironment"]:
+        return
+    try:
+        result["eeInfo"] = await fetch_ee_info(cluster_name, metadata["executionEnvironment"])
+    except Exception as e:
+        logger.warning("EE inspection failed: %s", e)
+
+
+@router.post(
+    "/diagnose",
+    responses={
+        400: {"description": "Bad Request"},
+        401: {"description": "Unauthorized"},
+        404: {"description": "Not Found"},
+        500: {"description": "Internal Server Error"},
+    },
+)
 async def diagnose(body: DiagnoseRequest):
     """Diagnose an AAP2 job failure (Phases 1-3 + fix).
 
@@ -50,59 +103,20 @@ async def diagnose(body: DiagnoseRequest):
 
         logger.info("Diagnosing job %d on controller %s", job_id, cluster_name)
 
-        # Phase 1: Fetch job metadata
         metadata = await fetch_job_metadata(cluster_name, job_id)
-
         result: dict = {
             "metadata": metadata,
             "failingTask": None,
-            "projectInfo": None,
+            "projectInfo": await _fetch_project_info_safe(cluster_name, metadata.get("projectId")),
             "fix": None,
             "eeInfo": None,
         }
 
-        # Fetch project info for SCM ref
-        if metadata.get("projectId"):
-            try:
-                result["projectInfo"] = await fetch_project_info(
-                    cluster_name, metadata["projectId"]
-                )
-            except Exception as e:
-                logger.warning("Failed to fetch project info: %s", e)
-
-        # Phase 2: If failed, fetch stdout and extract failing task
         if metadata["status"] == "failed":
-            stdout = await fetch_job_stdout(cluster_name, job_id)
-            if stdout:
-                failing_task = extract_failing_task(stdout)
-                if failing_task:
-                    result["failingTask"] = failing_task
+            await _diagnose_failed_job(cluster_name, job_id, metadata, result)
 
-                    # Phase 3: Recommend fix
-                    fix = await recommend_fix(
-                        failing_task,
-                        extra_vars=metadata["extraVars"],
-                        job_template_name=metadata.get("jobTemplateName"),
-                    )
-                    if fix:
-                        result["fix"] = fix
-
-        # Auto Phase 5 for status=error
         if metadata["status"] == "error":
-            # Try pattern match on job_explanation
-            if metadata["jobExplanation"]:
-                fix = match_pattern(metadata["jobExplanation"])
-                if fix:
-                    result["fix"] = fix
-
-            # Auto-fetch EE info
-            if metadata["executionEnvironment"]:
-                try:
-                    result["eeInfo"] = await fetch_ee_info(
-                        cluster_name, metadata["executionEnvironment"]
-                    )
-                except Exception as e:
-                    logger.warning("EE inspection failed: %s", e)
+            await _diagnose_error_job(cluster_name, metadata, result)
 
         return result
 
@@ -117,7 +131,10 @@ async def diagnose(body: DiagnoseRequest):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/correlation")
+@router.post(
+    "/correlation",
+    responses={400: {"description": "Bad Request"}, 500: {"description": "Internal Server Error"}},
+)
 async def correlation(body: CorrelationRequest):
     """Fetch correlation data for a job (Phase 4)."""
     try:
@@ -131,7 +148,10 @@ async def correlation(body: CorrelationRequest):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/ee")
+@router.post(
+    "/ee",
+    responses={400: {"description": "Bad Request"}, 500: {"description": "Internal Server Error"}},
+)
 async def ee_info(body: EERequest):
     """Fetch execution environment info (Phase 5)."""
     try:

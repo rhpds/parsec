@@ -389,6 +389,63 @@ async def _find_jobs(
     }
 
 
+def _validate_job_action(action: str, controller: str, job_id: int | None) -> dict | str:
+    """Validate and resolve controller for job-specific actions.
+
+    Returns error dict or resolved cluster name string.
+    """
+    if not job_id:
+        return {"error": f"job_id is required for {action}"}
+    if not controller:
+        return {"error": f"controller is required for {action}"}
+    return resolve_controller(controller)
+
+
+async def _dispatch_aap2_action(
+    action: str,
+    controller: str,
+    job_id: int | None,
+    failed_only: bool,
+    changed_only: bool,
+    status: str,
+    created_after: str,
+    created_before: str,
+    template_name: str,
+    max_results: int,
+) -> dict:
+    """Dispatch AAP2 action to the appropriate handler."""
+    if action == "get_job":
+        result = _validate_job_action(action, controller, job_id)
+        if isinstance(result, dict):
+            return result
+        assert job_id is not None  # validated by _validate_job_action
+        return await _get_job(result, job_id)
+
+    if action == "get_job_log":
+        result = _validate_job_action(action, controller, job_id)
+        if isinstance(result, dict):
+            return result
+        assert job_id is not None  # validated by _validate_job_action
+        return await _get_job_log(result, job_id)
+
+    if action == "get_job_events":
+        result = _validate_job_action(action, controller, job_id)
+        if isinstance(result, dict):
+            return result
+        assert job_id is not None  # validated by _validate_job_action
+        return await _get_job_events(result, job_id, failed_only, changed_only, max_results)
+
+    if action == "find_jobs":
+        return await _find_jobs(
+            controller, status, created_after, created_before, template_name, max_results
+        )
+
+    return {
+        "error": f"Unknown action: '{action}'. "
+        "Use get_job, get_job_log, get_job_events, or find_jobs."
+    }
+
+
 async def query_aap2(
     action: str,
     controller: str = "",
@@ -405,58 +462,24 @@ async def query_aap2(
     max_results = min(max_results, 200)
 
     try:
-        if action == "get_job":
-            if not job_id:
-                return {"error": "job_id is required for get_job"}
-            if not controller:
-                return {"error": "controller is required for get_job"}
-            cluster_name = resolve_controller(controller)
-            return await _get_job(cluster_name, job_id)
-
-        elif action == "get_job_log":
-            if not job_id:
-                return {"error": "job_id is required for get_job_log"}
-            if not controller:
-                return {"error": "controller is required for get_job_log"}
-            cluster_name = resolve_controller(controller)
-            return await _get_job_log(cluster_name, job_id)
-
-        elif action == "get_job_events":
-            if not job_id:
-                return {"error": "job_id is required for get_job_events"}
-            if not controller:
-                return {"error": "controller is required for get_job_events"}
-            cluster_name = resolve_controller(controller)
-            return await _get_job_events(
-                cluster_name,
-                job_id,
-                failed_only,
-                changed_only,
-                max_results,
-            )
-
-        elif action == "find_jobs":
-            return await _find_jobs(
-                controller,
-                status,
-                created_after,
-                created_before,
-                template_name,
-                max_results,
-            )
-
-        else:
-            return {
-                "error": f"Unknown action: '{action}'. "
-                "Use get_job, get_job_log, get_job_events, or find_jobs."
-            }
-
+        return await _dispatch_aap2_action(
+            action,
+            controller,
+            job_id,
+            failed_only,
+            changed_only,
+            status,
+            created_after,
+            created_before,
+            template_name,
+            max_results,
+        )
     except (ValueError, LookupError, PermissionError) as e:
         return {"error": str(e)}
     except httpx.ConnectError as e:
         return {"error": f"Cannot reach AAP2 controller: {e}"}
     except httpx.HTTPStatusError as e:
-        return {"error": f"AAP2 API error: {e.response.status_code} " f"{e.response.reason_phrase}"}
+        return {"error": f"AAP2 API error: {e.response.status_code} {e.response.reason_phrase}"}
     except Exception:
         logger.exception("Unexpected error in query_aap2")
         return {"error": "Internal error querying AAP2 — check logs"}

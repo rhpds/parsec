@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 ASSUME_ROLE_NAME = "OrganizationAccountAccessRole"
 
+_SAAS_AUTO_RENEW = "SaaS (Auto-Renew)"
+
 # Inline session policy: read-only actions only
 _SESSION_POLICY = json.dumps(
     {
@@ -226,15 +228,15 @@ def _classify_agreement(
 ) -> str:
     """Classify an agreement based on its terms (mirrors marketplace investigator)."""
     if "recurringPaymentTerm" in term_types:
-        return "SaaS (Auto-Renew)"
+        return _SAAS_AUTO_RENEW
     if "renewalTerm" in term_types:
         if auto_renew is False:
             return "SaaS (Auto-Renew Disabled)"
-        return "SaaS (Auto-Renew)"
+        return _SAAS_AUTO_RENEW
     if "fixedUpfrontPricingTerm" in term_types or "configurableUpfrontPricingTerm" in term_types:
         return "Fixed/Upfront"
     if has_end_date and estimated_cost is not None and estimated_cost > 0:
-        return "SaaS (Auto-Renew)"
+        return _SAAS_AUTO_RENEW
     return "Pay-As-You-Go"
 
 

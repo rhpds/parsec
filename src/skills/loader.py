@@ -142,35 +142,14 @@ class SkillLoader:
 
     def _load_one(self, skill_dir: Path, source_label: str) -> SkillManifest:
         skill_md = skill_dir / "SKILL.md"
-        try:
-            size = skill_md.stat().st_size
-            if size > MAX_SKILL_SIZE_BYTES:
-                raise SkillLoadError(
-                    skill_md,
-                    f"SKILL.md too large ({size} bytes, limit {MAX_SKILL_SIZE_BYTES} bytes)",
-                )
-            raw = skill_md.read_text(encoding="utf-8")
-        except OSError as e:
-            raise SkillLoadError(skill_md, f"cannot read file: {e}") from e
-
+        raw = _read_skill_file(skill_md)
         frontmatter, body = _split_frontmatter(skill_md, raw)
         data = _parse_yaml(skill_md, frontmatter)
         warnings = _validate(skill_md, skill_dir, data)
 
-        parsec_block = data.get("parsec") or {}
-        if parsec_block and not isinstance(parsec_block, dict):
-            raise SkillValidationError(skill_md, "parsec", "must be a mapping if present")
-        parsec_ext = ParsecExtensions.from_dict(parsec_block)
-        if parsec_ext.extra:
-            warnings.append(f"unknown parsec.* keys ignored: {sorted(parsec_ext.extra)}")
-
-        allowed_tools_raw = data.get("allowed-tools") or []
-        if allowed_tools_raw and not isinstance(allowed_tools_raw, list):
-            raise SkillValidationError(skill_md, "allowed-tools", "must be a list of strings")
-
-        metadata = data.get("metadata") or {}
-        if metadata and not isinstance(metadata, dict):
-            raise SkillValidationError(skill_md, "metadata", "must be a mapping if present")
+        parsec_ext = _parse_parsec_extensions(skill_md, data, warnings)
+        allowed_tools_raw = _parse_allowed_tools(skill_md, data)
+        metadata = _parse_metadata(skill_md, data)
 
         return SkillManifest(
             name=data["name"],
@@ -205,6 +184,49 @@ class SkillLoader:
                 continue
             seen[m.name] = m
         return list(seen.values())
+
+
+def _read_skill_file(skill_md: Path) -> str:
+    """Read a SKILL.md file, enforcing a size limit."""
+    try:
+        size = skill_md.stat().st_size
+        if size > MAX_SKILL_SIZE_BYTES:
+            raise SkillLoadError(
+                skill_md,
+                f"SKILL.md too large ({size} bytes, limit {MAX_SKILL_SIZE_BYTES} bytes)",
+            )
+        return skill_md.read_text(encoding="utf-8")
+    except OSError as e:
+        raise SkillLoadError(skill_md, f"cannot read file: {e}") from e
+
+
+def _parse_parsec_extensions(
+    skill_md: Path, data: dict[str, Any], warnings: list[str]
+) -> ParsecExtensions:
+    """Parse and validate the ``parsec`` frontmatter block."""
+    parsec_block = data.get("parsec") or {}
+    if parsec_block and not isinstance(parsec_block, dict):
+        raise SkillValidationError(skill_md, "parsec", "must be a mapping if present")
+    parsec_ext = ParsecExtensions.from_dict(parsec_block)
+    if parsec_ext.extra:
+        warnings.append(f"unknown parsec.* keys ignored: {sorted(parsec_ext.extra)}")
+    return parsec_ext
+
+
+def _parse_allowed_tools(skill_md: Path, data: dict[str, Any]) -> list:
+    """Parse and validate the ``allowed-tools`` frontmatter field."""
+    raw = data.get("allowed-tools") or []
+    if raw and not isinstance(raw, list):
+        raise SkillValidationError(skill_md, "allowed-tools", "must be a list of strings")
+    return raw
+
+
+def _parse_metadata(skill_md: Path, data: dict[str, Any]) -> dict:
+    """Parse and validate the ``metadata`` frontmatter field."""
+    metadata = data.get("metadata") or {}
+    if metadata and not isinstance(metadata, dict):
+        raise SkillValidationError(skill_md, "metadata", "must be a mapping if present")
+    return metadata
 
 
 def _get_skills_section(config: Any) -> dict[str, Any]:

@@ -7,6 +7,7 @@ import os
 import re
 import uuid
 from datetime import UTC, datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
@@ -15,6 +16,9 @@ from src.agent.learnings import is_admin_user_async
 from src.routes.query import _check_user_allowed
 
 logger = logging.getLogger(__name__)
+
+_ERR_INVALID_CONV_ID = "Invalid conversation ID format"
+_ERR_NOT_YOUR_CONV = "Not your conversation"
 
 router = APIRouter(prefix="/api", tags=["conversations"])
 
@@ -48,25 +52,39 @@ class ConversationSummary(BaseModel):
     owner: str | None = None
 
 
+def _extract_first_user_text(messages: list) -> str:
+    """Extract text from the first user message in a conversation."""
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(
+                block.get("text", "") for block in content if isinstance(block, dict)
+            )
+        content = content.strip()
+        if content:
+            return content
+    return ""
+
+
+def _truncate_title(text: str, max_len: int) -> str:
+    """Truncate text at a word boundary for use as a title."""
+    if len(text) <= max_len:
+        return text
+    truncated = text[:max_len]
+    last_space = truncated.rfind(" ")
+    if last_space > max_len // 2:
+        truncated = truncated[:last_space]
+    return truncated + "..."
+
+
 def _auto_title(messages: list) -> str:
     """Generate a title from the first user message."""
-    for msg in messages:
-        if isinstance(msg, dict) and msg.get("role") == "user":
-            content = msg.get("content", "")
-            if isinstance(content, list):
-                content = " ".join(
-                    block.get("text", "") for block in content if isinstance(block, dict)
-                )
-            content = content.strip()
-            if content:
-                if len(content) <= 80:
-                    return content
-                truncated = content[:80]
-                last_space = truncated.rfind(" ")
-                if last_space > 40:
-                    truncated = truncated[:last_space]
-                return truncated + "..."
-    return "New conversation"
+    text = _extract_first_user_text(messages)
+    if not text:
+        return "New conversation"
+    return _truncate_title(text, 80)
 
 
 def _count_user_messages(messages: list) -> int:
@@ -88,12 +106,15 @@ def _write_json(fpath: str, data: dict) -> None:
         json.dump(data, f)
 
 
-@router.post("/conversations")
+@router.post(
+    "/conversations",
+    responses={403: {"description": "Forbidden"}, 422: {"description": "Unprocessable Entity"}},
+)
 async def save_conversation(
     body: SaveConversationRequest,
     request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """Save or update a conversation."""
     user = x_forwarded_email or x_forwarded_user
@@ -104,13 +125,13 @@ async def save_conversation(
     conv_id = body.id or str(uuid.uuid4())
 
     if not _UUID_RE.match(conv_id):
-        raise HTTPException(status_code=422, detail="Invalid conversation ID format")
+        raise HTTPException(status_code=422, detail=_ERR_INVALID_CONV_ID)
 
     fpath = os.path.join(CONVERSATIONS_DIR, f"{conv_id}.json")
     if os.path.isfile(fpath):
         existing = await asyncio.to_thread(_read_json, fpath)
         if existing.get("owner") != owner:
-            raise HTTPException(status_code=403, detail="Not your conversation")
+            raise HTTPException(status_code=403, detail=_ERR_NOT_YOUR_CONV)
         created_at = existing.get("created_at", now)
     else:
         created_at = now
@@ -147,6 +168,27 @@ async def _background_learn(messages: list) -> None:
         logger.exception("Background learning analysis failed (non-fatal)")
 
 
+def _read_conversation_summary(fpath: str, owner: str, *, all_users: bool) -> dict | None:
+    """Read a single conversation file and return a summary dict, or None."""
+    try:
+        with open(fpath) as f:
+            data = json.load(f)
+    except Exception:  # nosec B112 — skip corrupt/unreadable JSON files
+        return None
+    if not all_users and data.get("owner") != owner:
+        return None
+    summary: dict = {
+        "id": data["id"],
+        "title": data.get("title", "Untitled"),
+        "created_at": data.get("created_at", ""),
+        "updated_at": data.get("updated_at", data.get("created_at", "")),
+        "message_count": _count_user_messages(data.get("messages", [])),
+    }
+    if all_users:
+        summary["owner"] = data.get("owner", "unknown")
+    return summary
+
+
 def _list_conversations_sync(owner: str, *, all_users: bool = False) -> list[dict]:
     """Scan conversations directory and return summaries.
 
@@ -154,42 +196,30 @@ def _list_conversations_sync(owner: str, *, all_users: bool = False) -> list[dic
     ``owner`` field populated.  Otherwise returns only conversations owned by
     *owner*.  Blocking I/O — always call via asyncio.to_thread.
     """
-    conversations: list[dict] = []
     try:
-        for fname in os.listdir(CONVERSATIONS_DIR):
-            if not fname.endswith(".json"):
-                continue
-            fpath = os.path.join(CONVERSATIONS_DIR, fname)
-            try:
-                with open(fpath) as f:
-                    data = json.load(f)
-                if not all_users and data.get("owner") != owner:
-                    continue
-                summary: dict = {
-                    "id": data["id"],
-                    "title": data.get("title", "Untitled"),
-                    "created_at": data.get("created_at", ""),
-                    "updated_at": data.get("updated_at", data.get("created_at", "")),
-                    "message_count": _count_user_messages(data.get("messages", [])),
-                }
-                if all_users:
-                    summary["owner"] = data.get("owner", "unknown")
-                conversations.append(summary)
-            except Exception:  # nosec B112 — skip corrupt/unreadable JSON files
-                continue
+        filenames = os.listdir(CONVERSATIONS_DIR)
     except FileNotFoundError:
-        pass
+        return []
+
+    conversations: list[dict] = []
+    for fname in filenames:
+        if not fname.endswith(".json"):
+            continue
+        fpath = os.path.join(CONVERSATIONS_DIR, fname)
+        summary = _read_conversation_summary(fpath, owner, all_users=all_users)
+        if summary:
+            conversations.append(summary)
 
     conversations.sort(key=lambda c: c.get("updated_at", ""), reverse=True)
     return conversations
 
 
-@router.get("/conversations")
+@router.get("/conversations", responses={403: {"description": "Forbidden"}})
 async def list_conversations(
     request: Request,
     all_users: bool = False,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """List conversations for the current user (or all users for admins)."""
     user = x_forwarded_email or x_forwarded_user
@@ -206,11 +236,11 @@ async def list_conversations(
     return {"conversations": conversations}
 
 
-@router.get("/conversations/export")
+@router.get("/conversations/export", responses={403: {"description": "Forbidden"}})
 async def export_conversations(
     request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """Export all conversations with full messages (admin only)."""
     user = x_forwarded_email or x_forwarded_user
@@ -244,12 +274,19 @@ def _export_all_conversations_sync() -> list[dict]:
     return conversations
 
 
-@router.get("/conversations/{conv_id}")
+@router.get(
+    "/conversations/{conv_id}",
+    responses={
+        403: {"description": "Forbidden"},
+        404: {"description": "Not Found"},
+        422: {"description": "Unprocessable Entity"},
+    },
+)
 async def get_conversation(
     conv_id: str,
     request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """Load a specific conversation."""
     user = x_forwarded_email or x_forwarded_user
@@ -257,7 +294,7 @@ async def get_conversation(
     owner = user or "anonymous"
 
     if not _UUID_RE.match(conv_id):
-        raise HTTPException(status_code=422, detail="Invalid conversation ID format")
+        raise HTTPException(status_code=422, detail=_ERR_INVALID_CONV_ID)
 
     fpath = os.path.join(CONVERSATIONS_DIR, f"{conv_id}.json")
     if not os.path.isfile(fpath):
@@ -266,17 +303,24 @@ async def get_conversation(
     data = await asyncio.to_thread(_read_json, fpath)
 
     if data.get("owner") != owner and not await is_admin_user_async(user):
-        raise HTTPException(status_code=403, detail="Not your conversation")
+        raise HTTPException(status_code=403, detail=_ERR_NOT_YOUR_CONV)
 
     return data
 
 
-@router.delete("/conversations/{conv_id}")
+@router.delete(
+    "/conversations/{conv_id}",
+    responses={
+        403: {"description": "Forbidden"},
+        404: {"description": "Not Found"},
+        422: {"description": "Unprocessable Entity"},
+    },
+)
 async def delete_conversation(
     conv_id: str,
     request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """Delete a conversation."""
     user = x_forwarded_email or x_forwarded_user
@@ -284,7 +328,7 @@ async def delete_conversation(
     owner = user or "anonymous"
 
     if not _UUID_RE.match(conv_id):
-        raise HTTPException(status_code=422, detail="Invalid conversation ID format")
+        raise HTTPException(status_code=422, detail=_ERR_INVALID_CONV_ID)
 
     fpath = os.path.join(CONVERSATIONS_DIR, f"{conv_id}.json")
     if not os.path.isfile(fpath):
@@ -293,7 +337,7 @@ async def delete_conversation(
     data = await asyncio.to_thread(_read_json, fpath)
 
     if data.get("owner") != owner:
-        raise HTTPException(status_code=403, detail="Not your conversation")
+        raise HTTPException(status_code=403, detail=_ERR_NOT_YOUR_CONV)
 
     os.remove(fpath)
     return {"deleted": True}

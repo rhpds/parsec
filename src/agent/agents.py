@@ -26,6 +26,11 @@ if TYPE_CHECKING:
     from src.metrics.collector import MetricsCollector
 
 from src.agent.streaming import (
+    sse_agent_done,
+    sse_agent_start,
+    sse_confidence,
+    sse_done,
+    sse_error,
     sse_event,
     sse_report,
     sse_status,
@@ -46,6 +51,8 @@ from src.config import get_config
 from src.metrics.tracing import SpanType, set_llm_span_outputs, set_tool_span_outputs
 
 logger = logging.getLogger(__name__)
+
+_QUERYING_BABYLON_LABEL = "Querying Babylon cluster"
 
 # Type alias for the SSE event callback used to forward sub-agent progress
 EventCallback = Callable[[str], Coroutine[Any, Any, None]]
@@ -97,7 +104,7 @@ AGENTS: dict[str, AgentConfig] = {
             "Investigates AAP2 job failures and traces configs through agnosticv/agnosticd."
         ),
         slow_tool_labels={
-            "query_babylon_catalog": "Querying Babylon cluster",
+            "query_babylon_catalog": _QUERYING_BABYLON_LABEL,
             "query_aap2": "Querying AAP2 controller",
         },
     ),
@@ -111,7 +118,7 @@ AGENTS: dict[str, AgentConfig] = {
             "Investigates Babylon catalog items, deployments, lifecycle state, and workshops."
         ),
         slow_tool_labels={
-            "query_babylon_catalog": "Querying Babylon cluster",
+            "query_babylon_catalog": _QUERYING_BABYLON_LABEL,
         },
     ),
     "security": AgentConfig(
@@ -141,7 +148,7 @@ AGENTS: dict[str, AgentConfig] = {
         ),
         slow_tool_labels={
             "query_ocpv_cluster": "Querying OCPV cluster",
-            "query_babylon_catalog": "Querying Babylon cluster",
+            "query_babylon_catalog": _QUERYING_BABYLON_LABEL,
         },
     ),
     "icinga": AgentConfig(
@@ -275,6 +282,19 @@ def classify_fast(question: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _should_use_sdk(agent_type: str, cfg: Any) -> bool:
+    """Whether this sub-agent task should run on the Agent SDK (Phase-2 pilot).
+
+    Single source of truth for the SDK dispatch rule, shared by both sub-agent
+    entry points (``run_sub_agent`` and ``run_sub_agent_streaming``): only Icinga
+    has an SDK profile today, and only when ``agent.runtime: sdk`` (default
+    ``legacy``). Add agents here as they gain SDK profiles.
+    """
+    from src.llm import RUNTIME_SDK, get_runtime
+
+    return agent_type == "icinga" and get_runtime(cfg) == RUNTIME_SDK
+
+
 def _extract_user_context(history: list) -> str:
     """Extract user text messages from conversation history for sub-agent context.
 
@@ -350,6 +370,152 @@ def _compute_confidence(tool_outcomes: list[dict]) -> tuple[str, list[str]]:
     return level, reasons
 
 
+# ---------------------------------------------------------------------------
+# Shared helpers — extracted from run_sub_agent / run_sub_agent_streaming
+# to reduce cognitive complexity (SonarQube S3776).
+# ---------------------------------------------------------------------------
+
+
+def _parse_response_blocks(
+    assistant_content: list,
+) -> tuple[list[str], list]:
+    """Separate text and tool_use blocks from a Claude response."""
+    text_parts: list[str] = []
+    tool_use_blocks: list = []
+    for block in assistant_content:
+        if block.type == "text":
+            text_parts.append(block.text)
+        elif block.type == "tool_use":
+            tool_use_blocks.append(block)
+    return text_parts, tool_use_blocks
+
+
+def _classify_tool_outcome(tool_name: str, result: dict) -> dict:
+    """Classify a tool execution result as success, error, or empty."""
+    if "error" in result:
+        return {
+            "tool": tool_name,
+            "status": "error",
+            "reason": str(result["error"])[:100],
+        }
+    if isinstance(result, dict) and result.get("count", -1) == 0:
+        return {"tool": tool_name, "status": "empty", "reason": "no results returned"}
+    return {"tool": tool_name, "status": "success"}
+
+
+def _format_log_entry(tool_name: str, result: dict, max_len: int = 300) -> str:
+    """Format a tool result for the investigation log with truncation."""
+    result_str = json.dumps(result, default=str)
+    if len(result_str) > max_len:
+        return f"[Tool: {tool_name}] result: {result_str[:max_len]}..."
+    return f"[Tool: {tool_name}] result: {result_str}"
+
+
+def _get_special_tool_events(tool_name: str, result: dict) -> list[str]:
+    """Return SSE events for special tool results (reports, charts)."""
+    events: list[str] = []
+    if tool_name == "generate_report" and "error" not in result:
+        download_url = f"/api/reports/{result['filename']}"
+        events.append(sse_report(result["filename"], result["format"], download_url))
+    elif tool_name == "render_chart" and "error" not in result:
+        events.append(sse_event("chart", result))
+    return events
+
+
+async def _execute_tool_cached_gen(
+    tool_name: str,
+    tool_input: dict,
+    agent_cfg: AgentConfig,
+    agent_type: str,
+) -> AsyncGenerator[tuple[str, Any], None]:
+    """Execute a tool with caching and progress polling.
+
+    Yields ``(event_type, data)`` tuples:
+
+    * ``("cache_hit", tool_name)`` when a cached result is found
+    * ``("progress", sse_event_str)`` for long-running tool progress updates
+    * ``("done", {"result": dict, "cached": bool, "duration_ms": float})``
+      as the final yield
+    """
+    from src.agent.orchestrator import (
+        _UNCACHEABLE_TOOLS,
+        _cache_key,
+        _execute_tool,
+        _tool_cache,
+    )
+
+    tool_start_time = _time.monotonic()
+    result: dict = {}
+    cached = False
+
+    try:
+        cache = _tool_cache.get(None)
+        if cache is not None and tool_name not in _UNCACHEABLE_TOOLS:
+            key = _cache_key(tool_name, tool_input)
+            if key in cache:
+                result = cache[key]
+                cached = True
+                yield ("cache_hit", tool_name)
+
+        if not cached:
+            tool_task = asyncio.create_task(_execute_tool(tool_name, tool_input))
+            elapsed = 0
+            while not tool_task.done():
+                done, _ = await asyncio.wait({tool_task}, timeout=10)
+                if not done:
+                    elapsed += 10
+                    label = agent_cfg.slow_tool_labels.get(tool_name, f"Processing {tool_name}")
+                    yield (
+                        "progress",
+                        sse_status(f"{agent_cfg.name}: {label}... ({elapsed}s)"),
+                    )
+            result = tool_task.result()
+            if cache is not None and tool_name not in _UNCACHEABLE_TOOLS and "error" not in result:
+                cache[_cache_key(tool_name, tool_input)] = result
+    except Exception as e:
+        logger.exception("Tool %s failed in %s sub-agent", tool_name, agent_type)
+        result = {"error": str(e)}
+
+    duration_ms = (_time.monotonic() - tool_start_time) * 1000
+    yield ("done", {"result": result, "cached": cached, "duration_ms": duration_ms})
+
+
+async def _try_sdk_streaming(
+    agent_type: str,
+    agent_cfg: AgentConfig,
+    cfg: Any,
+    task: str,
+    context: dict | None,
+    conversation_history: list | None,
+    metrics: MetricsCollector | None,
+) -> AsyncGenerator[str, None]:
+    """Run a sub-agent via the Agent SDK, yielding SSE events.
+
+    Used for Phase-2 SDK pilot (currently Icinga only).
+    """
+    from src.agent.orchestrator import _serialize_messages, _trim_history
+    from src.agent.runner import AgentRunner
+    from src.llm import RUNTIME_SDK
+
+    yield sse_agent_start(agent_type, agent_cfg.name)
+    yield sse_status("Running via Claude Agent SDK (icinga-triage skill)…")
+    sdk_result = await AgentRunner(cfg, runtime=RUNTIME_SDK).run_sub_agent(
+        agent_type,
+        task,
+        context=context,
+        conversation_history=conversation_history,
+        metrics=metrics,
+    )
+    answer = sdk_result.get("summary") or sdk_result.get("error") or "(no output)"
+    yield sse_text(answer)
+    yield sse_agent_done(agent_type)
+    sdk_history = _serialize_messages(_trim_history(conversation_history or []))
+    sdk_history.append({"role": "user", "content": task})
+    sdk_history.append({"role": "assistant", "content": answer})
+    yield sse_event("history", {"messages": sdk_history})
+    yield sse_done()
+
+
 async def run_sub_agent(  # noqa: C901
     agent_type: str,
     task: str,
@@ -390,6 +556,16 @@ async def run_sub_agent(  # noqa: C901
         }
 
     cfg = get_config()
+
+    # Phase-2: route Icinga through the Agent SDK when agent.runtime=sdk.
+    if _should_use_sdk(agent_type, cfg):
+        from src.agent.runner import AgentRunner
+        from src.llm import RUNTIME_SDK
+
+        return await AgentRunner(cfg, runtime=RUNTIME_SDK).run_sub_agent(
+            agent_type, task, context=context, conversation_history=conversation_history
+        )
+
     model = cfg.anthropic.get("model", "claude-sonnet-4-20250514")
     max_tokens = cfg.anthropic.get("max_tokens", 4096)
 
@@ -451,16 +627,11 @@ async def run_sub_agent(  # noqa: C901
                 response = await asyncio.to_thread(_call_api)
 
                 assistant_content = response.content
-                tool_use_blocks = []
-                response_text_parts: list[str] = []
-
-                for block in assistant_content:
-                    if block.type == "text" and block.text.strip():
-                        text_parts.append(block.text)
-                        response_text_parts.append(block.text)
-                        investigation_log.append(block.text)
-                    elif block.type == "tool_use":
-                        tool_use_blocks.append(block)
+                response_text_parts, tool_use_blocks = _parse_response_blocks(assistant_content)
+                for txt in response_text_parts:
+                    if txt.strip():
+                        text_parts.append(txt)
+                        investigation_log.append(txt)
 
                 tool_names = [b.name for b in tool_use_blocks]
                 set_llm_span_outputs(
@@ -516,47 +687,19 @@ async def run_sub_agent(  # noqa: C901
             )
 
             result: dict = {}
-            tool_start_time = _time.monotonic()
             cached = False
-            try:
-                from src.agent.orchestrator import (
-                    _UNCACHEABLE_TOOLS,
-                    _cache_key,
-                    _execute_tool,
-                    _tool_cache,
-                )
-
-                cache = _tool_cache.get(None)
-                if cache is not None and tool_name not in _UNCACHEABLE_TOOLS:
-                    key = _cache_key(tool_name, tool_input)
-                    if key in cache:
-                        result = cache[key]
-                        cached = True
-                        await _emit(sse_event("cache_hit", {"tool": tool_name}))
-
-                if not cached:
-                    task_coro = asyncio.create_task(_execute_tool(tool_name, tool_input))
-                    elapsed = 0
-                    while not task_coro.done():
-                        done, _ = await asyncio.wait({task_coro}, timeout=10)
-                        if not done:
-                            elapsed += 10
-                            label = agent_cfg.slow_tool_labels.get(
-                                tool_name, f"Processing {tool_name}"
-                            )
-                            await _emit(sse_status(f"{agent_cfg.name}: {label}... ({elapsed}s)"))
-                    result = task_coro.result()
-                    if (
-                        cache is not None
-                        and tool_name not in _UNCACHEABLE_TOOLS
-                        and "error" not in result
-                    ):
-                        cache[_cache_key(tool_name, tool_input)] = result
-            except Exception as e:
-                logger.exception("Tool %s failed in %s sub-agent", tool_name, agent_type)
-                result = {"error": str(e)}
-
-            tool_duration_ms = (_time.monotonic() - tool_start_time) * 1000
+            tool_duration_ms = 0.0
+            async for ev_type, ev_data in _execute_tool_cached_gen(
+                tool_name, tool_input, agent_cfg, agent_type
+            ):
+                if ev_type == "cache_hit":
+                    await _emit(sse_event("cache_hit", {"tool": ev_data}))
+                elif ev_type == "progress":
+                    await _emit(ev_data)
+                elif ev_type == "done":
+                    result = ev_data["result"]
+                    cached = ev_data["cached"]
+                    tool_duration_ms = ev_data["duration_ms"]
 
             # Span records metadata only (tool already executed above with
             # async progress polling); actual duration is in duration_ms attr.
@@ -576,33 +719,12 @@ async def run_sub_agent(  # noqa: C901
 
             await _emit(sse_tool_result(tool_name, result))
 
-            # Track outcome for confidence
-            if "error" in result:
-                tool_outcomes.append(
-                    {
-                        "tool": tool_name,
-                        "status": "error",
-                        "reason": str(result["error"])[:100],
-                    }
-                )
-            elif isinstance(result, dict) and result.get("count", -1) == 0:
-                tool_outcomes.append(
-                    {"tool": tool_name, "status": "empty", "reason": "no results returned"}
-                )
-            else:
-                tool_outcomes.append({"tool": tool_name, "status": "success"})
+            tool_outcomes.append(_classify_tool_outcome(tool_name, result))
 
-            if tool_name == "generate_report" and "error" not in result:
-                download_url = f"/api/reports/{result['filename']}"
-                await _emit(sse_report(result["filename"], result["format"], download_url))
-            elif tool_name == "render_chart" and "error" not in result:
-                await _emit(sse_event("chart", result))
+            for event in _get_special_tool_events(tool_name, result):
+                await _emit(event)
 
-            result_str = json.dumps(result, default=str)
-            if len(result_str) > 300:
-                investigation_log.append(f"[Tool: {tool_name}] result: {result_str[:300]}...")
-            else:
-                investigation_log.append(f"[Tool: {tool_name}] result: {result_str}")
+            investigation_log.append(_format_log_entry(tool_name, result))
 
             tool_results.append(
                 {
@@ -627,8 +749,6 @@ async def run_sub_agent(  # noqa: C901
     )
 
     # Compute and emit confidence
-    from src.agent.streaming import sse_confidence
-
     confidence_level, reasons = _compute_confidence(tool_outcomes)
     if confidence_level != "high":
         await _emit(sse_confidence(confidence_level, reasons))
@@ -664,20 +784,10 @@ async def run_sub_agent_streaming(  # noqa: C901
             for fast-path mode so follow-up questions retain context.
     """
     from src.agent.orchestrator import (
-        _UNCACHEABLE_TOOLS,
         _build_client,
-        _cache_key,
         _cap_tool_result,
-        _execute_tool,
         _tool_cache,
         _trim_history,
-    )
-    from src.agent.streaming import (
-        sse_done,
-        sse_error,
-        sse_event,
-        sse_report,
-        sse_text,
     )
 
     agent_cfg = AGENTS.get(agent_type)
@@ -691,6 +801,15 @@ async def run_sub_agent_streaming(  # noqa: C901
         _tool_cache.set({})
 
     cfg = get_config()
+
+    # Phase-2: route Icinga through the Agent SDK when agent.runtime=sdk.
+    if _should_use_sdk(agent_type, cfg):
+        async for event in _try_sdk_streaming(
+            agent_type, agent_cfg, cfg, task, context, conversation_history, metrics
+        ):
+            yield event
+        return
+
     model = cfg.anthropic.get("model", "claude-sonnet-4-20250514")
     max_tokens = cfg.anthropic.get("max_tokens", 4096)
 
@@ -784,19 +903,18 @@ async def run_sub_agent_streaming(  # noqa: C901
                         metrics.record_tokens(
                             input_tokens=response.usage.input_tokens,
                             output_tokens=response.usage.output_tokens,
+                            cache_creation_tokens=getattr(
+                                response.usage, "cache_creation_input_tokens", 0
+                            )
+                            or 0,
+                            cache_read_tokens=getattr(response.usage, "cache_read_input_tokens", 0)
+                            or 0,
                         )
                         if not metrics.model:
                             metrics.record_model(response.model)
 
                     assistant_content = response.content
-                    tool_use_blocks = []
-                    response_text_parts: list[str] = []
-
-                    for block in assistant_content:
-                        if block.type == "text":
-                            response_text_parts.append(block.text)
-                        elif block.type == "tool_use":
-                            tool_use_blocks.append(block)
+                    response_text_parts, tool_use_blocks = _parse_response_blocks(assistant_content)
 
                     tool_names = [b.name for b in tool_use_blocks]
                     set_llm_span_outputs(
@@ -847,8 +965,6 @@ async def run_sub_agent_streaming(  # noqa: C901
                     tool_call_count,
                     _time.monotonic() - start_time,
                 )
-                from src.agent.streaming import sse_confidence
-
                 confidence_level, reasons = _compute_confidence(tool_outcomes)
                 if confidence_level != "high":
                     yield sse_confidence(confidence_level, reasons)
@@ -880,42 +996,19 @@ async def run_sub_agent_streaming(  # noqa: C901
                 yield sse_tool_start(tool_name, tool_input)
 
                 result: dict = {}
-                tool_start_t = _time.monotonic()
                 cached = False
-                try:
-                    cache = _tool_cache.get(None)
-                    if cache is not None and tool_name not in _UNCACHEABLE_TOOLS:
-                        key = _cache_key(tool_name, tool_input)
-                        if key in cache:
-                            result = cache[key]
-                            cached = True
-                            yield sse_event("cache_hit", {"tool": tool_name})
-
-                    if not cached:
-                        tool_task = asyncio.create_task(_execute_tool(tool_name, tool_input))
-                        elapsed = 0
-                        while not tool_task.done():
-                            done, _ = await asyncio.wait({tool_task}, timeout=10)
-                            if not done:
-                                elapsed += 10
-                                label = agent_cfg.slow_tool_labels.get(
-                                    tool_name, f"Processing {tool_name}"
-                                )
-                                yield sse_status(f"{agent_cfg.name}: {label}... ({elapsed}s)")
-                        result = tool_task.result()
-                        if (
-                            cache is not None
-                            and tool_name not in _UNCACHEABLE_TOOLS
-                            and "error" not in result
-                        ):
-                            cache[_cache_key(tool_name, tool_input)] = result
-                except Exception as e:
-                    logger.exception(
-                        "Tool %s failed in %s streaming sub-agent", tool_name, agent_type
-                    )
-                    result = {"error": str(e)}
-
-                tool_duration_ms = (_time.monotonic() - tool_start_t) * 1000
+                tool_duration_ms = 0.0
+                async for ev_type, ev_data in _execute_tool_cached_gen(
+                    tool_name, tool_input, agent_cfg, agent_type
+                ):
+                    if ev_type == "cache_hit":
+                        yield sse_event("cache_hit", {"tool": ev_data})
+                    elif ev_type == "progress":
+                        yield ev_data
+                    elif ev_type == "done":
+                        result = ev_data["result"]
+                        cached = ev_data["cached"]
+                        tool_duration_ms = ev_data["duration_ms"]
 
                 # Span records metadata only (tool already executed above with
                 # async progress polling); actual duration is in duration_ms attr.
@@ -935,27 +1028,10 @@ async def run_sub_agent_streaming(  # noqa: C901
 
                 yield sse_tool_result(tool_name, result)
 
-                # Track outcome for confidence
-                if "error" in result:
-                    tool_outcomes.append(
-                        {
-                            "tool": tool_name,
-                            "status": "error",
-                            "reason": str(result["error"])[:100],
-                        }
-                    )
-                elif isinstance(result, dict) and result.get("count", -1) == 0:
-                    tool_outcomes.append(
-                        {"tool": tool_name, "status": "empty", "reason": "no results returned"}
-                    )
-                else:
-                    tool_outcomes.append({"tool": tool_name, "status": "success"})
+                tool_outcomes.append(_classify_tool_outcome(tool_name, result))
 
-                if tool_name == "generate_report" and "error" not in result:
-                    download_url = f"/api/reports/{result['filename']}"
-                    yield sse_report(result["filename"], result["format"], download_url)
-                elif tool_name == "render_chart" and "error" not in result:
-                    yield sse_event("chart", result)
+                for event in _get_special_tool_events(tool_name, result):
+                    yield event
 
                 tool_results.append(
                     {
@@ -975,8 +1051,6 @@ async def run_sub_agent_streaming(  # noqa: C901
             tool_call_count,
             _time.monotonic() - start_time,
         )
-        from src.agent.streaming import sse_confidence
-
         confidence_level, reasons = _compute_confidence(tool_outcomes)
         if confidence_level != "high":
             yield sse_confidence(confidence_level, reasons)

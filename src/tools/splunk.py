@@ -55,7 +55,64 @@ def _build_ocp_query(
     return query + " | spath | sort -_time"
 
 
-def _build_query(  # noqa: C901
+def _build_guid_query(
+    guid: str, cluster_name: str, errors_only: bool, search_terms: str
+) -> tuple[str, str] | dict[str, Any]:
+    """Build query for search_by_guid action."""
+    if not guid:
+        return {"error": "guid is required for search_by_guid action"}
+    guid = _sanitize_query_value(guid)
+    # GUID appears in namespace_name in _raw JSON — use raw text match
+    ns_filter = f'"{guid}"'
+    return _build_ocp_query(ns_filter, cluster_name, errors_only, search_terms), OCP_APP_INDEX
+
+
+def _build_namespace_query(
+    namespace: str, cluster_name: str, errors_only: bool, search_terms: str
+) -> tuple[str, str] | dict[str, Any]:
+    """Build query for search_namespace action."""
+    if not namespace:
+        return {"error": "namespace is required for search_namespace action"}
+    namespace = _sanitize_query_value(namespace)
+    ns_filter = f'"{namespace}"'
+    return _build_ocp_query(ns_filter, cluster_name, errors_only, search_terms), OCP_APP_INDEX
+
+
+def _build_aap2_query(
+    controller: str, guid: str, errors_only: bool, search_terms: str
+) -> tuple[str, str] | dict[str, Any]:
+    """Build query for search_aap2_logs action."""
+    if not controller:
+        return {"error": "controller is required for search_aap2_logs action"}
+    controller = _sanitize_query_value(controller)
+    # Federated search: use raw text match, then spath for field extraction
+    query = f'index={AAP_INDEX} "{controller}"'
+    if guid:
+        guid = _sanitize_query_value(guid)
+        query += f' "{guid}"'
+    if errors_only:
+        query += ' ("ERROR" OR "CRITICAL" OR "WARNING" OR "failed")'
+    if search_terms:
+        search_terms = _sanitize_query_value(search_terms)
+        query += f' "{search_terms}"'
+    return query + " | spath | sort -_time", AAP_INDEX
+
+
+def _build_raw_query(raw_query: str) -> tuple[str, str] | dict[str, Any]:
+    """Build query for search_raw action."""
+    if not raw_query:
+        return {"error": "raw_query is required for search_raw action"}
+    stripped = raw_query.strip()
+    if not stripped.startswith("search ") and not stripped.startswith("|"):
+        return {"error": "raw_query must start with 'search' or '|'"}
+    lower = stripped.lower()
+    for cmd in _DANGEROUS_COMMANDS:
+        if cmd in lower:
+            return {"error": f"Dangerous command '{cmd}' not allowed in raw queries"}
+    return stripped, "custom"
+
+
+def _build_query(
     action: str,
     guid: str,
     namespace: str,
@@ -67,48 +124,13 @@ def _build_query(  # noqa: C901
 ) -> tuple[str, str] | dict[str, Any]:
     """Build SPL query for the given action. Returns (query, index) or error dict."""
     if action == "search_by_guid":
-        if not guid:
-            return {"error": "guid is required for search_by_guid action"}
-        guid = _sanitize_query_value(guid)
-        # GUID appears in namespace_name in _raw JSON — use raw text match
-        ns_filter = f'"{guid}"'
-        return _build_ocp_query(ns_filter, cluster_name, errors_only, search_terms), OCP_APP_INDEX
-
+        return _build_guid_query(guid, cluster_name, errors_only, search_terms)
     if action == "search_namespace":
-        if not namespace:
-            return {"error": "namespace is required for search_namespace action"}
-        namespace = _sanitize_query_value(namespace)
-        ns_filter = f'"{namespace}"'
-        return _build_ocp_query(ns_filter, cluster_name, errors_only, search_terms), OCP_APP_INDEX
-
+        return _build_namespace_query(namespace, cluster_name, errors_only, search_terms)
     if action == "search_aap2_logs":
-        if not controller:
-            return {"error": "controller is required for search_aap2_logs action"}
-        controller = _sanitize_query_value(controller)
-        # Federated search: use raw text match, then spath for field extraction
-        query = f'index={AAP_INDEX} "{controller}"'
-        if guid:
-            guid = _sanitize_query_value(guid)
-            query += f' "{guid}"'
-        if errors_only:
-            query += ' ("ERROR" OR "CRITICAL" OR "WARNING" OR "failed")'
-        if search_terms:
-            search_terms = _sanitize_query_value(search_terms)
-            query += f' "{search_terms}"'
-        return query + " | spath | sort -_time", AAP_INDEX
-
+        return _build_aap2_query(controller, guid, errors_only, search_terms)
     if action == "search_raw":
-        if not raw_query:
-            return {"error": "raw_query is required for search_raw action"}
-        stripped = raw_query.strip()
-        if not stripped.startswith("search ") and not stripped.startswith("|"):
-            return {"error": "raw_query must start with 'search' or '|'"}
-        lower = stripped.lower()
-        for cmd in _DANGEROUS_COMMANDS:
-            if cmd in lower:
-                return {"error": f"Dangerous command '{cmd}' not allowed in raw queries"}
-        return stripped, "custom"
-
+        return _build_raw_query(raw_query)
     return {
         "error": f"Unknown action: {action}",
         "valid_actions": ["search_by_guid", "search_namespace", "search_aap2_logs", "search_raw"],

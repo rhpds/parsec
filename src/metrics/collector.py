@@ -19,6 +19,22 @@ logger = logging.getLogger(__name__)
 _last_error_time: float = 0
 _ERROR_BACKOFF_SECONDS = 60.0
 
+# Approximate list pricing in USD/token, used ONLY to *estimate* the legacy
+# arm's cost so it is comparable to the SDK arm (which reports an authoritative
+# ``total_cost_usd``). Keyed by a substring of the model id (intentional — model
+# ids vary by backend, e.g. ``claude-sonnet-4@20250514`` on Vertex). Cache-write
+# is billed at 1.25x the input rate and cache-read at 0.1x (5-minute TTL).
+# Anthropic list pricing, last verified 2026-06 — update when prices change.
+_PRICING_USD_PER_TOKEN: dict[str, tuple[float, float]] = {
+    # model-id substring: (input $/token, output $/token)
+    "haiku": (1e-6, 5e-6),
+    "sonnet": (3e-6, 15e-6),
+    "opus": (15e-6, 75e-6),
+}
+_DEFAULT_PRICING_USD_PER_TOKEN = (3e-6, 15e-6)  # assume Sonnet-class when unknown
+_CACHE_WRITE_MULTIPLIER = 1.25
+_CACHE_READ_MULTIPLIER = 0.10
+
 
 @dataclass
 class MetricsCollector:
@@ -31,6 +47,9 @@ class MetricsCollector:
     routing_method: str = ""
     model: str = ""
     confidence: str = ""
+    # Which LLM runtime produced this turn ("legacy" | "sdk"). Logged as a run
+    # tag + param so legacy and SDK populations can be pivoted in one experiment.
+    runtime: str = "legacy"
 
     # Metrics
     _start_time: float = 0.0
@@ -42,6 +61,11 @@ class MetricsCollector:
     max_rounds: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    # Authoritative cost (USD) when the runtime reports one (the SDK does); 0.0
+    # means "estimate from token counts" — see :meth:`resolved_cost_usd`.
+    cost_usd: float = 0.0
     status: str = ""
 
     def start_timer(self) -> None:
@@ -73,15 +97,54 @@ class MetricsCollector:
         self.max_rounds = max_rounds
         self.status = status
 
-    def record_tokens(self, input_tokens: int, output_tokens: int) -> None:
+    def record_tokens(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        cache_creation_tokens: int = 0,
+        cache_read_tokens: int = 0,
+    ) -> None:
         self.input_tokens += input_tokens
         self.output_tokens += output_tokens
+        self.cache_creation_tokens += cache_creation_tokens
+        self.cache_read_tokens += cache_read_tokens
 
     def record_model(self, model: str) -> None:
         self.model = model
 
+    def record_runtime(self, runtime: str) -> None:
+        self.runtime = runtime
+
+    def record_cost(self, cost_usd: float) -> None:
+        """Record an authoritative cost (the SDK reports ``total_cost_usd``).
+
+        Idempotent-friendly: keeps the largest value seen so a late zero can't
+        wipe a real cost.
+        """
+        self.cost_usd = max(self.cost_usd, cost_usd or 0.0)
+
     def record_confidence(self, confidence: str) -> None:
         self.confidence = confidence
+
+    def _estimate_cost_usd(self) -> float:
+        """Estimate cost from token counts + list pricing (for the legacy arm)."""
+        model = (self.model or "").lower()
+        in_rate, out_rate = _DEFAULT_PRICING_USD_PER_TOKEN
+        for key, rates in _PRICING_USD_PER_TOKEN.items():
+            if key in model:
+                in_rate, out_rate = rates
+                break
+        return (
+            self.input_tokens * in_rate
+            + self.output_tokens * out_rate
+            + self.cache_creation_tokens * in_rate * _CACHE_WRITE_MULTIPLIER
+            + self.cache_read_tokens * in_rate * _CACHE_READ_MULTIPLIER
+        )
+
+    def resolved_cost_usd(self) -> float:
+        """USD cost for this turn: the runtime's own figure if it reported one
+        (SDK ``total_cost_usd``), otherwise a token-based estimate (legacy)."""
+        return self.cost_usd if self.cost_usd > 0 else self._estimate_cost_usd()
 
     def to_params(self) -> dict[str, str]:
         return {
@@ -92,6 +155,7 @@ class MetricsCollector:
                 "model": self.model,
                 "confidence": self.confidence,
                 "status": self.status,
+                "runtime": self.runtime,
             }.items()
             if v
         }
@@ -105,6 +169,9 @@ class MetricsCollector:
             "rounds_used": float(self.rounds_used),
             "input_tokens": float(self.input_tokens),
             "output_tokens": float(self.output_tokens),
+            "cache_creation_tokens": float(self.cache_creation_tokens),
+            "cache_read_tokens": float(self.cache_read_tokens),
+            "cost_usd": self.resolved_cost_usd(),
         }
 
     async def flush_to_mlflow(self) -> None:
@@ -132,7 +199,10 @@ class MetricsCollector:
         else:
             experiment_id = experiment.experiment_id
 
-        run = client.create_run(experiment_id, tags={"conversation_id": self.conversation_id})
+        run = client.create_run(
+            experiment_id,
+            tags={"conversation_id": self.conversation_id, "runtime": self.runtime},
+        )
         run_id = run.info.run_id
 
         for param_key, param_value in self.to_params().items():

@@ -131,34 +131,32 @@ def _load_entries() -> list[dict]:
     return entries
 
 
+def _extract_tool_calls(messages: list) -> list[dict]:
+    """Extract tool call summaries from assistant messages."""
+    tool_calls: list[dict] = []
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        content = msg.get("content", [])
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                tool_calls.append({"name": block.get("name", ""), "input": block.get("input", {})})
+    return tool_calls
+
+
 async def analyze_and_learn(messages: list) -> None:
     """Analyze a completed conversation and extract learnings.
 
     Runs in the background — errors are logged but never propagated.
     """
     try:
-        # Skip very short conversations (< 2 user messages)
         user_msgs = [m for m in messages if isinstance(m, dict) and m.get("role") == "user"]
         if len(user_msgs) < 2:
             return
 
-        # Count tool calls
-        tool_calls = []
-        for msg in messages:
-            if not isinstance(msg, dict) or msg.get("role") != "assistant":
-                continue
-            content = msg.get("content", [])
-            if isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "tool_use":
-                        tool_calls.append(
-                            {
-                                "name": block.get("name", ""),
-                                "input": block.get("input", {}),
-                            }
-                        )
-
-        # Skip conversations with very few tool calls (nothing to learn)
+        tool_calls = _extract_tool_calls(messages)
         if len(tool_calls) < 3:
             return
 
@@ -166,7 +164,6 @@ async def analyze_and_learn(messages: list) -> None:
         if not new_entries:
             return
 
-        # Merge with existing entries
         existing = _load_entries()
         merged = _merge_entries(existing, new_entries)
         _save_entries(merged)
@@ -181,6 +178,43 @@ async def analyze_and_learn(messages: list) -> None:
         logger.exception("Background learning analysis failed (non-fatal)")
 
 
+def _summarize_user_content(content: object) -> list[str]:
+    """Extract summary lines from a user message's content."""
+    if not isinstance(content, list):
+        return [f"User: {content}"]
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "tool_result":
+            result_str = block.get("content", "")
+            if len(result_str) > 200:
+                result_str = result_str[:200] + "..."
+            parts.append(f"[tool_result: {result_str}]")
+        elif block.get("text"):
+            parts.append(f"User: {block['text']}")
+    return parts
+
+
+def _summarize_assistant_content(content: object) -> list[str]:
+    """Extract summary lines from an assistant message's content."""
+    if isinstance(content, str):
+        return [f"Assistant: {content[:300]}"]
+    if not isinstance(content, list):
+        return []
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "text" and block.get("text"):
+            parts.append(f"Assistant: {block['text'][:300]}")
+        elif block.get("type") == "tool_use":
+            parts.append(
+                f"Tool call: {block.get('name')}({json.dumps(block.get('input', {}))[:150]})"
+            )
+    return parts
+
+
 def _summarize_conversation(messages: list) -> str:
     """Build a compact text summary of a conversation for analysis."""
     summary_parts: list[str] = []
@@ -191,32 +225,9 @@ def _summarize_conversation(messages: list) -> str:
         content = msg.get("content", "")
 
         if role == "user":
-            if isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "tool_result":
-                        result_str = block.get("content", "")
-                        if len(result_str) > 200:
-                            result_str = result_str[:200] + "..."
-                        summary_parts.append(f"[tool_result: {result_str}]")
-                    elif isinstance(block, dict) and block.get("text"):
-                        summary_parts.append(f"User: {block['text']}")
-            else:
-                summary_parts.append(f"User: {content}")
+            summary_parts.extend(_summarize_user_content(content))
         elif role == "assistant":
-            if isinstance(content, list):
-                for block in content:
-                    if not isinstance(block, dict):
-                        continue
-                    if block.get("type") == "text" and block.get("text"):
-                        text = block["text"][:300]
-                        summary_parts.append(f"Assistant: {text}")
-                    elif block.get("type") == "tool_use":
-                        summary_parts.append(
-                            f"Tool call: {block.get('name')}("
-                            f"{json.dumps(block.get('input', {}))[:150]})"
-                        )
-            elif isinstance(content, str):
-                summary_parts.append(f"Assistant: {content[:300]}")
+            summary_parts.extend(_summarize_assistant_content(content))
 
     result = "\n".join(summary_parts)
     if len(result) > 8000:
@@ -224,7 +235,7 @@ def _summarize_conversation(messages: list) -> str:
     return result
 
 
-async def _ai_analyze(messages: list, tool_calls: list[dict]) -> list[dict]:
+async def _ai_analyze(messages: list, _tool_calls: list[dict]) -> list[dict]:
     """Use Claude to analyze a conversation and extract learnings."""
     cfg = get_config()
     backend = cfg.anthropic.get("backend", "direct")
@@ -364,36 +375,34 @@ def _parse_analysis_response(text: str) -> list[dict]:
     ]
 
 
+def _find_similar_entry(existing: list[dict], new_text_lower: str) -> dict | None:
+    """Find an existing entry with >60% word overlap, or None."""
+    new_words = set(new_text_lower.split())
+    if not new_words:
+        return None
+    for entry in existing:
+        existing_words = set(entry["text"].lower().strip().split())
+        if not existing_words:
+            continue
+        overlap = len(new_words & existing_words) / max(len(new_words), len(existing_words))
+        if overlap > 0.6:
+            return entry
+    return None
+
+
 def _merge_entries(existing: list[dict], new_entries: list[dict]) -> list[dict]:
     """Merge new entries into existing, combining similar ones."""
     today = datetime.now(UTC).strftime("%Y-%m-%d")
 
     for new_entry in new_entries:
-        new_text = new_entry["text"].lower().strip()
-        merged = False
-
-        for existing_entry in existing:
-            existing_text = existing_entry["text"].lower().strip()
-            # Simple similarity: if >60% of words overlap, merge
-            new_words = set(new_text.split())
-            existing_words = set(existing_text.split())
-            if not new_words or not existing_words:
-                continue
-            overlap = len(new_words & existing_words) / max(len(new_words), len(existing_words))
-            if overlap > 0.6:
-                existing_entry["count"] = existing_entry.get("count", 1) + 1
-                existing_entry["last_seen"] = today
-                # Keep the longer/more detailed version
-                if len(new_entry["text"]) > len(existing_entry["text"]):
-                    existing_entry["text"] = new_entry["text"]
-                merged = True
-                break
-
-        if not merged:
+        match = _find_similar_entry(existing, new_entry["text"].lower().strip())
+        if match:
+            match["count"] = match.get("count", 1) + 1
+            match["last_seen"] = today
+            if len(new_entry["text"]) > len(match["text"]):
+                match["text"] = new_entry["text"]
+        else:
             existing.append(new_entry)
 
-    # Sort by count (most seen first), then by last_seen
     existing.sort(key=lambda e: (e.get("count", 1), e.get("last_seen", "")), reverse=True)
-
-    # Cap at max entries
     return existing[:_MAX_ENTRIES]

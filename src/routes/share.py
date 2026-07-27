@@ -7,6 +7,7 @@ import os
 import re
 import uuid
 from datetime import UTC, datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
@@ -49,27 +50,39 @@ class ShareResponse(BaseModel):
     url: str
 
 
+def _extract_first_user_text(messages: list) -> str:
+    """Extract text from the first user message in a conversation."""
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(
+                block.get("text", "") for block in content if isinstance(block, dict)
+            )
+        content = content.strip()
+        if content:
+            return content
+    return ""
+
+
+def _truncate_title(text: str, max_len: int) -> str:
+    """Truncate text at a word boundary for use as a title."""
+    if len(text) <= max_len:
+        return text
+    truncated = text[:max_len]
+    last_space = truncated.rfind(" ")
+    if last_space > max_len // 2:
+        truncated = truncated[:last_space]
+    return truncated + "..."
+
+
 def _auto_title(messages: list) -> str:
     """Generate a title from the first user message."""
-    for msg in messages:
-        if isinstance(msg, dict) and msg.get("role") == "user":
-            content = msg.get("content", "")
-            if isinstance(content, list):
-                # Extract text from content blocks
-                content = " ".join(
-                    block.get("text", "") for block in content if isinstance(block, dict)
-                )
-            content = content.strip()
-            if content:
-                if len(content) <= 100:
-                    return content
-                # Truncate at word boundary
-                truncated = content[:100]
-                last_space = truncated.rfind(" ")
-                if last_space > 50:
-                    truncated = truncated[:last_space]
-                return truncated + "..."
-    return "Shared investigation"
+    text = _extract_first_user_text(messages)
+    if not text:
+        return "Shared investigation"
+    return _truncate_title(text, 100)
 
 
 def _cleanup_old_shares() -> None:
@@ -97,8 +110,8 @@ def _cleanup_old_shares() -> None:
 async def create_share(
     body: ShareRequest,
     request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """Create a read-only snapshot of a conversation."""
     user = x_forwarded_email or x_forwarded_user
@@ -130,12 +143,15 @@ async def create_share(
     return ShareResponse(id=share_id, url=url)
 
 
-@router.get("/share/{share_id}")
+@router.get(
+    "/share/{share_id}",
+    responses={404: {"description": "Not Found"}, 422: {"description": "Unprocessable Entity"}},
+)
 async def get_share(
     share_id: str,
     request: Request,
-    x_forwarded_user: str | None = Header(None),
-    x_forwarded_email: str | None = Header(None),
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
 ):
     """Retrieve a shared conversation snapshot."""
     user = x_forwarded_email or x_forwarded_user

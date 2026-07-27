@@ -13,6 +13,8 @@ VALID_DATABASES = {"pools", "aro", "roadshow"}
 MAX_RESULTS_CAP = 500
 DEFAULT_MAX_RESULTS = 100
 
+_ERR_COSMOS_NOT_CONFIGURED = "Azure Cosmos not configured"
+
 
 def _parse_pool_id(sub_id: str) -> str | None:
     """Extract pool ID from subscription name (e.g. 'pool-01-273' → '01')."""
@@ -24,7 +26,7 @@ def _list_pools(database: str) -> dict:
     """List all pools with utilization summary."""
     container = get_cosmos_container(database=database)
     if container is None:
-        return {"error": "Azure Cosmos not configured"}
+        return {"error": _ERR_COSMOS_NOT_CONFIGURED}
 
     items = list(
         container.query_items(
@@ -63,7 +65,7 @@ def _get_pool(pool_id: str, database: str, max_results: int) -> dict:
     """Get all subscriptions in a specific pool."""
     container = get_cosmos_container(database=database)
     if container is None:
-        return {"error": "Azure Cosmos not configured"}
+        return {"error": _ERR_COSMOS_NOT_CONFIGURED}
 
     prefix = f"pool-{pool_id}-"
     items = list(
@@ -95,7 +97,7 @@ def _get_subscription(subscription_name: str, database: str) -> dict:
     """Look up a specific subscription by name."""
     container = get_cosmos_container(database=database)
     if container is None:
-        return {"error": "Azure Cosmos not configured"}
+        return {"error": _ERR_COSMOS_NOT_CONFIGURED}
 
     items = list(
         container.query_items(
@@ -122,7 +124,7 @@ def _search_by_project(project_tag: str, database: str, max_results: int) -> dic
     """Find all subscriptions assigned to a project tag."""
     container = get_cosmos_container(database=database)
     if container is None:
-        return {"error": "Azure Cosmos not configured"}
+        return {"error": _ERR_COSMOS_NOT_CONFIGURED}
 
     items = list(
         container.query_items(

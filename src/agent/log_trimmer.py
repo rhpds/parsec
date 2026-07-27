@@ -49,7 +49,7 @@ def _extract_json_errors(line: str) -> str | None:
     json_str = line[start + 3 :].strip()
     try:
         data = json.loads(json_str)
-    except (json.JSONDecodeError, ValueError):
+    except ValueError:
         return None
 
     parts: list[str] = []
@@ -71,6 +71,78 @@ def _extract_json_errors(line: str) -> str | None:
     return ", ".join(parts) if parts else None
 
 
+def _parse_json_blob(line: str) -> dict | None:
+    """Extract and parse a JSON object from a line containing ``=> {``."""
+    start = line.find("=> {")
+    if start == -1:
+        return None
+    json_str = line[start + 3 :].strip()
+    try:
+        return json.loads(json_str)
+    except ValueError:
+        return None
+
+
+def _extract_first_pod(data: dict) -> dict | None:
+    """Return the first Pod resource from a k8s_info result, or None."""
+    resources = data.get("resources")
+    if not isinstance(resources, list) or not resources:
+        return None
+    pod = resources[0]
+    if not isinstance(pod, dict) or pod.get("kind") != "Pod":
+        return None
+    status = pod.get("status", {})
+    if not isinstance(status, dict):
+        return None
+    return pod
+
+
+def _extract_pod_conditions(status: dict) -> list[str]:
+    """Extract non-True condition strings from pod status."""
+    parts: list[str] = []
+    for cond in status.get("conditions", []):
+        if isinstance(cond, dict) and cond.get("status") != "True":
+            ctype = cond.get("type", "?")
+            msg = str(cond.get("message", "N/A"))[:300]
+            parts.append(f"  Condition {ctype}: {cond.get('status')} — {msg}")
+    return parts
+
+
+def _format_container_state(cs: dict) -> str:
+    """Build a state description string from a container status entry."""
+    state_info = ""
+    for state_type, state_data in cs.get("state", {}).items():
+        if not isinstance(state_data, dict):
+            continue
+        reason = state_data.get("reason", "")
+        message = str(state_data.get("message", ""))[:500]
+        state_info = state_type
+        if reason:
+            state_info += f"({reason})"
+        if message:
+            state_info += f": {message}"
+    return state_info
+
+
+def _extract_container_statuses(status: dict) -> list[str]:
+    """Extract diagnostic lines for init and regular containers."""
+    parts: list[str] = []
+    for label, key in [("Init", "initContainerStatuses"), ("Container", "containerStatuses")]:
+        for cs in status.get(key, []):
+            if not isinstance(cs, dict):
+                continue
+            name = cs.get("name", "?")
+            ready = cs.get("ready", False)
+            restarts = cs.get("restartCount", 0)
+            if ready and restarts == 0:
+                continue
+            state_info = _format_container_state(cs)
+            parts.append(
+                f"  {label} [{name}]: ready={ready}, restarts={restarts}, state={state_info}"
+            )
+    return parts
+
+
 def _extract_k8s_pod_status(line: str) -> str | None:
     """Extract container status summary from a K8s pod resource in a fatal line.
 
@@ -79,61 +151,23 @@ def _extract_k8s_pod_status(line: str) -> str | None:
     parts: pod phase, conditions, and container statuses (waiting reasons,
     restart counts, termination messages).
     """
-    start = line.find("=> {")
-    if start == -1:
+    data = _parse_json_blob(line)
+    if data is None:
         return None
 
-    json_str = line[start + 3 :].strip()
-    try:
-        data = json.loads(json_str)
-    except (json.JSONDecodeError, ValueError):
-        return None
-
-    resources = data.get("resources")
-    if not isinstance(resources, list) or not resources:
-        return None
-
-    pod = resources[0]
-    if not isinstance(pod, dict) or pod.get("kind") != "Pod":
+    pod = _extract_first_pod(data)
+    if pod is None:
         return None
 
     status = pod.get("status", {})
-    if not isinstance(status, dict):
-        return None
-
     parts: list[str] = []
 
     phase = status.get("phase", "")
     if phase:
         parts.append(f"Pod Phase: {phase}")
 
-    for cond in status.get("conditions", []):
-        if isinstance(cond, dict) and cond.get("status") != "True":
-            ctype = cond.get("type", "?")
-            msg = str(cond.get("message", "N/A"))[:300]
-            parts.append(f"  Condition {ctype}: {cond.get('status')} — {msg}")
-
-    for label, key in [("Init", "initContainerStatuses"), ("Container", "containerStatuses")]:
-        for cs in status.get(key, []):
-            if not isinstance(cs, dict):
-                continue
-            name = cs.get("name", "?")
-            ready = cs.get("ready", False)
-            restarts = cs.get("restartCount", 0)
-            state_info = ""
-            for state_type, state_data in cs.get("state", {}).items():
-                if isinstance(state_data, dict):
-                    reason = state_data.get("reason", "")
-                    message = str(state_data.get("message", ""))[:500]
-                    state_info = state_type
-                    if reason:
-                        state_info += f"({reason})"
-                    if message:
-                        state_info += f": {message}"
-            if not ready or restarts > 0:
-                parts.append(
-                    f"  {label} [{name}]: ready={ready}, restarts={restarts}, state={state_info}"
-                )
+    parts.extend(_extract_pod_conditions(status))
+    parts.extend(_extract_container_statuses(status))
 
     return "\n".join(parts) if parts else None
 
@@ -232,6 +266,40 @@ def _format_trimmed_output(result: list[str], total_lines: int, original_size: i
     return f"{header}\n\n{trimmed_text}"
 
 
+def _flush_retry_summary(result: list[str], retry_count: int) -> None:
+    """Append a retry summary line and reset state."""
+    if retry_count > 0:
+        result.append(f"  [... retried {retry_count} times before failing]")
+
+
+def _process_fatal_line(
+    stripped: str, line: str, result: list[str], prev_was_retry: bool, retry_count: int
+) -> tuple[bool, int]:
+    """Handle a line within fatal context. Returns (prev_was_retry, retry_count)."""
+    retry_match = _RETRY_RE.search(stripped)
+    if retry_match:
+        return _track_retry(prev_was_retry, retry_count)
+    if prev_was_retry:
+        _flush_retry_summary(result, retry_count)
+    result.append(_truncate_line(line, is_fatal=True))
+    return False, 0
+
+
+def _process_retry_line(
+    stripped: str, result: list[str], prev_was_retry: bool, retry_count: int
+) -> tuple[bool, int]:
+    """Handle a retry line outside fatal context. Returns (prev_was_retry, retry_count)."""
+    retry_match = _RETRY_RE.search(stripped)
+    if not retry_match:
+        return prev_was_retry, retry_count
+    retries_left = int(retry_match.group(1))
+    prev_was_retry, retry_count = _track_retry(prev_was_retry, retry_count)
+    if retries_left <= 1:
+        _flush_retry_summary(result, retry_count)
+        return False, 0
+    return prev_was_retry, retry_count
+
+
 def trim_ansible_log(content: str) -> str:
     """Trim an Ansible job log, keeping only investigation-relevant lines.
 
@@ -264,29 +332,19 @@ def trim_ansible_log(content: str) -> str:
             continue
 
         if i in fatal_indices:
-            retry_match_in_fatal = _RETRY_RE.search(stripped)
-            if retry_match_in_fatal:
-                prev_was_retry, retry_count = _track_retry(prev_was_retry, retry_count)
-                continue
-            if prev_was_retry and retry_count > 0:
-                result.append(f"  [... retried {retry_count} times before failing]")
-                prev_was_retry = False
-                retry_count = 0
-            result.append(_truncate_line(line, is_fatal=True))
+            prev_was_retry, retry_count = _process_fatal_line(
+                stripped, line, result, prev_was_retry, retry_count
+            )
             continue
 
         if _is_unconditional_keep(stripped):
             result.append(line)
             continue
 
-        retry_match = _RETRY_RE.search(stripped)
-        if retry_match:
-            retries_left = int(retry_match.group(1))
-            prev_was_retry, retry_count = _track_retry(prev_was_retry, retry_count)
-            if retries_left <= 1:
-                result.append(f"  [... retried {retry_count} times before failing]")
-                prev_was_retry = False
-                retry_count = 0
+        prev_was_retry, retry_count = _process_retry_line(
+            stripped, result, prev_was_retry, retry_count
+        )
+        if _RETRY_RE.search(stripped):
             continue
 
         if prev_was_retry:
