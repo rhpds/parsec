@@ -1,6 +1,5 @@
 """Tests for health check route handlers in src/routes/health.py."""
 
-
 import pytest
 from fastapi.testclient import TestClient
 

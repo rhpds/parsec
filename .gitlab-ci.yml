@@ -26,6 +26,21 @@ test-python:
   tags:
     - itup-alm-x86
 
+test-javascript:
+  stage: test
+  image: node:20
+  rules:
+    - when: always
+  script:
+    - npm ci
+    - npx vitest run --coverage
+  artifacts:
+    paths:
+      - coverage-js/lcov.info
+    expire_in: 1 hour
+  tags:
+    - itup-alm-x86
+
 sonarqube:
   variables:
     SONAR_PROJECT_KEY: "com.redhat.rhpds.parsec"
@@ -33,7 +48,11 @@ sonarqube:
     - job: test-python
       optional: true
       artifacts: true
+    - job: test-javascript
+      optional: true
+      artifacts: true
   dependencies:
     - test-python
+    - test-javascript
   tags:
     - itup-alm-x86

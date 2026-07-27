@@ -33,5 +33,9 @@ reports/
 .coverage
 htmlcov/
 
+node_modules/
+coverage-js/
+package-lock.json
+
 data/.pricing_etags.json
 data/debug/
