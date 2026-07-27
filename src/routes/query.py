@@ -239,7 +239,9 @@ async def download_report(
 
     # Sanitize filename to prevent path traversal
     safe_name = os.path.basename(filename)
-    filepath = os.path.join(REPORTS_DIR, safe_name)
+    filepath = os.path.realpath(os.path.join(REPORTS_DIR, safe_name))
+    if not filepath.startswith(os.path.realpath(REPORTS_DIR)):
+        raise HTTPException(status_code=400, detail="Invalid filename")
 
     if not os.path.isfile(filepath):
         raise HTTPException(status_code=404, detail="Report not found")
