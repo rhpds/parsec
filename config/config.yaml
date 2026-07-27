@@ -170,6 +170,17 @@ skills:
   project_root: "skills"
   # plugin_paths: additional roots, typically mounted from external skill repos
   # (e.g. rhdp-rca-plugin). Listed paths are scanned for SKILL.md directories.
+  #
+  # Skills found here are BOTH listed by GET /api/skills and — since startup
+  # publishes every discovered skill into <cwd>/.claude/skills (see
+  # src/skills/sdk_root.py) — loadable by the Agent SDK. GET /api/skills reports
+  # `sdk_visible` per skill, so a mount that the SDK cannot see is visible as
+  # such rather than silently inert.
+  #
+  # Each listed path is a directory OF skill directories, i.e.
+  # /opt/rhdp-rca-plugin/skills/root-cause-analysis/SKILL.md, not the SKILL.md
+  # itself. Skill names must be unique across roots; project_root wins on a
+  # collision (see SkillLoader._deduplicate).
   plugin_paths: []
   #   - "/opt/rhdp-rca-plugin/skills"
   # user_root: per-user skill directory for local dev only.

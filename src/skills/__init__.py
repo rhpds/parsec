@@ -21,6 +21,7 @@ from src.skills.errors import (
 )
 from src.skills.loader import SkillLoader, SkillSource
 from src.skills.manifest import ParsecExtensions, SkillManifest
+from src.skills.sdk_root import sdk_skills_root, sync_sdk_skill_root
 
 __all__ = [
     "ParsecExtensions",
@@ -30,4 +31,6 @@ __all__ = [
     "SkillManifest",
     "SkillSource",
     "SkillValidationError",
+    "sdk_skills_root",
+    "sync_sdk_skill_root",
 ]

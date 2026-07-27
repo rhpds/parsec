@@ -21,6 +21,9 @@ EXPECTED_SKILLS = {
     "abuse-account-detection",
     "aap2-job-failure-triage",
     "icinga-triage",
+    "cost-anomaly-triage",
+    "provision-lookup",
+    "aap2-job-failure-rca",
 }
 
 
