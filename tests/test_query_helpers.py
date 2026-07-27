@@ -1,6 +1,5 @@
 """Tests for pure-logic helpers in src/routes/query.py."""
 
-
 from src.routes.query import _is_user_in_email_list, _parse_csv_set
 
 # ---------------------------------------------------------------------------

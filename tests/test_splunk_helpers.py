@@ -1,6 +1,5 @@
 """Tests for pure-logic helpers in src/tools/splunk.py."""
 
-
 from src.tools.splunk import (
     AAP_INDEX,
     OCP_APP_INDEX,

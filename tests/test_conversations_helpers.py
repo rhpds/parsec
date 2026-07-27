@@ -1,6 +1,5 @@
 """Tests for pure-logic helpers in src/routes/conversations.py."""
 
-
 from src.routes.conversations import (
     _auto_title,
     _count_user_messages,
