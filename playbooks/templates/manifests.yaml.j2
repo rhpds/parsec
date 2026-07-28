@@ -171,6 +171,24 @@ spec:
               value: "{{ vertex_region }}"
             - name: PARSEC_ANTHROPIC__VERTEX_CREDENTIALS_PATH
               value: "/app/gcp/service-account.json"
+{% if litellm_base_url | default('') %}
+            - name: PARSEC_ANTHROPIC__LITELLM_BASE_URL
+              value: "{{ litellm_base_url }}"
+            - name: PARSEC_ANTHROPIC__LITELLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: parsec-secrets
+                  key: litellm-api-key
+                  optional: true
+{% endif %}
+{% if litellm_overrides | default({}) %}
+{% for component, overrides in litellm_overrides.items() %}
+{% for key, value in overrides.items() %}
+            - name: PARSEC_ANTHROPIC__OVERRIDES__{{ component | upper }}__{{ key | upper }}
+              value: "{{ value }}"
+{% endfor %}
+{% endfor %}
+{% endif %}
             - name: PARSEC_AWS__REGION
               value: "{{ aws_region }}"
             - name: PARSEC_GCP__CREDENTIALS_PATH
