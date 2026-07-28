@@ -1,13 +1,14 @@
-# Parsec on the Claude Agent SDK — human-led E2E instance.
+# Parsec on the Claude Agent SDK — human-led E2E / parity instance.
 #
-# Deliberately separate from the `parsec` (prod) and `parsec-dev` deployments:
-# this runs with `agent.runtime: sdk`, every sub-agent enabled, and the whole
-# turn orchestrated by the SDK. It lives in `rh-ace-aiops` alongside the
-# rhdp-rca-plugin batch CronJob and reuses that namespace's existing
-# `claude-vertex-creds` secret rather than copying credentials around.
+# Runs in `rh-ace-aiops` (deliberately NOT parsec-dev, which belongs to the RHDP
+# team) with `agent.runtime: sdk`, every sub-agent enabled, and the whole turn
+# orchestrated by the SDK. Everything is named `parsec-sdk*` so it cannot collide
+# with the rhdp-rca-plugin resources already in the namespace.
 #
-# Everything is named `parsec-sdk*` so it cannot collide with the rca-plugin
-# resources already in the namespace.
+# Connector parity with parsec-dev: the same eight secrets, the same icinga-mcp
+# sidecar, and the same MCP/service URLs, so the ONLY variable between this and
+# https://parsec-dev.apps.ocpv-infra01.dal12.infra.demo.redhat.com is the runtime.
+# The secrets were copied from parsec-dev (they are namespace-scoped).
 #
 #   oc apply -f playbooks/parsec-sdk-e2e.yaml -n rh-ace-aiops
 #   oc start-build parsec-sdk -n rh-ace-aiops --follow
@@ -42,24 +43,68 @@ spec:
   successfulBuildsHistoryLimit: 2
   failedBuildsHistoryLimit: 2
 ---
+# ServiceAccount used as its own OAuth client, so browser traffic authenticates
+# against OpenShift without needing a cluster-scoped OAuthClient (which this
+# account cannot create).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: parsec-sdk-oauth
+  labels: {app: parsec-sdk}
+  annotations:
+    serviceaccounts.openshift.io/oauth-redirecturi.primary: >-
+      https://parsec-sdk-rh-ace-aiops.apps.ocpv-infra01.dal12.infra.demo.redhat.com
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: parsec-sdk-config
   labels: {app: parsec-sdk}
 data:
-  # Mounted over /app/config/config.yaml. Only the keys that differ from the
-  # image default are meaningful here, but the file replaces the whole config,
-  # so it has to be complete enough to boot.
+  # Mirrors parsec-dev's config.yaml. Differences are intentional and limited to
+  # the agent block (the runtime flip) and auth (see below).
   config.yaml: |
-    anthropic:
-      model: "claude-sonnet-4-5@20250929"
-      max_tokens: 8192
-      max_tool_rounds: 10
-      use_vertex: true
+    app:
+      name: parsec
+      port: 8000
+      host: "0.0.0.0"
+      log_level: info
 
+    anthropic:
+      model: "claude-sonnet-4@20250514"
+      max_tokens: 4096
+      max_tool_rounds: 10
+
+    provision_db:
+      max_rows: 500
+
+    aws:
+      region: "us-east-1"
+      batch_size: 100
+
+    cost_monitor:
+      api_url: "http://cost-data-service.cost-monitor.svc:8000"
+      dashboard_url: "https://cost-monitor.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
+
+    cloudtrail:
+      event_data_store_id: "03041e6e-ecfe-40bb-91db-c467e33c2313"
+
+    alert_api_key: ""
+
+    learnings:
+      admin_users: "prutledg@redhat.com,andrjone@redhat.com"
+
+    github:
+      mcp_url: "https://api.githubcopilot.com/mcp/"
+
+    mlflow:
+      # Cross-namespace from rh-ace-aiops this is unreachable, so tracing stays
+      # off here. Startup no longer hangs on it (see src/connections/mlflow_tracking.py).
+      tracking_url: "http://mlflow-tracking.mlflow.svc:5000"
+      experiment_name: "parsec-agent-metrics"
+
+    # --- the only functional difference from parsec-dev ---
     agent:
-      # The flip. Everything below runs on the Claude Agent SDK.
       runtime: "sdk"
       sdk:
         enabled_agents: ["all"]
@@ -75,25 +120,11 @@ data:
       user_root: ""
 
     auth:
-      # E2E instance: the group check calls the OpenShift API and needs the
-      # `parsec-oauth` ClusterRole, which this namespace's default service
-      # account does not have — so it denies everyone. Use the email allowlist
-      # fallback instead, which needs no cluster read.
+      # oauth-proxy establishes identity; the group check additionally needs the
+      # `parsec-oauth` ClusterRole, which cannot be granted from this namespace.
+      # So authorisation is the email allowlist rather than group membership.
       allowed_groups: ""
       allowed_users: "anxie@redhat.com"
-
-    reporting_mcp:
-      mcp_url: ""
-
-    mlflow:
-      tracking_url: "http://mlflow-tracking.mlflow.svc:5000"
-      experiment: "parsec-agent-metrics"
-
-    icinga:
-      mcp_url: ""
-
-    github:
-      mcp_url: ""
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -115,47 +146,82 @@ spec:
         - name: parsec
           image: parsec-sdk:latest
           ports: [{containerPort: 8000, name: http}]
+          envFrom:
+            - secretRef: {name: parsec-cloud-credentials, optional: true}
+            - secretRef: {name: parsec-aap2-credentials, optional: true}
           env:
-            # The runtime flip is also set here so it can be flipped back with
-            # `oc set env deploy/parsec-sdk PARSEC_AGENT__RUNTIME=legacy`
-            # without editing the ConfigMap.
+            # Rollback switch: `oc set env deploy/parsec-sdk PARSEC_AGENT__RUNTIME=legacy`
             - name: PARSEC_AGENT__RUNTIME
               value: "sdk"
-            # Vertex wiring for the `claude` CLI subprocess. Without these the
-            # subprocess starts with no credential and complete() swallows the
-            # failure into is_error, which surfaces as a plausible bad answer
-            # rather than a failed rollout.
+            # --- connectors, matching parsec-dev ---
+            - name: PARSEC_REPORTING_MCP__MCP_URL
+              value: "http://reporting-mcp.demo-reporting.svc:8080/mcp/"
+            - name: PARSEC_ICINGA__MCP_URL
+              value: "http://localhost:3000/sse"
+            - name: PARSEC_GITHUB__TOKEN
+              valueFrom: {secretKeyRef: {name: parsec-secrets, key: github-token, optional: true}}
+            - name: PARSEC_REPORTING_MCP__TOKEN
+              valueFrom: {secretKeyRef: {name: parsec-secrets, key: reporting-mcp-token, optional: true}}
+            - name: PARSEC_ALERT_API_KEY
+              valueFrom: {secretKeyRef: {name: parsec-secrets, key: alert-api-key, optional: true}}
+            - name: PARSEC_ANTHROPIC__LITELLM_API_KEY
+              valueFrom: {secretKeyRef: {name: parsec-secrets, key: litellm-api-key, optional: true}}
+            - name: PARSEC_LEARNINGS__LOCAL__API_KEY
+              valueFrom: {secretKeyRef: {name: parsec-secrets, key: litellm-api-key, optional: true}}
+            # --- Vertex for Parsec's own Anthropic client (same as parsec-dev) ---
+            - name: PARSEC_ANTHROPIC__BACKEND
+              value: "vertex"
+            - name: PARSEC_ANTHROPIC__VERTEX_PROJECT_ID
+              value: "itpc-gcp-product-all-claude"
+            - name: PARSEC_ANTHROPIC__VERTEX_REGION
+              value: "us-east5"
+            - name: PARSEC_ANTHROPIC__VERTEX_CREDENTIALS_PATH
+              value: /app/gcp/service-account.json
+            - name: PARSEC_GCP__CREDENTIALS_PATH
+              value: /app/gcp-billing/service-account.json
+            # NOTE: parsec-dev additionally overrides the ORCHESTRATOR onto
+            # litellm/qwen3-14b (PARSEC_ANTHROPIC__OVERRIDES__ORCHESTRATOR__*).
+            # Deliberately not copied — the whole point here is that the Agent
+            # SDK orchestrates. It is a real confound for any answer-quality
+            # comparison and must be stated alongside results.
+            # --- Vertex for the `claude` CLI subprocess the SDK spawns ---
+            # Same project/region as Parsec's own client so both arms bill and
+            # resolve identically.
             - name: CLAUDE_CODE_USE_VERTEX
               value: "1"
-            - name: CLOUD_ML_REGION
-              valueFrom:
-                secretKeyRef: {name: claude-vertex-creds, key: CLOUD_ML_REGION}
-            - name: ANTHROPIC_VERTEX_PROJECT_ID
-              valueFrom:
-                secretKeyRef: {name: claude-vertex-creds, key: ANTHROPIC_VERTEX_PROJECT_ID}
             - name: GOOGLE_APPLICATION_CREDENTIALS
-              value: /app/gcp/application_default_credentials.json
+              value: /app/gcp/service-account.json
+            - name: ANTHROPIC_VERTEX_PROJECT_ID
+              value: "itpc-gcp-product-all-claude"
+            - name: CLOUD_ML_REGION
+              value: "us-east5"
             - name: CLAUDE_CODE_ACCEPT_TOS
               value: "true"
-            # Parsec's own Vertex client reads this one.
-            - name: PARSEC_ANTHROPIC__VERTEX_CREDENTIALS_PATH
-              value: /app/gcp/application_default_credentials.json
-            - name: PARSEC_ANTHROPIC__VERTEX_PROJECT_ID
-              valueFrom:
-                secretKeyRef: {name: claude-vertex-creds, key: ANTHROPIC_VERTEX_PROJECT_ID}
-            - name: PARSEC_ANTHROPIC__VERTEX_REGION
-              valueFrom:
-                secretKeyRef: {name: claude-vertex-creds, key: CLOUD_ML_REGION}
+            # --- Babylon / OCPV cluster kubeconfigs (mounted secrets) ---
+            - {name: PARSEC_BABYLON__CLUSTERS__EAST__KUBECONFIG, value: /app/babylon/east.kubeconfig}
+            - {name: PARSEC_BABYLON__CLUSTERS__WEST__KUBECONFIG, value: /app/babylon/west.kubeconfig}
+            - {name: PARSEC_BABYLON__CLUSTERS__PARTNER0__KUBECONFIG, value: /app/babylon/partner0.kubeconfig}
+            - {name: PARSEC_BABYLON__CLUSTERS__PARTNER1__KUBECONFIG, value: /app/babylon/partner1.kubeconfig}
+            - {name: PARSEC_BABYLON__CLUSTERS__INTEGRATION__KUBECONFIG, value: /app/babylon/integration.kubeconfig}
+            - {name: PARSEC_BABYLON__CLUSTERS__BABYDEV__KUBECONFIG, value: /app/babylon/babydev.kubeconfig}
+            - {name: PARSEC_OCPV__CLUSTERS__OCPV05__KUBECONFIG, value: /app/ocpv/ocpv05.kubeconfig}
+            - {name: PARSEC_OCPV__CLUSTERS__OCPV06__KUBECONFIG, value: /app/ocpv/ocpv06.kubeconfig}
+            - {name: PARSEC_OCPV__CLUSTERS__OCPV07__KUBECONFIG, value: /app/ocpv/ocpv07.kubeconfig}
+            - {name: PARSEC_OCPV__CLUSTERS__OCPV08__KUBECONFIG, value: /app/ocpv/ocpv08.kubeconfig}
+            - {name: PARSEC_OCPV__CLUSTERS__OCPV09__KUBECONFIG, value: /app/ocpv/ocpv09.kubeconfig}
+            - {name: PARSEC_OCPV__CLUSTERS__OCPV10__KUBECONFIG, value: /app/ocpv/ocpv10.kubeconfig}
           volumeMounts:
-            - {name: gcp-creds, mountPath: /app/gcp, readOnly: true}
             - {name: config, mountPath: /app/config/config.yaml, subPath: config.yaml}
+            - {name: vertex-credentials, mountPath: /app/gcp, readOnly: true}
+            - {name: gcp-billing-credentials, mountPath: /app/gcp-billing, readOnly: true}
+            - {name: babylon-kubeconfigs, mountPath: /app/babylon, readOnly: true}
+            - {name: ocpv-kubeconfigs, mountPath: /app/ocpv, readOnly: true}
             - {name: data, mountPath: /app/data}
           resources:
             requests: {cpu: '500m', memory: 1Gi}
-            # CPU, not memory, is the binding constraint: each SDK turn spawns a
-            # `claude` subprocess, and under a 500m quota N concurrent cold
-            # starts starve the Python event loop until the liveness probe
-            # restarts the pod.
+            # CPU, not memory, is the binding constraint: every SDK turn spawns a
+            # `claude` subprocess, and under a tight quota concurrent cold starts
+            # starve the event loop until the liveness probe restarts the pod.
             limits: {cpu: '2', memory: 3Gi}
           livenessProbe:
             httpGet: {path: /api/health, port: 8000}
@@ -168,15 +234,77 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
+        # Same monitoring-mcp sidecar parsec-dev runs; reachable on localhost:3000
+        # because containers in a pod share a network namespace.
+        - name: icinga-mcp
+          image: quay.io/rhpds/monitoring-mcp:v0.3.1
+          args: ['--transport', 'sse', '--host', '0.0.0.0', '--port', '3000']
+          envFrom:
+            - secretRef: {name: icinga-credentials, optional: true}
+          env:
+            - name: PARSEC_REPORTING_MCP__MCP_URL
+              value: "http://reporting-mcp.demo-reporting.svc:8080/mcp/"
+          resources:
+            requests: {cpu: '50m', memory: 64Mi}
+            limits: {cpu: '200m', memory: 128Mi}
       volumes:
-        - name: gcp-creds
-          secret:
-            secretName: claude-vertex-creds
-            items: [{key: gcp-credentials, path: application_default_credentials.json}]
         - name: config
           configMap: {name: parsec-sdk-config}
+        - name: vertex-credentials
+          secret: {secretName: vertex-credentials}
+        - name: gcp-billing-credentials
+          secret: {secretName: gcp-billing-credentials}
+        - name: babylon-kubeconfigs
+          secret: {secretName: babylon-kubeconfigs}
+        - name: ocpv-kubeconfigs
+          secret: {secretName: ocpv-kubeconfigs}
         - name: data
           emptyDir: {}
+---
+# OAuth proxy: without it no X-Forwarded-Email ever reaches the app, so every
+# browser request is rejected with "no user identity found in request".
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: parsec-sdk-oauth
+  labels: {app: parsec-sdk-oauth}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: parsec-sdk-oauth}
+  template:
+    metadata:
+      labels: {app: parsec-sdk-oauth}
+    spec:
+      serviceAccountName: parsec-sdk-oauth
+      containers:
+        - name: oauth-proxy
+          image: registry.redhat.io/openshift4/ose-oauth-proxy-rhel9:latest
+          ports: [{containerPort: 8080, name: public}]
+          args:
+            - -provider=openshift
+            - -http-address=:8080
+            - -https-address=
+            - -email-domain=*
+            - -upstream=http://parsec-sdk:8000/
+            - -openshift-service-account=parsec-sdk-oauth
+            - -client-id=system:serviceaccount:rh-ace-aiops:parsec-sdk-oauth
+            - -client-secret-file=/var/run/secrets/kubernetes.io/serviceaccount/token
+            - -cookie-secret-file=/etc/proxy/secrets/session_secret
+            - -openshift-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            - -skip-auth-regex=^/api/(health|alert/)
+            # Must exceed the SDK's own 300s ceiling or long investigations are
+            # cut off by the proxy rather than by the agent.
+            - -upstream-timeout=330s
+            - -pass-user-headers=true
+          volumeMounts:
+            - {name: oauth-secret, mountPath: /etc/proxy/secrets, readOnly: true}
+          resources:
+            requests: {cpu: '20m', memory: 64Mi}
+            limits: {cpu: '200m', memory: 256Mi}
+      volumes:
+        - name: oauth-secret
+          secret: {secretName: parsec-sdk-oauth-secret}
 ---
 apiVersion: v1
 kind: Service
@@ -187,12 +315,22 @@ spec:
   selector: {app: parsec-sdk}
   ports: [{name: http, port: 8000, targetPort: 8000}]
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: parsec-sdk-oauth
+  labels: {app: parsec-sdk-oauth}
+spec:
+  selector: {app: parsec-sdk-oauth}
+  ports: [{name: public, port: 8080, targetPort: 8080}]
+---
+# Route points at the proxy, not the app.
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
   name: parsec-sdk
   labels: {app: parsec-sdk}
 spec:
-  to: {kind: Service, name: parsec-sdk}
-  port: {targetPort: http}
+  to: {kind: Service, name: parsec-sdk-oauth}
+  port: {targetPort: public}
   tls: {termination: edge, insecureEdgeTerminationPolicy: Redirect}
