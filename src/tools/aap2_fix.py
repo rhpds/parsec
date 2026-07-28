@@ -2,11 +2,11 @@
 
 import json
 import logging
-import os
 import re
 
 import httpx
 
+from src.agent.client_factory import build_client, resolve_model
 from src.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -246,45 +246,6 @@ async def _resolve_role_source(role_fqcn: str) -> tuple[str, str]:
     return "", ""
 
 
-def _create_vertex_client(cfg):
-    """Create Anthropic Vertex AI client."""
-    import anthropic
-    from google.oauth2 import service_account
-
-    project_id = cfg.anthropic.get("vertex_project_id", "") or cfg.gcp.get("project_id", "")
-    region = cfg.anthropic.get("vertex_region", "us-east5")
-    kwargs: dict = {"project_id": project_id, "region": region}
-    creds_path = cfg.anthropic.get("vertex_credentials_path", "")
-    if creds_path and os.path.isfile(creds_path):
-        credentials = service_account.Credentials.from_service_account_file(
-            creds_path,
-            scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        )
-        kwargs["credentials"] = credentials
-    return anthropic.AnthropicVertex(**kwargs)
-
-
-def _create_anthropic_client(cfg):
-    """Create the appropriate Anthropic client based on backend config.
-
-    Returns the client or None if not available.
-    """
-    import anthropic
-
-    backend = cfg.anthropic.get("backend", "api")
-
-    if backend == "vertex":
-        return _create_vertex_client(cfg)
-    if backend == "bedrock":
-        region = cfg.anthropic.get("bedrock_region", "us-east-1")
-        return anthropic.AnthropicBedrock(aws_region=region)
-
-    api_key = cfg.anthropic.get("api_key", "") or os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return None
-    return anthropic.Anthropic(api_key=api_key)
-
-
 def _parse_ai_fix_response(text: str) -> dict | None:
     """Parse AI fix recommendation from response text."""
     # Strip markdown code fences
@@ -341,8 +302,7 @@ async def ai_analyze_fix(
     Uses parsec's Anthropic config (supports direct API, Vertex AI, Bedrock).
     """
     cfg = get_config()
-    backend = cfg.anthropic.get("backend", "api")
-    model = cfg.anthropic.get("model", "claude-sonnet-4-6")
+    model = resolve_model(cfg, "aap2_fix")
 
     safe_vars = _filter_sensitive_vars(extra_vars)
 
@@ -385,12 +345,13 @@ The "before" field must show real code from the source, not a summary.
 The "after" field must show the corrected version with FQCN."""
 
     try:
-        client = _create_anthropic_client(cfg)
-        if client is None:
-            logger.info("AI not available: no API key configured")
-            return None
+        client = build_client(cfg, "aap2_fix")
+    except ValueError:
+        logger.info("AI not available: no API key configured")
+        return None
 
-        logger.info("Running AI fix analysis (backend=%s)...", backend)
+    try:
+        logger.info("Running AI fix analysis...")
         response = client.messages.create(
             model=model,
             max_tokens=1024,
