@@ -157,20 +157,81 @@ def build_orchestrator_options(config: Any, *, system: str) -> Any:
     )
 
 
-def _orchestrator_system() -> str:
-    """The orchestrator prompt, with the same date grounding the legacy path adds.
+def _delegation_addendum(config: Any) -> str:
+    """Translate the prompt's ``investigate_*`` instructions onto the Agent tool.
 
-    ``orchestrator.py:1248`` appends ``Today's date is {today}`` and the SDK path
-    did not, so SDK answers were reasoning about relative windows ("last 30
-    days") without knowing the date. That asymmetry also silently confounded
-    every legacy-vs-SDK comparison run so far.
+    ``config/prompts/orchestrator.md`` tells the model to delegate by calling
+    ``investigate_costs``, ``investigate_icinga`` and friends. Those tools do not
+    exist on this path — the SDK's own ``Agent`` tool replaces them — so without
+    this the model is instructed to use tools it does not have. It cannot, so it
+    silently does the whole investigation inline with the bridged tools instead:
+    delegation never fires, the sub-agent prompts and skills are never loaded,
+    and the only visible symptom is that no ``agent_start`` event is emitted.
+
+    Rewriting the prompt itself is not an option while the legacy runtime still
+    reads the same file, so the mapping is appended for the SDK path only.
+    """
+    from src.agent.agents import AGENTS
+    from src.agent.sdk_profiles import enabled_sdk_agents
+
+    enabled = sorted(enabled_sdk_agents(config))
+    if not enabled:
+        return ""
+
+    lines = [
+        "",
+        "## Delegation on this runtime",
+        "",
+        "The `investigate_*` tools described above do NOT exist here. Delegate with",
+        "the `Agent` tool instead, passing `subagent_type`. Each specialist has its",
+        "own prompt, tools and skill, and returns a finished answer:",
+        "",
+    ]
+    legacy_names = {
+        "cost": "investigate_costs",
+        "aap2": "investigate_aap2_job",
+        "babylon": "investigate_babylon",
+        "security": "investigate_security",
+        "ocpv": "investigate_ocpv",
+        "icinga": "investigate_icinga",
+    }
+    for agent_type in enabled:
+        cfg = AGENTS.get(agent_type)
+        if not cfg:
+            continue
+        was = legacy_names.get(agent_type)
+        lines.append(
+            f'- `subagent_type="{agent_type}"` — {cfg.name}'
+            + (f" (replaces `{was}`)" if was else "")
+        )
+    lines += [
+        "",
+        "Delegate whenever a question falls in one of those domains, exactly as the",
+        "instructions above intend. Handle only cross-domain synthesis and your own",
+        "direct tools yourself.",
+    ]
+    return "\n".join(lines)
+
+
+def _orchestrator_system(config: Any) -> str:
+    """The orchestrator prompt, adapted for the SDK runtime.
+
+    Two additions over the raw prompt file: the delegation mapping above, and the
+    date grounding the legacy path appends at ``orchestrator.py:1248``. Without
+    the date, SDK answers reason about relative windows ("last 30 days") with no
+    idea what today is — an asymmetry that also silently confounded every
+    legacy-vs-SDK comparison run so far.
     """
     from datetime import UTC, datetime
 
     from src.agent.system_prompt import get_agent_prompt
 
     today = datetime.now(UTC).strftime("%Y-%m-%d")
-    return f"{get_agent_prompt('orchestrator')}\n\nToday's date is {today}."
+    return (
+        f"{get_agent_prompt('orchestrator')}"
+        f"{_delegation_addendum(config)}"
+        f"\n\nToday's date is {today}."
+    )
 
 
 def _section_get(config: Any, key: str) -> dict:
@@ -218,7 +279,7 @@ async def run_agent_via_sdk(
     translator = SdkEventTranslator(question=question, history=conversation_history or [])
 
     try:
-        options = build_orchestrator_options(cfg, system=_orchestrator_system())
+        options = build_orchestrator_options(cfg, system=_orchestrator_system(cfg))
     except Exception as e:
         logger.exception("Failed to build SDK orchestrator options")
         yield sse_error(f"SDK orchestrator unavailable: {e}")

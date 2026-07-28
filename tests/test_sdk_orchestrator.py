@@ -342,3 +342,32 @@ def test_streaming_and_isolation_flags(_sdk_stub):
     assert o.include_partial_messages is True, "token streaming requires this"
     assert o.strict_mcp_config is True
     assert set(o.mcp_servers) == {"parsec"}
+
+
+def test_delegation_instructions_are_translated_for_the_sdk():
+    """The prompt's `investigate_*` tools do not exist on this runtime.
+
+    Left untranslated, the orchestrator is told to delegate with tools it does
+    not have, cannot, and silently does everything inline instead — no
+    agent_start, no sub-agent prompt, no skill. The only visible symptom is a
+    missing event.
+    """
+    from src.agent.sdk_orchestrator import _orchestrator_system
+
+    cfg = {"agent": {"runtime": "sdk", "sdk": {"enabled_agents": ["all"]}}}
+    sys_prompt = _orchestrator_system(cfg)
+
+    assert "Agent" in sys_prompt and "subagent_type" in sys_prompt
+    for agent_type in ("cost", "aap2", "babylon", "security", "ocpv", "icinga"):
+        assert f'subagent_type="{agent_type}"' in sys_prompt
+    # and it explicitly retires the legacy names the prompt file still advertises
+    assert "investigate_costs" in sys_prompt
+    assert "do NOT exist here" in sys_prompt
+    assert "Today's date is" in sys_prompt
+
+
+def test_no_delegation_block_when_no_agents_enabled():
+    from src.agent.sdk_orchestrator import _orchestrator_system
+
+    cfg = {"agent": {"runtime": "sdk", "sdk": {"enabled_agents": []}}}
+    assert "subagent_type" not in _orchestrator_system(cfg)
