@@ -6,7 +6,7 @@ import re
 
 import httpx
 
-from src.agent.client_factory import build_client, resolve_model
+from src.agent.client_factory import build_client, resolve_model, strip_thinking_tokens
 from src.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -359,6 +359,7 @@ The "after" field must show the corrected version with FQCN."""
         )
 
         text = "".join(b.text for b in response.content if hasattr(b, "text"))
+        text = strip_thinking_tokens(text)
         return _parse_ai_fix_response(text)
     except Exception as e:
         logger.warning("AI fix analysis failed: %s", e)

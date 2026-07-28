@@ -1394,9 +1394,11 @@ def _parse_alert_response_blocks(
     text_parts: list[str] = []
     tool_use_blocks: list = []
     for block in response_content:
-        if block.type == "text" and block.text.strip():
-            investigation_log.append(block.text)
-            text_parts.append(block.text)
+        if block.type == "text":
+            cleaned = strip_thinking_tokens(block.text)
+            if cleaned.strip():
+                investigation_log.append(cleaned)
+                text_parts.append(cleaned)
         elif block.type == "tool_use":
             tool_use_blocks.append(block)
     return text_parts, tool_use_blocks
