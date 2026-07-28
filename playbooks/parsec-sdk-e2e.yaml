@@ -75,10 +75,12 @@ data:
       user_root: ""
 
     auth:
-      # E2E instance behind an OpenShift route without oauth-proxy; keep the
-      # app-level allowlist as the gate.
-      allowed_groups: "rhpds-admins,ace-octo-team"
-      allowed_users: ""
+      # E2E instance: the group check calls the OpenShift API and needs the
+      # `parsec-oauth` ClusterRole, which this namespace's default service
+      # account does not have — so it denies everyone. Use the email allowlist
+      # fallback instead, which needs no cluster read.
+      allowed_groups: ""
+      allowed_users: "anxie@redhat.com"
 
     reporting_mcp:
       mcp_url: ""
