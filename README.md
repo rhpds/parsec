@@ -104,7 +104,7 @@ anthropic:
       model: "claude-opus-4-6"   # stronger model for debugging
 ```
 
-See the [infrastructure docs on Confluence](https://redhat.atlassian.net/wiki/spaces/RHPDS/pages/375984824) for full deployment and LiteMaaS setup details.
+See the infrastructure docs on Confluence for full deployment and LiteMaaS setup details.
 
 ### OpenShift Deployment
 
