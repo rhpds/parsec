@@ -272,3 +272,73 @@ def test_structured_content_blocks_flatten_into_the_preamble():
         history=[{"role": "user", "content": [{"type": "text", "text": "original ask"}]}],
     )
     assert "original ask" in tr.build_prompt()
+
+
+# ------------------------------------------------ orchestrator options wiring
+
+
+@pytest.fixture
+def _sdk_stub(monkeypatch):
+    import claude_agent_sdk
+
+    monkeypatch.setattr(claude_agent_sdk, "tool", lambda n, d, s: (lambda fn: fn), raising=False)
+    monkeypatch.setattr(
+        claude_agent_sdk,
+        "create_sdk_mcp_server",
+        lambda name, version, tools: {"name": name, "count": len(tools)},
+        raising=False,
+    )
+
+
+def _opts(_sdk_stub):
+    from src.agent.sdk_orchestrator import build_orchestrator_options
+
+    cfg = {"agent": {"runtime": "sdk", "sdk": {"enabled_agents": ["all"]}}}
+    return build_orchestrator_options(cfg, system="sys")
+
+
+def test_every_subagent_tool_is_pre_approved(_sdk_stub):
+    """Regression: subagents were denied every tool call.
+
+    `permission_mode="dontAsk"` denies anything absent from the session-wide
+    `allowed_tools`. Approving only the orchestrator's own tools meant a
+    delegated agent could call nothing — the icinga agent answered "unable to
+    access the monitoring system due to permission restrictions" having made
+    zero tool calls, which looks like a plausible answer rather than a failure.
+    """
+    from src.agent.agents import AGENTS
+    from src.agent.parsec_mcp import tool_names_for
+
+    approved = set(_opts(_sdk_stub).allowed_tools)
+
+    for agent_type, agent_cfg in AGENTS.items():
+        for name in tool_names_for(list(agent_cfg.tools)):
+            assert name in approved, f"{agent_type} may call {name} but it is not pre-approved"
+
+
+def test_agent_tool_is_available_and_approved(_sdk_stub):
+    """Without `Agent` in both lists, delegation cannot happen at all."""
+    o = _opts(_sdk_stub)
+    assert "Agent" in o.tools
+    assert "Agent" in o.allowed_tools
+
+
+def test_per_agent_availability_stays_narrow(_sdk_stub):
+    """Widening approval must not widen what an individual agent can reach."""
+    from src.agent.parsec_mcp import tool_names_for
+    from src.agent.agents import AGENTS
+
+    o = _opts(_sdk_stub)
+    ocpv_tools = set(o.agents["ocpv"].tools)
+    assert ocpv_tools == set(tool_names_for(list(AGENTS["ocpv"].tools)))
+    # The cost agent has tools ocpv does not; they must not leak into ocpv.
+    cost_only = set(tool_names_for(list(AGENTS["cost"].tools))) - ocpv_tools
+    assert cost_only, "expected cost to have tools ocpv lacks"
+    assert not (cost_only & ocpv_tools)
+
+
+def test_streaming_and_isolation_flags(_sdk_stub):
+    o = _opts(_sdk_stub)
+    assert o.include_partial_messages is True, "token streaming requires this"
+    assert o.strict_mcp_config is True
+    assert set(o.mcp_servers) == {"parsec"}

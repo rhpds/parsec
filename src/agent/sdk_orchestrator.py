@@ -110,7 +110,6 @@ def build_orchestrator_options(config: Any, *, system: str) -> Any:
 
     from src.agent.parsec_mcp import SERVER_NAME, build_server, tool_names_for
     from src.agent.sdk_profiles import _sdk_section
-    from src.agent.tool_definitions import get_orchestrator_direct_tools
     from src.llm.agent_sdk_client import AgentSdkConfig, build_subprocess_env
 
     sdk_cfg = _sdk_section(config)
@@ -119,8 +118,19 @@ def build_orchestrator_options(config: Any, *, system: str) -> Any:
     schemas = _union_tool_schemas()
     server = build_server(schemas, allow_writes=allow_writes)
 
-    # The orchestrator may call its own direct tools plus delegate.
-    orchestrator_tools = tool_names_for(get_orchestrator_direct_tools())
+    # Auto-approve every bridged tool, not just the orchestrator's own.
+    #
+    # `allowed_tools` is the session-wide *approval* list and `permission_mode`
+    # is "dontAsk" (deny anything not pre-approved), so a tool missing from here
+    # is denied even when a subagent is explicitly allowed to use it. Listing
+    # only the orchestrator's direct tools meant every delegated call was
+    # refused: the icinga agent reported "unable to access the monitoring system
+    # due to permission restrictions" and answered with no tool calls at all.
+    #
+    # This does not widen what any individual agent can reach — availability is
+    # still per-agent via `AgentDefinition.tools` (see `_agent_definitions`).
+    # Approval is session-wide; availability is per-agent.
+    approved_tools = tool_names_for(schemas)
 
     anthropic_cfg = _section_get(config, "anthropic")
     model = sdk_cfg.get("model") or anthropic_cfg.get("model") or "claude-sonnet-4-6"
@@ -133,7 +143,7 @@ def build_orchestrator_options(config: Any, *, system: str) -> Any:
         max_turns=max_turns,
         agents=_agent_definitions(config),
         mcp_servers={SERVER_NAME: server},
-        allowed_tools=[*orchestrator_tools, *_ORCHESTRATOR_EXTRA_TOOLS],
+        allowed_tools=[*approved_tools, *_ORCHESTRATOR_EXTRA_TOOLS],
         # Availability, not just auto-approval — see agent_sdk_client._build_options.
         # "Agent" must be present or delegation cannot happen at all.
         tools=[*defaults.builtin_tools, *_ORCHESTRATOR_EXTRA_TOOLS],
