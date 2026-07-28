@@ -44,7 +44,7 @@ Ask for a report in the chat and Claude will generate a formatted Markdown or As
 - AWS credentials (cost-monitor IAM user)
 - Azure client credentials for billing blob access
 - GCP service account for BigQuery billing export
-- Vertex AI credentials (or Anthropic API key)
+- LiteMaaS API key (or Vertex AI credentials, or Anthropic API key)
 - Babylon cluster kubeconfigs (`rhdp-readonly` SA)
 - GitHub PAT with `repo` scope (for agnosticv/agnosticd private repos)
 
@@ -67,6 +67,44 @@ uvicorn src.app:app --host 0.0.0.0 --port 8000
 ```
 
 Open http://localhost:8000
+
+### LLM Backend
+
+Parsec supports 4 backends for connecting to Claude (or open-source models):
+
+| Backend | Config value | Description |
+|---------|-------------|-------------|
+| `litellm` | `backend: "litellm"` | LiteLLM proxy (default for dev and prod) |
+| `vertex` | `backend: "vertex"` | Google Cloud Vertex AI |
+| `bedrock` | `backend: "bedrock"` | AWS Bedrock |
+| `api` | `backend: "api"` | Direct Anthropic API |
+
+Configure in `config/config.local.yaml`:
+
+```yaml
+anthropic:
+  backend: "litellm"
+  model: "claude-sonnet-4-6"
+  litellm_base_url: "<litemaas-endpoint>"
+  litellm_api_key: "<your-key>"
+```
+
+Each component (orchestrator, sub-agents, learnings) can independently use a different backend/model via the `overrides` section:
+
+```yaml
+anthropic:
+  backend: "litellm"
+  model: "claude-sonnet-4-6"
+  litellm_base_url: "<litemaas-endpoint>"
+  litellm_api_key: "<key>"
+  overrides:
+    orchestrator:
+      model: "qwen3-14b"         # cheaper model for routing
+    aap2:
+      model: "claude-opus-4-6"   # stronger model for debugging
+```
+
+See the [infrastructure docs on Confluence](https://redhat.atlassian.net/wiki/spaces/RHPDS/pages/375984824) for full deployment and LiteMaaS setup details.
 
 ### OpenShift Deployment
 
