@@ -124,6 +124,17 @@ class AgentSdkConfig:
     # @anthropic-ai/claude-code@<pin>`` in dockerfiles/Dockerfile does NOT
     # determine which binary runs. Set this to make that pin authoritative.
     cli_path: str | None = None
+    # Built-in CLI tools the model may use. Parsec serves its own tools over the
+    # in-process MCP bridge, so the default is just the two the SDK machinery
+    # needs: ``ToolSearch`` to load deferred MCP schemas, and ``Skill`` to
+    # activate a SKILL.md. Notably absent: Bash, Read, Write, Edit, WebFetch —
+    # the subprocess runs in /app alongside mounted kubeconfigs and GCP
+    # service-account JSON.
+    builtin_tools: tuple[str, ...] = ("ToolSearch", "Skill")
+    # ``dontAsk`` = "don't prompt for permissions; deny if not pre-approved".
+    # A headless run has nobody to prompt, so the default mode's prompt would
+    # resolve by accident rather than by policy.
+    permission_mode: str = "dontAsk"
     # Wall-clock ceiling for a single complete() call. ``sdk.query()`` runs an
     # agentic loop (up to max_turns rounds of possibly-slow tools), so a hung
     # query would otherwise leak the coroutine and child CLI process. ``None``
@@ -191,6 +202,16 @@ class AgentSdkClient:
         timeout_raw = sdk_section.get("timeout", 300.0)
         timeout = float(timeout_raw) if timeout_raw else None
         cli_path = str(sdk_section.get("cli_path", "") or "").strip() or None
+        builtin_raw = sdk_section.get("builtin_tools", None)
+        builtin = (
+            tuple(str(t) for t in builtin_raw)
+            if isinstance(builtin_raw, list | tuple)
+            else AgentSdkConfig.builtin_tools
+        )
+        permission_mode = (
+            str(sdk_section.get("permission_mode", "") or "").strip()
+            or AgentSdkConfig.permission_mode
+        )
 
         return cls(
             AgentSdkConfig(
@@ -200,6 +221,8 @@ class AgentSdkClient:
                 setting_sources=tuple(setting_sources_raw),
                 extra_env=dict(extra_env),
                 cli_path=cli_path,
+                builtin_tools=builtin,
+                permission_mode=permission_mode,
                 timeout=timeout,
             )
         )
@@ -217,12 +240,32 @@ class AgentSdkClient:
         mcp_servers: dict[str, Any] | None,
         max_turns: int | None,
     ) -> Any:
-        """Build ClaudeAgentOptions from call parameters and config."""
+        """Build ClaudeAgentOptions from call parameters and config.
+
+        Note the difference between the two tool knobs, which is easy to get
+        backwards: ``tools`` is the set of built-in tools that *exist*, while
+        ``allowed_tools`` only says which may run *without prompting*. Setting
+        ``allowed_tools`` alone therefore restricts nothing — the CLI's default
+        built-ins (Bash, Write, Edit, WebFetch, …) stay available to a
+        subprocess whose cwd is ``/app``. Parsec supplies its own tools over
+        MCP, so the built-in set is emptied and permissions are set to deny
+        anything not pre-approved.
+        """
         options_kwargs: dict[str, Any] = {
             "model": self._cfg.model,
             "max_turns": max_turns or self._cfg.max_turns,
             "setting_sources": list(self._cfg.setting_sources),
             "env": build_subprocess_env(self._cfg.extra_env),
+            # Availability, not just auto-approval. `Skill` is re-added by the
+            # SDK itself when `skills` is set, and `ToolSearch` is kept because
+            # the model uses it to load deferred MCP schemas — without it, a
+            # profile with ~24 bridged tools can end up unable to call any.
+            "tools": list(self._cfg.builtin_tools),
+            # Deny anything not explicitly allowed instead of prompting a user
+            # who does not exist in a headless run.
+            "permission_mode": self._cfg.permission_mode,
+            # Ignore any stray .mcp.json in the image or working directory.
+            "strict_mcp_config": True,
         }
         if self._cfg.cwd:
             options_kwargs["cwd"] = self._cfg.cwd

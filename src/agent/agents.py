@@ -283,16 +283,22 @@ def classify_fast(question: str) -> str | None:
 
 
 def _should_use_sdk(agent_type: str, cfg: Any) -> bool:
-    """Whether this sub-agent task should run on the Agent SDK (Phase-2 pilot).
+    """Whether this sub-agent task should run on the Agent SDK.
 
     Single source of truth for the SDK dispatch rule, shared by both sub-agent
-    entry points (``run_sub_agent`` and ``run_sub_agent_streaming``): only Icinga
-    has an SDK profile today, and only when ``agent.runtime: sdk`` (default
-    ``legacy``). Add agents here as they gain SDK profiles.
+    entry points (``run_sub_agent`` and ``run_sub_agent_streaming``).
+
+    Two conditions must BOTH hold: the runtime flag is ``sdk``, and the agent is
+    listed in ``agent.sdk.enabled_agents``. Keeping ``agent.runtime`` in the
+    conjunction is deliberate — it stays a universal kill switch, so no agent
+    can be SDK-only and rollback is always one env var.
     """
+    from src.agent.sdk_profiles import enabled_sdk_agents
     from src.llm import RUNTIME_SDK, get_runtime
 
-    return agent_type == "icinga" and get_runtime(cfg) == RUNTIME_SDK
+    if get_runtime(cfg) != RUNTIME_SDK:
+        return False
+    return agent_type in enabled_sdk_agents(cfg)
 
 
 def _extract_user_context(history: list) -> str:

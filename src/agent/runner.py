@@ -161,7 +161,7 @@ class AgentRunner:
         token/cache/cost usage is recorded for cross-validation against the
         legacy arm — see :meth:`run_sub_agent`'s ``metrics`` note.
         """
-        from src.agent.icinga_sdk import sdk_profile_for
+        from src.agent.sdk_profiles import sdk_profile_for
         from src.agent.system_prompt import get_agent_prompt
         from src.llm import AgentSdkClient, AgentSdkUnavailableError
 
