@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING, Any
 import anthropic
 import mlflow
 
+from src.agent.client_factory import strip_thinking_tokens
+
 if TYPE_CHECKING:
     from anthropic import AnthropicBedrock, AnthropicVertex
 
@@ -384,7 +386,9 @@ def _parse_response_blocks(
     tool_use_blocks: list = []
     for block in assistant_content:
         if block.type == "text":
-            text_parts.append(block.text)
+            cleaned = strip_thinking_tokens(block.text)
+            if cleaned:
+                text_parts.append(cleaned)
         elif block.type == "tool_use":
             tool_use_blocks.append(block)
     return text_parts, tool_use_blocks
@@ -540,7 +544,8 @@ async def run_sub_agent(  # noqa: C901
     Returns:
         Structured result dict with summary, findings, and metadata.
     """
-    from src.agent.orchestrator import _build_client, _cap_tool_result, _trim_history
+    from src.agent.client_factory import build_client, resolve_max_tokens, resolve_model
+    from src.agent.orchestrator import _cap_tool_result, _trim_history
 
     start = _time.monotonic()
     agent_cfg = AGENTS.get(agent_type)
@@ -566,11 +571,11 @@ async def run_sub_agent(  # noqa: C901
             agent_type, task, context=context, conversation_history=conversation_history
         )
 
-    model = cfg.anthropic.get("model", "claude-sonnet-4-20250514")
-    max_tokens = cfg.anthropic.get("max_tokens", 4096)
+    model = resolve_model(cfg, agent_type)
+    max_tokens = resolve_max_tokens(cfg, agent_type)
 
     if client is None:
-        client = _build_client(cfg)
+        client = build_client(cfg, agent_type)
     assert client is not None
 
     from datetime import UTC, datetime
@@ -783,8 +788,8 @@ async def run_sub_agent_streaming(  # noqa: C901
         conversation_history: Prior messages for multi-turn context. Required
             for fast-path mode so follow-up questions retain context.
     """
+    from src.agent.client_factory import build_client, resolve_max_tokens, resolve_model
     from src.agent.orchestrator import (
-        _build_client,
         _cap_tool_result,
         _tool_cache,
         _trim_history,
@@ -810,12 +815,12 @@ async def run_sub_agent_streaming(  # noqa: C901
             yield event
         return
 
-    model = cfg.anthropic.get("model", "claude-sonnet-4-20250514")
-    max_tokens = cfg.anthropic.get("max_tokens", 4096)
+    model = resolve_model(cfg, agent_type)
+    max_tokens = resolve_max_tokens(cfg, agent_type)
 
     try:
         if client is None:
-            client = _build_client(cfg)
+            client = build_client(cfg, agent_type)
     except ValueError as e:
         yield sse_error(str(e))
         yield sse_done()
