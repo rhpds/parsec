@@ -45,6 +45,16 @@ def init_mlflow() -> None:
     if password:
         os.environ.setdefault("MLFLOW_TRACKING_PASSWORD", password)
 
+    # Bound the reachability probe below. MLflow's REST client retries with
+    # exponential backoff, and the `except` further down cannot fire until it
+    # finally gives up — so an unreachable tracking server does not "disable
+    # tracing", it blocks application startup indefinitely. uvicorn never binds,
+    # the liveness probe fails, and the pod crashloops with no error logged.
+    # `setdefault` so an operator can still tune these.
+    os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "5")
+    os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "1")
+    os.environ.setdefault("MLFLOW_HTTP_REQUEST_BACKOFF_FACTOR", "1")
+
     mlflow.set_tracking_uri(tracking_url)
     _client = mlflow.MlflowClient()
 

@@ -1,0 +1,196 @@
+# Parsec on the Claude Agent SDK — human-led E2E instance.
+#
+# Deliberately separate from the `parsec` (prod) and `parsec-dev` deployments:
+# this runs with `agent.runtime: sdk`, every sub-agent enabled, and the whole
+# turn orchestrated by the SDK. It lives in `rh-ace-aiops` alongside the
+# rhdp-rca-plugin batch CronJob and reuses that namespace's existing
+# `claude-vertex-creds` secret rather than copying credentials around.
+#
+# Everything is named `parsec-sdk*` so it cannot collide with the rca-plugin
+# resources already in the namespace.
+#
+#   oc apply -f playbooks/parsec-sdk-e2e.yaml -n rh-ace-aiops
+#   oc start-build parsec-sdk -n rh-ace-aiops --follow
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: parsec-sdk
+  labels: {app: parsec-sdk}
+spec:
+  lookupPolicy: {local: true}
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: parsec-sdk
+  labels: {app: parsec-sdk}
+spec:
+  source:
+    type: Git
+    git:
+      uri: https://github.com/PalmPalm7/parsec.git
+      ref: migration/full-sdk
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: dockerfiles/Dockerfile
+  output:
+    to: {kind: ImageStreamTag, name: 'parsec-sdk:latest'}
+  resources:
+    limits: {cpu: '2', memory: 4Gi}
+  successfulBuildsHistoryLimit: 2
+  failedBuildsHistoryLimit: 2
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: parsec-sdk-config
+  labels: {app: parsec-sdk}
+data:
+  # Mounted over /app/config/config.yaml. Only the keys that differ from the
+  # image default are meaningful here, but the file replaces the whole config,
+  # so it has to be complete enough to boot.
+  config.yaml: |
+    anthropic:
+      model: "claude-sonnet-4-5@20250929"
+      max_tokens: 8192
+      max_tool_rounds: 10
+      use_vertex: true
+
+    agent:
+      # The flip. Everything below runs on the Claude Agent SDK.
+      runtime: "sdk"
+      sdk:
+        enabled_agents: ["all"]
+        orchestrator: true
+        allow_writes: false
+        setting_sources: ["project"]
+        timeout: 300
+        cwd: "/app"
+
+    skills:
+      project_root: "skills"
+      plugin_paths: []
+      user_root: ""
+
+    auth:
+      # E2E instance behind an OpenShift route without oauth-proxy; keep the
+      # app-level allowlist as the gate.
+      allowed_groups: "rhpds-admins,ace-octo-team"
+      allowed_users: ""
+
+    reporting_mcp:
+      mcp_url: ""
+
+    mlflow:
+      tracking_url: "http://mlflow-tracking.mlflow.svc:5000"
+      experiment: "parsec-agent-metrics"
+
+    icinga:
+      mcp_url: ""
+
+    github:
+      mcp_url: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: parsec-sdk
+  labels: {app: parsec-sdk}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: parsec-sdk}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  template:
+    metadata:
+      labels: {app: parsec-sdk}
+    spec:
+      containers:
+        - name: parsec
+          image: parsec-sdk:latest
+          ports: [{containerPort: 8000, name: http}]
+          env:
+            # The runtime flip is also set here so it can be flipped back with
+            # `oc set env deploy/parsec-sdk PARSEC_AGENT__RUNTIME=legacy`
+            # without editing the ConfigMap.
+            - name: PARSEC_AGENT__RUNTIME
+              value: "sdk"
+            # Vertex wiring for the `claude` CLI subprocess. Without these the
+            # subprocess starts with no credential and complete() swallows the
+            # failure into is_error, which surfaces as a plausible bad answer
+            # rather than a failed rollout.
+            - name: CLAUDE_CODE_USE_VERTEX
+              value: "1"
+            - name: CLOUD_ML_REGION
+              valueFrom:
+                secretKeyRef: {name: claude-vertex-creds, key: CLOUD_ML_REGION}
+            - name: ANTHROPIC_VERTEX_PROJECT_ID
+              valueFrom:
+                secretKeyRef: {name: claude-vertex-creds, key: ANTHROPIC_VERTEX_PROJECT_ID}
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: /app/gcp/application_default_credentials.json
+            - name: CLAUDE_CODE_ACCEPT_TOS
+              value: "true"
+            # Parsec's own Vertex client reads this one.
+            - name: PARSEC_ANTHROPIC__VERTEX_CREDENTIALS_PATH
+              value: /app/gcp/application_default_credentials.json
+            - name: PARSEC_ANTHROPIC__VERTEX_PROJECT_ID
+              valueFrom:
+                secretKeyRef: {name: claude-vertex-creds, key: ANTHROPIC_VERTEX_PROJECT_ID}
+            - name: PARSEC_ANTHROPIC__VERTEX_REGION
+              valueFrom:
+                secretKeyRef: {name: claude-vertex-creds, key: CLOUD_ML_REGION}
+          volumeMounts:
+            - {name: gcp-creds, mountPath: /app/gcp, readOnly: true}
+            - {name: config, mountPath: /app/config/config.yaml, subPath: config.yaml}
+            - {name: data, mountPath: /app/data}
+          resources:
+            requests: {cpu: '500m', memory: 1Gi}
+            # CPU, not memory, is the binding constraint: each SDK turn spawns a
+            # `claude` subprocess, and under a 500m quota N concurrent cold
+            # starts starve the Python event loop until the liveness probe
+            # restarts the pod.
+            limits: {cpu: '2', memory: 3Gi}
+          livenessProbe:
+            httpGet: {path: /api/health, port: 8000}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            httpGet: {path: /api/health/ready, port: 8000}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: gcp-creds
+          secret:
+            secretName: claude-vertex-creds
+            items: [{key: gcp-credentials, path: application_default_credentials.json}]
+        - name: config
+          configMap: {name: parsec-sdk-config}
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: parsec-sdk
+  labels: {app: parsec-sdk}
+spec:
+  selector: {app: parsec-sdk}
+  ports: [{name: http, port: 8000, targetPort: 8000}]
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: parsec-sdk
+  labels: {app: parsec-sdk}
+spec:
+  to: {kind: Service, name: parsec-sdk}
+  port: {targetPort: http}
+  tls: {termination: edge, insecureEdgeTerminationPolicy: Redirect}
