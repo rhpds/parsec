@@ -101,9 +101,7 @@ def _fake_sdk(monkeypatch):
     """Stub the SDK so profiles can be built without the real package."""
     import claude_agent_sdk
 
-    monkeypatch.setattr(
-        claude_agent_sdk, "tool", lambda n, d, s: (lambda fn: fn), raising=False
-    )
+    monkeypatch.setattr(claude_agent_sdk, "tool", lambda n, d, s: (lambda fn: fn), raising=False)
     monkeypatch.setattr(
         claude_agent_sdk,
         "create_sdk_mcp_server",

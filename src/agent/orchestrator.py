@@ -1159,6 +1159,25 @@ _MAX_ROUNDS_TEXT = (
 )
 
 
+def _should_orchestrate_via_sdk(cfg) -> bool:
+    """Whether the whole turn should be orchestrated by the Agent SDK.
+
+    Requires ``agent.runtime: sdk`` plus ``agent.sdk.orchestrator: true``, so the
+    sub-agent migration can be exercised on its own before the orchestrator
+    follows. Fail-safe: any error resolves to the legacy loop.
+    """
+    try:
+        from src.agent.sdk_profiles import _sdk_section
+        from src.llm import RUNTIME_SDK, get_runtime
+
+        if get_runtime(cfg) != RUNTIME_SDK:
+            return False
+        return bool(_sdk_section(cfg).get("orchestrator", False))
+    except Exception:
+        logger.exception("Failed to resolve SDK orchestrator flag; staying on legacy")
+        return False
+
+
 async def run_agent(
     question: str,
     conversation_history: list | None = None,
@@ -1187,6 +1206,23 @@ async def run_agent(
         session_id,
         conversation_id,
     )
+
+    # Agent-SDK orchestration: one ClaudeSDKClient session drives the whole turn,
+    # with the sub-agents as native SDK subagents. Gated on `agent.runtime` so
+    # this stays the same kill switch as the sub-agent path — flipping back to
+    # legacy restores the hand-written loop below in full.
+    if _should_orchestrate_via_sdk(get_config()):
+        from src.agent.sdk_orchestrator import run_agent_via_sdk
+
+        logger.info("run_agent: orchestrating via the Agent SDK")
+        async for event in run_agent_via_sdk(
+            question,
+            conversation_history=conversation_history,
+            conversation_id=conversation_id,
+            session_id=session_id,
+        ):
+            yield event
+        return
 
     session_id = session_id or conversation_id or str(uuid.uuid4())
 

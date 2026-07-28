@@ -89,13 +89,26 @@ class MetricsCollector:
         max_rounds: int,
         status: str,
     ) -> None:
-        self.agent_type = agent_type
-        self.sub_agent_latency_ms = duration_seconds * 1000
-        self.tool_calls = tool_calls
-        self.tool_errors = tool_errors
-        self.rounds_used = rounds_used
-        self.max_rounds = max_rounds
-        self.status = status
+        # Accumulate rather than assign. A single turn can dispatch several
+        # sub-agents (the orchestrator fans out, and the SDK runtime can run
+        # subagents concurrently), and plain assignment made that last-writer-
+        # wins: a two-agent turn reported one agent's tool count as the whole
+        # turn's. That silently understated every multi-agent run and made
+        # mixed legacy/SDK turns report one arbitrary runtime tag.
+        if self.agent_type and self.agent_type != agent_type:
+            existing = self.agent_type.split("+")
+            if agent_type not in existing:
+                self.agent_type = "+".join([*existing, agent_type])
+        else:
+            self.agent_type = agent_type
+
+        self.sub_agent_latency_ms = (self.sub_agent_latency_ms or 0) + duration_seconds * 1000
+        self.tool_calls = (self.tool_calls or 0) + tool_calls
+        self.tool_errors = (self.tool_errors or 0) + tool_errors
+        self.rounds_used = (self.rounds_used or 0) + rounds_used
+        self.max_rounds = (self.max_rounds or 0) + max_rounds
+        # A single failure makes the turn a failure; success must not overwrite it.
+        self.status = status if self.status in (None, "", "success") else self.status
 
     def record_tokens(
         self,

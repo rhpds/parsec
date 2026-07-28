@@ -166,6 +166,18 @@ agent:
     # model: ""          # falls back to anthropic.model
     # max_turns: 10      # falls back to anthropic.max_tool_rounds
     # cwd: ""            # working directory for the SDK subprocess (default: pwd)
+    # Which sub-agents may run on the SDK. Requires runtime: sdk as well, so
+    # `agent.runtime: legacy` stays a universal kill switch. Use ["all"] for
+    # every agent, or a subset like ["icinga", "ocpv"] to migrate gradually.
+    enabled_agents: ["icinga"]
+    # Orchestrate the WHOLE turn with the SDK: one ClaudeSDKClient session with
+    # the sub-agents as native SDK subagents, delegating via the Agent tool.
+    # When false, only the individual sub-agents listed above run on the SDK and
+    # the legacy orchestrator loop still routes them.
+    orchestrator: false
+    # Permit state-mutating tool actions (currently only the Icinga writes:
+    # acknowledge, schedule/remove downtime, add/remove comment).
+    allow_writes: false
     setting_sources: ["project"]   # where the SDK discovers SKILL.md files
     # Extra env vars merged into the subprocess (e.g. OTel). The subprocess
     # inherits an ALLOWLIST of the app's environment, never all of it — see

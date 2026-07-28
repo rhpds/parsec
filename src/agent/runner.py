@@ -240,6 +240,10 @@ def _sdk_result_to_dict(agent_type: str, result: Any, duration_seconds: float) -
                 "total_cost_usd": usage.total_cost_usd,
                 "num_turns": usage.num_turns,
             },
+            # Surfaced so the saved conversation can be shaped like a legacy
+            # turn — `analyze_and_learn` mines tool_use blocks and gives up
+            # below three, so without these the learnings loop goes dormant.
+            "tool_invocations": list(result.tool_invocations),
         },
         "tool_calls": len(result.tool_invocations),
         "tool_errors": sum(1 for inv in result.tool_invocations if inv.get("is_error")),

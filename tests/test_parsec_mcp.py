@@ -305,9 +305,7 @@ def test_long_descriptions_are_truncated(monkeypatch):
         lambda n, d, s: (captured.append(d) or (lambda fn: fn)),
         raising=False,
     )
-    monkeypatch.setattr(
-        claude_agent_sdk, "create_sdk_mcp_server", lambda **kw: None, raising=False
-    )
+    monkeypatch.setattr(claude_agent_sdk, "create_sdk_mcp_server", lambda **kw: None, raising=False)
 
     parsec_mcp.build_server([{**SCHEMAS[0], "description": "y" * 5000}])
     assert len(captured[0]) <= parsec_mcp._MAX_DESCRIPTION_CHARS

@@ -4,7 +4,6 @@ Covers find_controller_for_url, _parse_extra_vars, _int_field,
 and additional fetch_* helpers.
 """
 
-
 from src.tools.aap2_debug import (
     _int_field,
     _parse_extra_vars,
