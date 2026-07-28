@@ -14,22 +14,17 @@ import uuid
 from collections.abc import AsyncGenerator
 from contextvars import ContextVar
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import anthropic
 import mlflow
 
-from src.metrics.collector import MetricsCollector
-from src.metrics.tracing import (
-    SpanType,
-    set_llm_span_outputs,
-    set_root_span_outputs,
-    set_tool_span_outputs,
+from src.agent.client_factory import (
+    build_client,
+    resolve_max_tokens,
+    resolve_model,
+    strip_thinking_tokens,
 )
-
-if TYPE_CHECKING:
-    from anthropic import AnthropicBedrock, AnthropicVertex
-
 from src.agent.streaming import (
     sse_done,
     sse_error,
@@ -43,6 +38,13 @@ from src.agent.streaming import (
 from src.agent.system_prompt import ALERT_INVESTIGATION_PROMPT
 from src.agent.tool_definitions import SUBMIT_ALERT_VERDICT_TOOL
 from src.config import get_config
+from src.metrics.collector import MetricsCollector
+from src.metrics.tracing import (
+    SpanType,
+    set_llm_span_outputs,
+    set_root_span_outputs,
+    set_tool_span_outputs,
+)
 from src.tools.aap2 import query_aap2
 from src.tools.aws_account import query_aws_account
 from src.tools.aws_accounts import query_aws_account_db
@@ -454,63 +456,6 @@ def _save_report(tool_input: dict) -> dict:
         "path": filepath,
         "size_bytes": len(content.encode("utf-8")),
     }
-
-
-def _build_client(cfg) -> anthropic.Anthropic | AnthropicVertex | AnthropicBedrock:
-    """Build the appropriate Anthropic client based on config.
-
-    Supports three backends:
-    - vertex: Claude via Google Vertex AI (uses GCP credentials)
-    - bedrock: Claude via AWS Bedrock
-    - api: Direct Anthropic API (default)
-    """
-    backend = cfg.anthropic.get("backend", "api")
-
-    if backend == "vertex":
-        from anthropic import AnthropicVertex
-
-        project_id = cfg.anthropic.get("vertex_project_id", "") or cfg.gcp.get("project_id", "")
-        region = cfg.anthropic.get("vertex_region", "us-east5")
-        if not project_id:
-            raise ValueError(
-                "anthropic.vertex_project_id or gcp.project_id required for Vertex backend"
-            )
-
-        # Use explicit SA credentials if provided, otherwise fall back to ADC
-        creds_path = cfg.anthropic.get("vertex_credentials_path", "")
-        kwargs = {"project_id": project_id, "region": region}
-        if creds_path and os.path.isfile(creds_path):
-            from google.oauth2 import service_account
-
-            credentials = service_account.Credentials.from_service_account_file(
-                creds_path,
-                scopes=["https://www.googleapis.com/auth/cloud-platform"],
-            )
-            kwargs["credentials"] = credentials
-            logger.info(
-                "Using Vertex AI backend (project=%s, region=%s, sa=%s)",
-                project_id,
-                region,
-                creds_path,
-            )
-        else:
-            logger.info("Using Vertex AI backend (project=%s, region=%s, ADC)", project_id, region)
-
-        return AnthropicVertex(**kwargs)
-
-    elif backend == "bedrock":
-        from anthropic import AnthropicBedrock
-
-        region = cfg.anthropic.get("bedrock_region", cfg.aws.get("region", "us-east-1"))
-        logger.info("Using Bedrock backend (region=%s)", region)
-        return AnthropicBedrock(aws_region=region)
-
-    else:
-        api_key = cfg.anthropic.get("api_key", "") or os.environ.get("ANTHROPIC_API_KEY", "")
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY not configured")
-        logger.info("Using direct Anthropic API backend")
-        return anthropic.Anthropic(api_key=api_key)
 
 
 def _estimate_tokens(obj) -> int:
@@ -1036,7 +981,9 @@ def _parse_response_blocks(
     tool_use_blocks: list = []
     for block in response_content:
         if block.type == "text":
-            text_parts.append(block.text)
+            cleaned = strip_thinking_tokens(block.text)
+            if cleaned:
+                text_parts.append(cleaned)
         elif block.type == "tool_use":
             tool_use_blocks.append(block)
     return text_parts, tool_use_blocks
@@ -1207,14 +1154,12 @@ async def run_agent(
             return
 
         # Full orchestrator mode
-        model = cfg.anthropic.get("orchestrator_model", "") or cfg.anthropic.get(
-            "model", "claude-sonnet-4-20250514"
-        )
-        max_tokens = cfg.anthropic.get("max_tokens", 4096)
+        model = resolve_model(cfg, "orchestrator")
+        max_tokens = resolve_max_tokens(cfg, "orchestrator")
         max_rounds = cfg.anthropic.get("max_tool_rounds", 10)
 
         try:
-            client = _build_client(cfg)
+            client = build_client(cfg, "orchestrator")
         except ValueError as e:
             yield sse_error(str(e))
             _flush_collector(collector)
@@ -1449,9 +1394,11 @@ def _parse_alert_response_blocks(
     text_parts: list[str] = []
     tool_use_blocks: list = []
     for block in response_content:
-        if block.type == "text" and block.text.strip():
-            investigation_log.append(block.text)
-            text_parts.append(block.text)
+        if block.type == "text":
+            cleaned = strip_thinking_tokens(block.text)
+            if cleaned.strip():
+                investigation_log.append(cleaned)
+                text_parts.append(cleaned)
         elif block.type == "tool_use":
             tool_use_blocks.append(block)
     return text_parts, tool_use_blocks
@@ -1510,12 +1457,12 @@ async def run_alert_investigation(
     """
     start = _time.monotonic()
     cfg = get_config()
-    model = cfg.anthropic.get("model", "claude-sonnet-4-20250514")
-    max_tokens = cfg.anthropic.get("max_tokens", 4096)
+    model = resolve_model(cfg, "security")
+    max_tokens = resolve_max_tokens(cfg, "security")
     max_rounds = cfg.anthropic.get("max_tool_rounds", 10)
 
     try:
-        client = _build_client(cfg)
+        client = build_client(cfg, "security")
     except ValueError as e:
         return _make_error_verdict(f"Investigation failed: {e}", [], start)
 

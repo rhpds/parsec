@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 from anthropic.types import TextBlock
 
+from src.agent.client_factory import build_async_client, resolve_model, strip_thinking_tokens
 from src.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -238,8 +239,6 @@ def _summarize_conversation(messages: list) -> str:
 async def _ai_analyze(messages: list, _tool_calls: list[dict]) -> list[dict]:
     """Use Claude to analyze a conversation and extract learnings."""
     cfg = get_config()
-    backend = cfg.anthropic.get("backend", "direct")
-    model = cfg.anthropic.get("model", "claude-sonnet-4-20250514")
 
     conversation_summary = _summarize_conversation(messages)
 
@@ -268,87 +267,23 @@ Respond with ONLY a JSON array of strings, each being one learning. Example:
 If no useful learnings, respond with: []"""
 
     try:
-        if backend == "bedrock":
-            return await _analyze_bedrock(cfg, model, analysis_prompt)
-        elif backend == "vertex":
-            return await _analyze_vertex(cfg, model, analysis_prompt)
-        else:
-            return await _analyze_direct(cfg, model, analysis_prompt)
+        client = build_async_client(cfg, "learnings")
+        model = resolve_model(cfg, "learnings")
+        resp = await client.messages.create(
+            model=model,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": analysis_prompt}],
+        )
+        block = resp.content[0]
+        if not isinstance(block, TextBlock):
+            return []
+        return _parse_analysis_response(strip_thinking_tokens(block.text))
+    except ValueError:
+        logger.info("AI not available for learnings extraction")
+        return []
     except Exception:
         logger.exception("AI analysis call failed")
         return []
-
-
-async def _analyze_direct(cfg: dict, model: str, prompt: str) -> list[dict]:
-    """Analyze using direct Anthropic API."""
-    import anthropic
-
-    api_key = cfg.anthropic.get("api_key", "")  # type: ignore[attr-defined]
-    if not api_key:
-        return []
-
-    client = anthropic.AsyncAnthropic(api_key=api_key)
-    resp = await client.messages.create(
-        model=model,
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    block = resp.content[0]
-    if not isinstance(block, TextBlock):
-        return []
-    return _parse_analysis_response(block.text)
-
-
-async def _analyze_vertex(cfg: dict, model: str, prompt: str) -> list[dict]:
-    """Analyze using Vertex AI."""
-    import os
-
-    import anthropic
-
-    project_id = cfg.anthropic.get("vertex_project_id", "")  # type: ignore[attr-defined]
-    region = cfg.anthropic.get("vertex_region", "us-east5")  # type: ignore[attr-defined]
-    if not project_id:
-        return []
-
-    kwargs: dict = {"project_id": project_id, "region": region}
-    creds_path = cfg.anthropic.get("vertex_credentials_path", "")  # type: ignore[attr-defined]
-    if creds_path and os.path.isfile(creds_path):
-        from google.oauth2 import service_account
-
-        credentials = service_account.Credentials.from_service_account_file(
-            creds_path,
-            scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        )
-        kwargs["credentials"] = credentials
-
-    client = anthropic.AsyncAnthropicVertex(**kwargs)
-    resp = await client.messages.create(
-        model=model,
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    block = resp.content[0]
-    if not isinstance(block, TextBlock):
-        return []
-    return _parse_analysis_response(block.text)
-
-
-async def _analyze_bedrock(cfg: dict, model: str, prompt: str) -> list[dict]:
-    """Analyze using AWS Bedrock."""
-    import anthropic
-
-    client = anthropic.AsyncAnthropicBedrock(
-        aws_region=cfg.anthropic.get("bedrock_region", "us-east-1"),  # type: ignore[attr-defined]
-    )
-    resp = await client.messages.create(
-        model=model,
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    block = resp.content[0]
-    if not isinstance(block, TextBlock):
-        return []
-    return _parse_analysis_response(block.text)
 
 
 def _parse_analysis_response(text: str) -> list[dict]:

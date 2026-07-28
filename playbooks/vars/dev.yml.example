@@ -69,5 +69,13 @@ reporting_mcp_token: ""
 # Used by the fetch_github_file tool (GitHub remote MCP server)
 github_token: "ghp_..."
 
+# LiteLLM / LiteMaaS (optional — enables per-component model overrides)
+# litellm_base_url: "https://maas-rhdp.apps.maas.redhatworkshops.io"
+# litellm_api_key: ""
+# litellm_overrides:
+#   orchestrator:
+#     backend: "litellm"
+#     model: "qwen3-14b"
+
 # Allowed users (comma-separated emails, empty = group-based auth only)
 allowed_users: ""

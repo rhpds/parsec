@@ -15,7 +15,7 @@ data:
       host: "0.0.0.0"
       log_level: info
     anthropic:
-      model: "claude-sonnet-4@20250514"
+      model: "{{ anthropic_model | default('claude-sonnet-4@20250514') }}"
       max_tokens: 4096
       max_tool_rounds: 10
     provision_db:
@@ -164,13 +164,31 @@ spec:
               protocol: TCP
           env:
             - name: PARSEC_ANTHROPIC__BACKEND
-              value: "vertex"
+              value: "{{ anthropic_backend | default('vertex') }}"
             - name: PARSEC_ANTHROPIC__VERTEX_PROJECT_ID
               value: "{{ vertex_project_id }}"
             - name: PARSEC_ANTHROPIC__VERTEX_REGION
               value: "{{ vertex_region }}"
             - name: PARSEC_ANTHROPIC__VERTEX_CREDENTIALS_PATH
               value: "/app/gcp/service-account.json"
+{% if litellm_base_url | default('') %}
+            - name: PARSEC_ANTHROPIC__LITELLM_BASE_URL
+              value: "{{ litellm_base_url }}"
+            - name: PARSEC_ANTHROPIC__LITELLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: parsec-secrets
+                  key: litellm-api-key
+                  optional: true
+{% endif %}
+{% if litellm_overrides | default({}) %}
+{% for component, overrides in litellm_overrides.items() %}
+{% for key, value in overrides.items() %}
+            - name: PARSEC_ANTHROPIC__OVERRIDES__{{ component | upper }}__{{ key | upper }}
+              value: "{{ value }}"
+{% endfor %}
+{% endfor %}
+{% endif %}
             - name: PARSEC_AWS__REGION
               value: "{{ aws_region }}"
             - name: PARSEC_GCP__CREDENTIALS_PATH
