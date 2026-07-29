@@ -126,6 +126,63 @@ PARSEC_AUTH__ALLOWED_USERS=user1@redhat.com,user2@redhat.com
 
 Files loaded in order: `config/config.yaml` → `config/config.local.yaml` (gitignored).
 
+### LLM Backend Configuration
+
+Parsec supports 4 backends: `api` (direct Anthropic), `vertex` (GCP Vertex AI), `bedrock` (AWS Bedrock), and `litellm` (LiteLLM proxy). The backend is set via `anthropic.backend` in config or `PARSEC_ANTHROPIC__BACKEND` env var.
+
+**LiteLLM / LiteMaaS setup** (current default for dev and prod):
+
+```yaml
+# In config.local.yaml or via env vars:
+anthropic:
+  backend: "litellm"
+  model: "claude-sonnet-4-6"          # LiteMaaS model name
+  litellm_base_url: "https://<litemaas-endpoint>"
+  litellm_api_key: "<your-key>"       # Generate via LiteMaaS admin API
+```
+
+**Vertex AI setup** (legacy):
+
+```yaml
+anthropic:
+  backend: "vertex"
+  model: "claude-sonnet-4@20250514"   # Vertex model name format
+  vertex_project_id: "itpc-gcp-product-all-claude"
+  vertex_region: "us-east5"
+  vertex_credentials_path: "/path/to/sa.json"
+```
+
+**Per-component overrides** — each component (orchestrator, cost, aap2, babylon, security, ocpv, icinga, learnings, aap2_fix) can independently use a different backend/model:
+
+```yaml
+anthropic:
+  backend: "litellm"
+  model: "claude-sonnet-4-6"
+  litellm_base_url: "https://<litemaas-endpoint>"
+  litellm_api_key: "<key>"
+  overrides:
+    orchestrator:
+      model: "qwen3-14b"             # Cheaper model for routing
+    aap2:
+      model: "claude-opus-4-6"       # Stronger model for debugging
+```
+
+**Deployment vars** (in `playbooks/vars/dev.yml` or `prod.yml`):
+
+```yaml
+anthropic_backend: "litellm"          # Sets PARSEC_ANTHROPIC__BACKEND
+anthropic_model: "claude-sonnet-4-6"  # Sets model in ConfigMap
+litellm_base_url: "https://<litemaas-endpoint>"
+litellm_api_key: "<key>"              # Stored in parsec-secrets
+# Optional per-component overrides:
+# litellm_overrides:
+#   orchestrator:
+#     backend: "litellm"
+#     model: "qwen3-14b"
+```
+
+**LiteMaaS:** API keys generated via `POST /key/generate` with the master key. Available models include Claude (sonnet, opus, haiku), Qwen3, Granite, Llama, DeepSeek, Gemini.
+
 ## Key Database Tables
 
 - `provisions` — sandbox/account provisioning records
@@ -188,7 +245,7 @@ with the same message — do NOT amend the previous commit (the failed commit ne
 ### Key Technical Decisions
 
 - **Dockerfile**: Do NOT use `ENTRYPOINT []` — CRI-O on OpenShift requires the S2I base image's `container-entrypoint`. Do NOT hardcode PATH — use `$PATH` to inherit base image paths.
-- **Claude backend**: Supports direct API, Vertex AI, and AWS Bedrock. Production uses Vertex AI (`claude-sonnet-4@20250514`).
+- **Claude backend**: Supports direct API, Vertex AI, AWS Bedrock, and LiteLLM proxy. Both dev and prod route through LiteMaaS. Per-component model/backend overrides available via `anthropic.overrides.<component>` in config.
 - **Sub-agent architecture**: Orchestrator classifies queries and dispatches to domain sub-agents (cost, aap2, babylon, security, ocpv, icinga). Fast-path classifier skips LLM call for obvious single-domain queries. Per-agent prompts in `config/prompts/`.
 - **Reporting MCP**: Provision DB access goes through a Reporting MCP server via Streamable HTTP (`src/connections/reporting_mcp.py`). Tool schemas are dynamically discovered at startup and prefixed with `db_`. The `reporting_mcp.mcp_url` config is required. Health readiness probe checks cached init state — does NOT make live MCP calls.
 - **GitHub auth**: Push access to `rhpds/parsec` requires a GitHub account with write permissions. Use `gh auth status` to check the current profile.

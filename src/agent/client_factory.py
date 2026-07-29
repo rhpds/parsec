@@ -52,16 +52,21 @@ def _resolve_config(cfg, component: str) -> dict:
         if legacy_model:
             defaults["model"] = legacy_model
 
-    # Apply per-component overrides
-    overrides = cfg.anthropic.get("overrides", {})
-    if isinstance(overrides, dict) and component in overrides:
-        component_overrides = overrides[component]
-        if isinstance(component_overrides, dict):
-            for key in ("backend", "model", "max_tokens"):
-                if key in component_overrides:
-                    defaults[key] = component_overrides[key]
-
+    _apply_component_overrides(defaults, cfg, component)
     return defaults
+
+
+def _apply_component_overrides(defaults: dict, cfg, component: str) -> None:
+    """Apply per-component overrides from anthropic.overrides.<component>."""
+    overrides = cfg.anthropic.get("overrides", {})
+    if not isinstance(overrides, dict) or component not in overrides:
+        return
+    component_overrides = overrides[component]
+    if not isinstance(component_overrides, dict):
+        return
+    for key in ("backend", "model", "max_tokens"):
+        if key in component_overrides:
+            defaults[key] = component_overrides[key]
 
 
 def resolve_model(cfg, component: str = "default") -> str:
@@ -94,68 +99,67 @@ def build_async_client(cfg, component: str = "default"):
     return _build_from_resolved(resolved, component, sync=False)
 
 
-def _build_from_resolved(resolved: dict, component: str, *, sync: bool):
-    """Construct the correct client from resolved config."""
-    backend = resolved["backend"]
+def _build_litellm(resolved: dict, component: str, sync: bool):
+    base_url = resolved["litellm_base_url"]
+    api_key = resolved["litellm_api_key"]
+    if not base_url:
+        raise ValueError("anthropic.litellm_base_url required when backend is 'litellm'")
+    logger.info(
+        "LiteLLM backend for %s (model=%s, url=%s)",
+        component,
+        resolved["model"],
+        base_url,
+    )
+    if sync:
+        return anthropic.Anthropic(base_url=base_url, api_key=api_key)
+    return anthropic.AsyncAnthropic(base_url=base_url, api_key=api_key)
 
-    if backend == "litellm":
-        base_url = resolved["litellm_base_url"]
-        api_key = resolved["litellm_api_key"]
-        if not base_url:
-            raise ValueError("anthropic.litellm_base_url required when backend is 'litellm'")
-        logger.info(
-            "LiteLLM backend for %s (model=%s, url=%s)",
-            component,
-            resolved["model"],
-            base_url,
+
+def _build_vertex(resolved: dict, component: str, sync: bool):
+    project_id = resolved["vertex_project_id"]
+    region = resolved["vertex_region"]
+    if not project_id:
+        raise ValueError(
+            "anthropic.vertex_project_id or gcp.project_id required for Vertex backend"
         )
-        if sync:
-            return anthropic.Anthropic(base_url=base_url, api_key=api_key)
-        return anthropic.AsyncAnthropic(base_url=base_url, api_key=api_key)
+    kwargs: dict = {"project_id": project_id, "region": region}
+    creds_path = resolved["vertex_credentials_path"]
+    if creds_path and os.path.isfile(creds_path):
+        from google.oauth2 import service_account
 
-    if backend == "vertex":
-        project_id = resolved["vertex_project_id"]
-        region = resolved["vertex_region"]
-        if not project_id:
-            raise ValueError(
-                "anthropic.vertex_project_id or gcp.project_id required for Vertex backend"
-            )
-        kwargs: dict = {"project_id": project_id, "region": region}
-        creds_path = resolved["vertex_credentials_path"]
-        if creds_path and os.path.isfile(creds_path):
-            from google.oauth2 import service_account
+        credentials = service_account.Credentials.from_service_account_file(
+            creds_path,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+        kwargs["credentials"] = credentials
+        logger.info(
+            "Vertex AI backend for %s (project=%s, region=%s, sa=%s)",
+            component,
+            project_id,
+            region,
+            creds_path,
+        )
+    else:
+        logger.info(
+            "Vertex AI backend for %s (project=%s, region=%s, ADC)",
+            component,
+            project_id,
+            region,
+        )
+    if sync:
+        return anthropic.AnthropicVertex(**kwargs)
+    return anthropic.AsyncAnthropicVertex(**kwargs)
 
-            credentials = service_account.Credentials.from_service_account_file(
-                creds_path,
-                scopes=["https://www.googleapis.com/auth/cloud-platform"],
-            )
-            kwargs["credentials"] = credentials
-            logger.info(
-                "Vertex AI backend for %s (project=%s, region=%s, sa=%s)",
-                component,
-                project_id,
-                region,
-                creds_path,
-            )
-        else:
-            logger.info(
-                "Vertex AI backend for %s (project=%s, region=%s, ADC)",
-                component,
-                project_id,
-                region,
-            )
-        if sync:
-            return anthropic.AnthropicVertex(**kwargs)
-        return anthropic.AsyncAnthropicVertex(**kwargs)
 
-    if backend == "bedrock":
-        region = resolved["bedrock_region"]
-        logger.info("Bedrock backend for %s (region=%s)", component, region)
-        if sync:
-            return anthropic.AnthropicBedrock(aws_region=region)
-        return anthropic.AsyncAnthropicBedrock(aws_region=region)
+def _build_bedrock(resolved: dict, component: str, sync: bool):
+    region = resolved["bedrock_region"]
+    logger.info("Bedrock backend for %s (region=%s)", component, region)
+    if sync:
+        return anthropic.AnthropicBedrock(aws_region=region)
+    return anthropic.AsyncAnthropicBedrock(aws_region=region)
 
-    # Default: direct API
+
+def _build_api(resolved: dict, component: str, sync: bool):
     api_key = resolved["api_key"] or os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
         raise ValueError("ANTHROPIC_API_KEY not configured")
@@ -163,6 +167,19 @@ def _build_from_resolved(resolved: dict, component: str, *, sync: bool):
     if sync:
         return anthropic.Anthropic(api_key=api_key)
     return anthropic.AsyncAnthropic(api_key=api_key)
+
+
+_BACKEND_BUILDERS = {
+    "litellm": _build_litellm,
+    "vertex": _build_vertex,
+    "bedrock": _build_bedrock,
+}
+
+
+def _build_from_resolved(resolved: dict, component: str, *, sync: bool):
+    """Construct the correct client from resolved config."""
+    builder = _BACKEND_BUILDERS.get(resolved["backend"], _build_api)
+    return builder(resolved, component, sync)
 
 
 def strip_thinking_tokens(text: str) -> str:
