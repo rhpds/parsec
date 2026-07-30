@@ -109,12 +109,22 @@ repos:
             \.secrets\.baseline
           )
 
+  # SonarQube analysis (pre-push only)
+  - repo: local
+    hooks:
+      - id: sonarqube
+        name: SonarQube analysis
+        entry: bash scripts/sonarqube-check.sh
+        language: system
+        pass_filenames: false
+        stages: [push]
+
 ci:
   autofix_commit_msg: |
     [pre-commit.ci] auto fixes from pre-commit hooks
   autofix_prs: true
   autoupdate_schedule: weekly
-  skip: [mypy, vulture]
+  skip: [mypy, vulture, sonarqube]
   submodules: false
 
 fail_fast: false
