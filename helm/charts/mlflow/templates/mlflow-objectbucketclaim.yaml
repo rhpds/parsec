@@ -1,0 +1,13 @@
+{{- if .Values.deploy -}}
+apiVersion: objectbucket.io/v1alpha1
+kind: ObjectBucketClaim
+metadata:
+  name: {{ .Values.s3.bucketName }}
+  namespace: {{ include "mlflow.namespaceName" . }}
+  labels:
+    {{- include "mlflow.labels" . | nindent 4 }}
+    component: storage
+spec:
+  generateBucketName: {{ .Values.s3.bucketName }}
+  storageClassName: {{ .Values.s3.storageClass }}
+{{- end -}}

@@ -1,0 +1,20 @@
+{{- if .Values.deploy -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow-postgres
+  namespace: {{ include "mlflow.namespaceName" . }}
+  labels:
+    {{- include "mlflow.labels" . | nindent 4 }}
+    component: postgres
+spec:
+  type: ClusterIP
+  selector:
+    app: mlflow
+    component: postgres
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
+{{- end -}}

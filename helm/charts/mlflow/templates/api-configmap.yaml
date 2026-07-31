@@ -1,0 +1,31 @@
+{{- if and .Values.deploy .Values.api.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mlflow-api-nginx-config
+  namespace: {{ include "mlflow.namespaceName" . }}
+  labels:
+    {{- include "mlflow.labels" . | nindent 4 }}
+    component: api-proxy
+data:
+  default.conf: |
+    server {
+        listen 8080;
+
+        location / {
+            auth_basic "MLflow API";
+            auth_basic_user_file /etc/nginx/htpasswd/auth;
+
+            proxy_pass http://mlflow-tracking:5000;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location /health {
+            return 200 'ok';
+            add_header Content-Type text/plain;
+        }
+    }
+{{- end -}}
