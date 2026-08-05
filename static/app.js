@@ -758,6 +758,27 @@ function _handleAgentStartEvent(data, state) {
     scrollToBottom();
 }
 
+function _handleSkillUsedEvent(data, state) {
+    // A skill can shape an entire answer without ever producing a tool call —
+    // preloaded skills are in the agent's context from turn one. Without this
+    // badge there is no way to tell from the UI that one was in play.
+    _ensureStreamStarted(state);
+    var skill = data.skill || "";
+    if (!skill) return;
+    var existing = state.contentEl.querySelector('.skill-badge[data-skill="' + skill + '"]');
+    if (existing) return;
+    var badge = document.createElement("div");
+    badge.className = "skill-badge skill-" + (data.source === "preloaded" ? "preloaded" : "invoked");
+    badge.dataset.skill = skill;
+    var how = data.source === "preloaded" ? "loaded" : "invoked";
+    badge.innerHTML = '<span class="skill-icon">&#128218;</span> ' +
+        '<span class="skill-label">skill: ' + skill + '</span>' +
+        ' <span class="skill-how">' + how +
+        (data.agent ? " by " + data.agent : "") + '</span>';
+    state.contentEl.appendChild(badge);
+    scrollToBottom();
+}
+
 function _handleAgentDoneEvent(data, contentEl) {
     const banners = contentEl.querySelectorAll('.agent-banner[data-agent="' + data.agent + '"]');
     banners.forEach(function(b) {
@@ -966,6 +987,9 @@ function processStreamEvent(eventType, data, state) {
             break;
         case "agent_done":
             _handleAgentDoneEvent(data, state.contentEl);
+            break;
+        case "skill_used":
+            _handleSkillUsedEvent(data, state);
             break;
         case "status":
             _handleStatusEvent(data, state);

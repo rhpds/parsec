@@ -39,6 +39,7 @@ class SdkEventTranslator:
         self._queue: deque[str] = deque()
         self._text_parts: list[str] = []
         self._active_agents: dict[str, str] = {}
+        self._skills_seen: set[str] = set()
         self._usage: Any | None = None
         self._session_id: str | None = None
 
@@ -142,10 +143,23 @@ class SdkEventTranslator:
             if name == "Skill":
                 skill = str(tool_input.get("command") or tool_input.get("name") or "").strip()
                 if skill:
-                    yield sse_status(f"Loading skill: {skill}")
+                    yield from self._note_skill(skill, source="invoked")
+                    yield sse_status(f"Using skill: {skill}")
+
+    def _note_skill(
+        self, skill: str, *, source: str, agent_type: str | None = None
+    ) -> Iterator[str]:
+        """Emit ``skill_used`` once per skill per turn."""
+        from src.agent.streaming import sse_skill_used
+
+        if skill in self._skills_seen:
+            return
+        self._skills_seen.add(skill)
+        yield sse_skill_used(skill, agent_type=agent_type, source=source)
 
     def _start_agent(self, agent_type: str, tool_use_id: str) -> Iterator[str]:
         from src.agent.agents import AGENTS
+        from src.agent.sdk_profiles import skills_for
         from src.agent.streaming import sse_agent_start
 
         if tool_use_id:
@@ -153,6 +167,15 @@ class SdkEventTranslator:
         agent_cfg = AGENTS.get(agent_type)
         name = agent_cfg.name if agent_cfg else agent_type
         yield sse_agent_start(agent_type, name)
+
+        # Skills passed via AgentDefinition.skills are in the agent's context
+        # from turn one and never produce a Skill tool call, so nothing else
+        # would ever reveal them. Surface them at delegation time.
+        try:
+            for skill in skills_for(agent_type):
+                yield from self._note_skill(skill, source="preloaded", agent_type=agent_type)
+        except Exception:
+            logger.exception("Could not resolve preloaded skills for %s", agent_type)
 
     def _translate_user(self, message: Any) -> Iterator[str]:
         """A UserMessage carries tool_result blocks back from the model."""

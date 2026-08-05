@@ -71,7 +71,10 @@ data:
       log_level: info
 
     anthropic:
-      model: "claude-sonnet-4@20250514"
+      # Verified available on Vertex in itpc-gcp-product-all-claude/us-east5.
+      # Deliberately NOT litellm/qwen3-14b: parsec-dev overrides its orchestrator
+      # onto that, which would make any comparison model-confounded.
+      model: "claude-sonnet-4-6"
       max_tokens: 4096
       max_tool_rounds: 10
 
@@ -111,7 +114,11 @@ data:
         orchestrator: true
         allow_writes: false
         setting_sources: ["project"]
-        timeout: 300
+        # 300s was too tight for multi-tool investigations: the SDK does its
+        # tool work first and writes the answer last, so a cut-off yields
+        # NOTHING (legacy interleaves text and at least leaves a partial).
+        # Two of eight parity questions returned empty at 300s.
+        timeout: 900
         cwd: "/app"
 
     skills:
@@ -261,6 +268,155 @@ spec:
         - name: data
           emptyDir: {}
 ---
+# Legacy control arm. Identical image, ConfigMap, secrets, model and connectors
+# to parsec-sdk — the ONLY difference is PARSEC_AGENT__RUNTIME=legacy, which
+# turns off both the SDK sub-agent path and the SDK orchestrator. This is what
+# makes the parity comparison clean: comparing against parsec-dev instead would
+# confound the runtime with a different image AND a litellm/qwen3-14b
+# orchestrator override.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: parsec-legacy
+  labels: {app: parsec-legacy}
+  annotations:
+    image.openshift.io/triggers: |
+      [{"from":{"kind":"ImageStreamTag","name":"parsec-sdk:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"parsec\")].image"}]
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: parsec-legacy}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  template:
+    metadata:
+      labels: {app: parsec-legacy}
+    spec:
+      containers:
+        - name: parsec
+          image: parsec-sdk:latest
+          ports: [{containerPort: 8000, name: http}]
+          envFrom:
+            - secretRef: {name: parsec-cloud-credentials, optional: true}
+            - secretRef: {name: parsec-aap2-credentials, optional: true}
+          env:
+            - name: PARSEC_AGENT__RUNTIME
+              value: "legacy"
+            - name: PARSEC_REPORTING_MCP__MCP_URL
+              value: "http://reporting-mcp.demo-reporting.svc:8080/mcp/"
+            - name: PARSEC_ICINGA__MCP_URL
+              value: "http://localhost:3000/sse"
+            - name: PARSEC_GITHUB__TOKEN
+              valueFrom: {secretKeyRef: {name: parsec-secrets, key: github-token, optional: true}}
+            - name: PARSEC_REPORTING_MCP__TOKEN
+              valueFrom: {secretKeyRef: {name: parsec-secrets, key: reporting-mcp-token, optional: true}}
+            - name: PARSEC_ALERT_API_KEY
+              valueFrom: {secretKeyRef: {name: parsec-secrets, key: alert-api-key, optional: true}}
+            - name: PARSEC_ANTHROPIC__LITELLM_API_KEY
+              valueFrom: {secretKeyRef: {name: parsec-secrets, key: litellm-api-key, optional: true}}
+            - name: PARSEC_LEARNINGS__LOCAL__API_KEY
+              valueFrom: {secretKeyRef: {name: parsec-secrets, key: litellm-api-key, optional: true}}
+            # --- Vertex for Parsec's own Anthropic client (same as parsec-dev) ---
+            - name: PARSEC_ANTHROPIC__BACKEND
+              value: "vertex"
+            - name: PARSEC_ANTHROPIC__VERTEX_PROJECT_ID
+              value: "itpc-gcp-product-all-claude"
+            - name: PARSEC_ANTHROPIC__VERTEX_REGION
+              value: "us-east5"
+            - name: PARSEC_ANTHROPIC__VERTEX_CREDENTIALS_PATH
+              value: /app/gcp/service-account.json
+            - name: PARSEC_GCP__CREDENTIALS_PATH
+              value: /app/gcp-billing/service-account.json
+            # NOTE: parsec-dev additionally overrides the ORCHESTRATOR onto
+            # litellm/qwen3-14b (PARSEC_ANTHROPIC__OVERRIDES__ORCHESTRATOR__*).
+            # Deliberately not copied — the whole point here is that the Agent
+            # SDK orchestrates. It is a real confound for any answer-quality
+            # comparison and must be stated alongside results.
+            # --- Vertex for the `claude` CLI subprocess the SDK spawns ---
+            # Same project/region as Parsec's own client so both arms bill and
+            # resolve identically.
+            - name: CLAUDE_CODE_USE_VERTEX
+              value: "1"
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: /app/gcp/service-account.json
+            - name: ANTHROPIC_VERTEX_PROJECT_ID
+              value: "itpc-gcp-product-all-claude"
+            - name: CLOUD_ML_REGION
+              value: "us-east5"
+            - name: CLAUDE_CODE_ACCEPT_TOS
+              value: "true"
+            # --- Babylon / OCPV cluster kubeconfigs (mounted secrets) ---
+            - {name: PARSEC_BABYLON__CLUSTERS__EAST__KUBECONFIG, value: /app/babylon/east.kubeconfig}
+            - {name: PARSEC_BABYLON__CLUSTERS__WEST__KUBECONFIG, value: /app/babylon/west.kubeconfig}
+            - {name: PARSEC_BABYLON__CLUSTERS__PARTNER0__KUBECONFIG, value: /app/babylon/partner0.kubeconfig}
+            - {name: PARSEC_BABYLON__CLUSTERS__PARTNER1__KUBECONFIG, value: /app/babylon/partner1.kubeconfig}
+            - {name: PARSEC_BABYLON__CLUSTERS__INTEGRATION__KUBECONFIG, value: /app/babylon/integration.kubeconfig}
+            - {name: PARSEC_BABYLON__CLUSTERS__BABYDEV__KUBECONFIG, value: /app/babylon/babydev.kubeconfig}
+            - {name: PARSEC_OCPV__CLUSTERS__OCPV05__KUBECONFIG, value: /app/ocpv/ocpv05.kubeconfig}
+            - {name: PARSEC_OCPV__CLUSTERS__OCPV06__KUBECONFIG, value: /app/ocpv/ocpv06.kubeconfig}
+            - {name: PARSEC_OCPV__CLUSTERS__OCPV07__KUBECONFIG, value: /app/ocpv/ocpv07.kubeconfig}
+            - {name: PARSEC_OCPV__CLUSTERS__OCPV08__KUBECONFIG, value: /app/ocpv/ocpv08.kubeconfig}
+            - {name: PARSEC_OCPV__CLUSTERS__OCPV09__KUBECONFIG, value: /app/ocpv/ocpv09.kubeconfig}
+            - {name: PARSEC_OCPV__CLUSTERS__OCPV10__KUBECONFIG, value: /app/ocpv/ocpv10.kubeconfig}
+          volumeMounts:
+            - {name: config, mountPath: /app/config/config.yaml, subPath: config.yaml}
+            - {name: vertex-credentials, mountPath: /app/gcp, readOnly: true}
+            - {name: gcp-billing-credentials, mountPath: /app/gcp-billing, readOnly: true}
+            - {name: babylon-kubeconfigs, mountPath: /app/babylon, readOnly: true}
+            - {name: ocpv-kubeconfigs, mountPath: /app/ocpv, readOnly: true}
+            - {name: data, mountPath: /app/data}
+          resources:
+            requests: {cpu: '500m', memory: 1Gi}
+            # CPU, not memory, is the binding constraint: every SDK turn spawns a
+            # `claude` subprocess, and under a tight quota concurrent cold starts
+            # starve the event loop until the liveness probe restarts the pod.
+            limits: {cpu: '2', memory: 3Gi}
+          livenessProbe:
+            httpGet: {path: /api/health, port: 8000}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            httpGet: {path: /api/health/ready, port: 8000}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+        - name: icinga-mcp
+          image: quay.io/rhpds/monitoring-mcp:v0.3.1
+          args: ['--transport', 'sse', '--host', '0.0.0.0', '--port', '3000']
+          envFrom:
+            - secretRef: {name: icinga-credentials, optional: true}
+          env:
+            - name: PARSEC_REPORTING_MCP__MCP_URL
+              value: "http://reporting-mcp.demo-reporting.svc:8080/mcp/"
+          resources:
+            requests: {cpu: '50m', memory: 64Mi}
+            limits: {cpu: '200m', memory: 128Mi}
+      volumes:
+        - name: config
+          configMap: {name: parsec-sdk-config}
+        - name: vertex-credentials
+          secret: {secretName: vertex-credentials}
+        - name: gcp-billing-credentials
+          secret: {secretName: gcp-billing-credentials}
+        - name: babylon-kubeconfigs
+          secret: {secretName: babylon-kubeconfigs}
+        - name: ocpv-kubeconfigs
+          secret: {secretName: ocpv-kubeconfigs}
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: parsec-legacy
+  labels: {app: parsec-legacy}
+spec:
+  selector: {app: parsec-legacy}
+  ports: [{name: http, port: 8000, targetPort: 8000}]
+---
 # OAuth proxy: without it no X-Forwarded-Email ever reaches the app, so every
 # browser request is rejected with "no user identity found in request".
 apiVersion: apps/v1
@@ -293,9 +449,9 @@ spec:
             - -cookie-secret-file=/etc/proxy/secrets/session_secret
             - -openshift-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
             - -skip-auth-regex=^/api/(health|alert/)
-            # Must exceed the SDK's own 300s ceiling or long investigations are
-            # cut off by the proxy rather than by the agent.
-            - -upstream-timeout=330s
+            # Must exceed the SDK's own ceiling or long investigations are cut
+            # off by the proxy rather than by the agent.
+            - -upstream-timeout=930s
             - -pass-user-headers=true
           volumeMounts:
             - {name: oauth-secret, mountPath: /etc/proxy/secrets, readOnly: true}

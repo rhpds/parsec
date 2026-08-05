@@ -56,7 +56,7 @@ def _agent_definitions(config: Any) -> dict[str, Any]:
 
     from src.agent.agents import AGENTS
     from src.agent.parsec_mcp import tool_names_for
-    from src.agent.sdk_profiles import _AGENT_SKILLS, TURN_HEADROOM, enabled_sdk_agents
+    from src.agent.sdk_profiles import TURN_HEADROOM, enabled_sdk_agents, skills_for
     from src.agent.system_prompt import get_agent_prompt
 
     enabled = enabled_sdk_agents(config)
@@ -77,9 +77,9 @@ def _agent_definitions(config: Any) -> dict[str, Any]:
             "tools": tool_names_for(list(agent_cfg.tools)),
             "maxTurns": agent_cfg.max_rounds + TURN_HEADROOM,
         }
-        skill = _AGENT_SKILLS.get(agent_type)
-        if skill:
-            kwargs["skills"] = [skill]
+        skills = skills_for(agent_type)
+        if skills:
+            kwargs["skills"] = skills
         definitions[agent_type] = AgentDefinition(**kwargs)
 
     logger.info("SDK orchestrator: %d subagents (%s)", len(definitions), ", ".join(definitions))

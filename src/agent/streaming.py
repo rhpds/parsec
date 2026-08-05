@@ -52,6 +52,22 @@ def sse_agent_done(agent_type: str) -> str:
     return sse_event("agent_done", {"agent": agent_type})
 
 
+def sse_skill_used(skill: str, agent_type: str | None = None, source: str = "invoked") -> str:
+    """Signal that an agent skill shaped this answer.
+
+    Without this a skill is invisible: preloaded skills never produce a tool
+    call, so a SKILL.md could steer an entire investigation with no trace in the
+    UI at all. ``source`` distinguishes the two ways that happens:
+
+    ``preloaded``
+        Passed via ``AgentDefinition.skills``, so it is in the agent's context
+        from the first turn.
+    ``invoked``
+        The model called the ``Skill`` tool for it mid-run.
+    """
+    return sse_event("skill_used", {"skill": skill, "agent": agent_type, "source": source})
+
+
 def sse_confidence(level: str, reasons: list[str]) -> str:
     """Send a confidence level indicator (only emitted for medium/low)."""
     return sse_event("confidence", {"level": level, "reasons": reasons})

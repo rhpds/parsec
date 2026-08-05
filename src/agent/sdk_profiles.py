@@ -52,14 +52,64 @@ class SdkProfile:
     extra_mcp_servers: dict[str, Any] = field(default_factory=dict)
 
 
-#: Skill each agent loads, when one is shipped for it. A missing entry simply
-#: means no skill is passed — the agent still gets its system prompt and tools.
-_AGENT_SKILLS: dict[str, str] = {
-    "icinga": "icinga-triage",
-    "cost": "cost-anomaly-triage",
-    "aap2": "aap2-job-failure-rca",
-    "security": "abuse-account-detection",
+#: Skills each agent may use. Every entry is preloaded into that agent's context
+#: via ``AgentDefinition.skills``; the SDK also keeps unlisted skills invocable
+#: through the ``Skill`` tool, so this is the "definitely available" set rather
+#: than a whitelist.
+#:
+#: Previously one skill per agent, which left three shipped skills
+#: (``cost-spike-investigation``, ``aap2-job-failure-triage``,
+#: ``provision-lookup``) attached to nothing — they loaded, appeared in the
+#: Skills tab, and no agent could ever use them.
+_AGENT_SKILLS: dict[str, tuple[str, ...]] = {
+    "icinga": ("icinga-triage",),
+    "cost": ("cost-anomaly-triage", "cost-spike-investigation", "provision-lookup"),
+    "aap2": ("aap2-job-failure-rca", "aap2-job-failure-triage", "root-cause-analysis"),
+    "security": ("abuse-account-detection", "provision-lookup"),
+    "babylon": ("provision-lookup",),
+    "ocpv": (),
 }
+
+
+def skills_for(agent_type: str) -> list[str]:
+    """Skills to preload for ``agent_type``, filtered to those actually shipped.
+
+    A name that is not on disk would be silently ignored by the SDK, so it is
+    dropped here instead and logged — an agent quietly missing its skill is the
+    failure mode this whole path is meant to make visible.
+    """
+    wanted = _AGENT_SKILLS.get(agent_type, ())
+    if not wanted:
+        return []
+    available = discoverable_skill_names()
+    if not available:
+        # Discovery unavailable (e.g. unit tests with no skills root): trust the
+        # map rather than silently dropping everything.
+        return list(wanted)
+    present = [s for s in wanted if s in available]
+    missing = [s for s in wanted if s not in available]
+    if missing:
+        logger.warning(
+            "Agent %s: skills not found on disk, dropped: %s (available: %s)",
+            agent_type,
+            ", ".join(missing),
+            ", ".join(sorted(available)),
+        )
+    return present
+
+
+def discoverable_skill_names() -> frozenset[str]:
+    """Names the SDK can actually load, i.e. what is under its discovery root."""
+    try:
+        from src.skills.sdk_root import sdk_skills_root
+
+        root = sdk_skills_root()
+        if not root.is_dir():
+            return frozenset()
+        return frozenset(p.name for p in root.iterdir() if (p / "SKILL.md").is_file())
+    except Exception:
+        logger.exception("Could not enumerate SDK-visible skills")
+        return frozenset()
 
 
 def enabled_sdk_agents(config: Any) -> frozenset[str]:
@@ -126,9 +176,9 @@ def sdk_profile_for(agent_type: str, config: Any) -> dict[str, Any]:
         "max_turns": agent_cfg.max_rounds + TURN_HEADROOM,
     }
 
-    skill = _AGENT_SKILLS.get(agent_type)
-    if skill:
-        profile["skills"] = [skill]
+    skills = skills_for(agent_type)
+    if skills:
+        profile["skills"] = skills
 
     extra = _extra_mcp_servers(agent_type, config)
     if extra:
@@ -138,10 +188,10 @@ def sdk_profile_for(agent_type: str, config: Any) -> dict[str, Any]:
         ]
 
     logger.info(
-        "SDK profile for %s: %d bridged tools, skill=%s, max_turns=%d, writes=%s",
+        "SDK profile for %s: %d bridged tools, skills=%s, max_turns=%d, writes=%s",
         agent_type,
         len(schemas),
-        skill or "none",
+        ", ".join(skills) or "none",
         profile["max_turns"],
         allow_writes,
     )

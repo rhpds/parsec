@@ -371,3 +371,69 @@ def test_no_delegation_block_when_no_agents_enabled():
 
     cfg = {"agent": {"runtime": "sdk", "sdk": {"enabled_agents": []}}}
     assert "subagent_type" not in _orchestrator_system(cfg)
+
+
+# ------------------------------------------------------------- skill visibility
+
+
+def test_preloaded_skills_are_surfaced_on_delegation(tr, monkeypatch):
+    """Preloaded skills never produce a Skill tool call.
+
+    They are in the agent's context from turn one, so without an explicit event
+    a SKILL.md can steer an entire investigation with zero UI trace.
+    """
+    monkeypatch.setattr(
+        "src.agent.sdk_profiles.skills_for",
+        lambda a: ["icinga-triage"] if a == "icinga" else [],
+    )
+    msg = _assistant([ToolUseBlock(id="tu-1", name="Agent", input={"subagent_type": "icinga"})])
+    blob = _blob(_events(tr, msg))
+
+    assert "skill_used" in blob
+    assert "icinga-triage" in blob
+    assert "preloaded" in blob
+
+
+def test_explicitly_invoked_skill_is_surfaced(tr):
+    msg = _assistant([ToolUseBlock(id="tu-2", name="Skill", input={"command": "provision-lookup"})])
+    blob = _blob(_events(tr, msg))
+
+    assert "skill_used" in blob
+    assert "provision-lookup" in blob
+    assert "invoked" in blob
+
+
+def test_skill_reported_once_per_turn(tr):
+    """Repeated use must not spam the transcript with duplicate badges."""
+    m = _assistant([ToolUseBlock(id="t", name="Skill", input={"command": "provision-lookup"})])
+    first = _blob(_events(tr, m))
+    second = _blob(_events(tr, m))
+
+    assert first.count("skill_used") == 1
+    assert "skill_used" not in second
+
+
+def test_skill_lookup_failure_does_not_break_delegation(tr, monkeypatch):
+    def _boom(_):
+        raise RuntimeError("skills root unreadable")
+
+    monkeypatch.setattr("src.agent.sdk_profiles.skills_for", _boom)
+    blob = _blob(
+        _events(
+            tr, _assistant([ToolUseBlock(id="x", name="Agent", input={"subagent_type": "cost"})])
+        )
+    )
+    assert "agent_start" in blob  # delegation still reported
+
+
+def test_every_agent_with_skills_resolves_them():
+    """The map must name skills that are actually shipped."""
+    from src.agent.sdk_profiles import _AGENT_SKILLS
+    from pathlib import Path
+
+    shipped = {
+        p.name for p in (Path(__file__).resolve().parent.parent / "skills").iterdir() if p.is_dir()
+    }
+    for agent, skills in _AGENT_SKILLS.items():
+        for s in skills:
+            assert s in shipped, f"{agent} references skill {s!r} which is not shipped"
