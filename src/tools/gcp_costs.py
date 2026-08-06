@@ -1,5 +1,6 @@
 """Tool: query_gcp_costs — query GCP BigQuery billing data."""
 
+import asyncio
 import logging
 from datetime import datetime
 
@@ -7,6 +8,17 @@ from src.config import get_config
 from src.connections.gcp import get_bq_client
 
 logger = logging.getLogger(__name__)
+
+
+def _run_query(bq_client, query: str) -> list:
+    """Run the BigQuery job and drain its rows (blocking — via asyncio.to_thread).
+
+    All three steps block: ``query`` submits, ``result`` waits for completion, and
+    iterating pages the rows in over the network. Draining here keeps every one of
+    them off the event loop — otherwise health probes and SSE keepalives stall for
+    the length of the job.
+    """
+    return list(bq_client.query(query).result())
 
 
 async def query_gcp_costs(
@@ -81,8 +93,7 @@ async def query_gcp_costs(
     """
 
     try:
-        query_job = bq_client.query(query)
-        results = query_job.result()
+        results = await asyncio.to_thread(_run_query, bq_client, query)
 
         rows = []
         total_cost = 0.0
