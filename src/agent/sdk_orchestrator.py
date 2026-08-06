@@ -45,6 +45,34 @@ def _today() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%d")
 
 
+#: Appended to every subagent prompt.
+#:
+#: Only a subagent's FINAL message returns to the orchestrator — its tool
+#: results stay in its own context. So whatever it omits from that message is
+#: lost for good, and the orchestrator then summarises what it does receive.
+#: Measured effect of that double compression: SDK answers ran 659 characters
+#: against legacy's 10,785 on the same question, and an LLM judge scored the SDK
+#: 3.00 on actionability against legacy's 4.43 — not because it investigated
+#: less (tool counts were comparable) but because the findings never survived
+#: the hand-off.
+_SUBAGENT_OUTPUT_CONTRACT = """
+
+## Reporting your findings
+
+Your final message is the ONLY thing that leaves this investigation — your tool
+results are not visible to anyone else. Write it as the complete answer for a
+Red Hat SRE who will act on it, not as a summary for another agent.
+
+Include every specific you found: job IDs, hostnames, cluster and account names,
+error strings, dollar amounts, counts, dates, SQL you ran, file paths and
+`owner/repo:path:line` citations. Keep your tables. Keep your section headings.
+State the root cause and the concrete next steps.
+
+Length is not a virtue, but omitting specifics is a defect — a tidy answer that
+drops the identifiers an SRE needs is worse than a long one that keeps them.
+"""
+
+
 def _agent_definitions(config: Any) -> dict[str, Any]:
     """Turn Parsec's ``AGENTS`` registry into SDK subagent definitions.
 
@@ -73,7 +101,11 @@ def _agent_definitions(config: Any) -> dict[str, Any]:
             # Same date grounding the legacy sub-agent loop appends
             # (agents.py:579/828); without it an SDK agent reasons about
             # "the last 30 days" with no idea what today is.
-            "prompt": f"{get_agent_prompt(agent_type)}\n\nToday's date is {_today()}.",
+            "prompt": (
+                f"{get_agent_prompt(agent_type)}"
+                f"\n\nToday's date is {_today()}."
+                f"{_SUBAGENT_OUTPUT_CONTRACT}"
+            ),
             "tools": tool_names_for(list(agent_cfg.tools)),
             "maxTurns": agent_cfg.max_rounds + TURN_HEADROOM,
         }
@@ -209,6 +241,22 @@ def _delegation_addendum(config: Any) -> str:
         "Delegate whenever a question falls in one of those domains, exactly as the",
         "instructions above intend. Handle only cross-domain synthesis and your own",
         "direct tools yourself.",
+        "",
+        "### Relay specialist findings in full",
+        "",
+        "A specialist's reply is the finished answer for its domain. **Relay it in",
+        "full.** Do not condense it, do not replace its tables with a summary, and do",
+        "not drop its specifics — job IDs, hostnames, error strings, dollar amounts,",
+        "counts, SQL, file paths and `owner/repo:path:line` citations must all survive",
+        "into your response verbatim. Reproduce its structure and section headings.",
+        "",
+        "Add only what the specialist could not: cross-domain synthesis when you",
+        "consulted several, and a short lead sentence. If you consulted exactly one",
+        "specialist, your answer should be essentially its answer.",
+        "",
+        "Detail is what makes an answer actionable. An SRE reading this needs the",
+        "specific values in order to act; a tidy precis of them is worse than useless",
+        "because it looks complete while omitting what they need.",
     ]
     return "\n".join(lines)
 

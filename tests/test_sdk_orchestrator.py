@@ -325,8 +325,8 @@ def test_agent_tool_is_available_and_approved(_sdk_stub):
 
 def test_per_agent_availability_stays_narrow(_sdk_stub):
     """Widening approval must not widen what an individual agent can reach."""
-    from src.agent.parsec_mcp import tool_names_for
     from src.agent.agents import AGENTS
+    from src.agent.parsec_mcp import tool_names_for
 
     o = _opts(_sdk_stub)
     ocpv_tools = set(o.agents["ocpv"].tools)
@@ -428,8 +428,9 @@ def test_skill_lookup_failure_does_not_break_delegation(tr, monkeypatch):
 
 def test_every_agent_with_skills_resolves_them():
     """The map must name skills that are actually shipped."""
-    from src.agent.sdk_profiles import _AGENT_SKILLS
     from pathlib import Path
+
+    from src.agent.sdk_profiles import _AGENT_SKILLS
 
     shipped = {
         p.name for p in (Path(__file__).resolve().parent.parent / "skills").iterdir() if p.is_dir()
@@ -437,3 +438,37 @@ def test_every_agent_with_skills_resolves_them():
     for agent, skills in _AGENT_SKILLS.items():
         for s in skills:
             assert s in shipped, f"{agent} references skill {s!r} which is not shipped"
+
+
+# ------------------------------------------------------- answer-detail parity
+
+
+def test_orchestrator_is_told_to_relay_specialist_findings_verbatim():
+    """The measured parity gap was answer compression, not worse investigation.
+
+    Tool counts were comparable (legacy 208 vs SDK 154) but SDK answers ran 659
+    chars against legacy's 10,785 on the same question, scoring 3.00 vs 4.43 on
+    actionability. The SDK docs note the parent "may summarise" a subagent
+    result unless told otherwise.
+    """
+    from src.agent.sdk_orchestrator import _orchestrator_system
+
+    cfg = {"agent": {"runtime": "sdk", "sdk": {"enabled_agents": ["all"]}}}
+    p = _orchestrator_system(cfg)
+
+    assert "Relay specialist findings in full" in p
+    assert "verbatim" in p
+    for token in ("job IDs", "hostnames", "dollar amounts", "citations"):
+        assert token in p, f"prompt should name {token!r} as detail to preserve"
+
+
+def test_subagents_are_told_their_final_message_is_the_whole_output(_sdk_stub):
+    """Only a subagent's final message returns; its tool results do not."""
+    from src.agent.sdk_orchestrator import _agent_definitions
+
+    defs = _agent_definitions({"agent": {"runtime": "sdk", "sdk": {"enabled_agents": ["all"]}}})
+    assert defs, "expected subagent definitions"
+    for agent_type, d in defs.items():
+        assert "Reporting your findings" in d.prompt, f"{agent_type} lacks the output contract"
+        assert "ONLY thing that leaves" in d.prompt
+        assert "owner/repo:path:line" in d.prompt
