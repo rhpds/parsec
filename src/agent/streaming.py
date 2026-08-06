@@ -83,27 +83,48 @@ async def with_keepalive(stream, interval: float = SSE_KEEPALIVE_SECONDS):
     on ``localhost:8000``, bypassing the router and the oauth-proxy entirely.
     Both runtimes are affected; this wraps the shared entry point so both are
     covered.
+
+    The source runs as ONE task feeding a queue, rather than a task per step.
+    That matters: ``ensure_future`` copies the current context, so stepping the
+    generator that way puts each ``__anext__`` in a *different* context and a
+    ``ContextVar`` set in one step cannot be reset in another. Parsec sets
+    ``parsec_mcp_sse_sink`` for the life of a request and resets it in a
+    ``finally``, so the per-step form raised
+
+        ValueError: <Token ...> was created in a different Context
+
+    at teardown — after a complete answer had streamed — which killed the
+    terminating ``done``/``history`` events and dropped the connection.
     """
-    it = stream.__aiter__()
-    pending: asyncio.Task | None = None
+    done_marker = object()
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def _pump() -> None:
+        try:
+            async for chunk in stream:
+                await queue.put(chunk)
+        except BaseException as exc:  # noqa: BLE001 - re-raised on the consumer side
+            await queue.put(exc)
+        else:
+            await queue.put(done_marker)
+
+    pump = asyncio.ensure_future(_pump())
     try:
         while True:
-            if pending is None:
-                pending = asyncio.ensure_future(it.__anext__())
-            done, _ = await asyncio.wait({pending}, timeout=interval)
-            if not done:
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=interval)
+            except TimeoutError:
                 yield sse_keepalive()
                 continue
-            task, pending = pending, None
-            try:
-                yield task.result()
-            except StopAsyncIteration:
+            if item is done_marker:
                 return
+            if isinstance(item, BaseException):
+                raise item
+            yield item
     finally:
-        if pending is not None:
-            pending.cancel()
-            with contextlib.suppress(BaseException):
-                await pending
+        pump.cancel()
+        with contextlib.suppress(BaseException):
+            await pump
 
 
 def sse_skill_used(skill: str, agent_type: str | None = None, source: str = "invoked") -> str:

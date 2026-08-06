@@ -533,3 +533,34 @@ async def test_keepalive_propagates_upstream_errors():
         async for c in with_keepalive(boom(), interval=5):
             got.append(c)
     assert got, "events before the failure should still have been delivered"
+
+
+async def test_keepalive_preserves_contextvar_set_reset_pairing():
+    """The source must run in ONE context, or teardown raises.
+
+    Regression: stepping the generator with a task per `__anext__` copies the
+    context each step, so a ContextVar set early cannot be reset in the
+    generator's `finally` — it raised "Token was created in a different
+    Context" *after* a complete answer had streamed, killing the terminating
+    done/history events and dropping the browser connection.
+    """
+    from contextvars import ContextVar
+
+    from src.agent.streaming import with_keepalive
+
+    probe: ContextVar = ContextVar("probe", default=None)
+    reset_ok = {"value": False}
+
+    async def source():
+        token = probe.set("sink")
+        try:
+            yield "event: text\ndata: {}\n\n"
+            yield "event: done\ndata: {}\n\n"
+        finally:
+            probe.reset(token)  # raises if set/reset straddle contexts
+            reset_ok["value"] = True
+
+    out = [c async for c in with_keepalive(source(), interval=5)]
+
+    assert reset_ok["value"], "ContextVar reset did not complete — contexts straddled"
+    assert out[-1].startswith("event: done"), "terminating event must survive"
