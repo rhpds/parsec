@@ -472,3 +472,64 @@ def test_subagents_are_told_their_final_message_is_the_whole_output(_sdk_stub):
         assert "Reporting your findings" in d.prompt, f"{agent_type} lacks the output contract"
         assert "ONLY thing that leaves" in d.prompt
         assert "owner/repo:path:line" in d.prompt
+
+
+# ------------------------------------------------------------ SSE keepalive
+
+
+async def test_keepalive_emitted_during_silence():
+    """A long quiet stretch must not look like a dead connection.
+
+    HAProxy drops a route connection after 30s of silence, which is exactly what
+    an investigation looks like while tools run and while the model composes.
+    """
+    import asyncio
+
+    from src.agent.streaming import with_keepalive
+
+    async def slow():
+        yield "event: text\ndata: {}\n\n"
+        await asyncio.sleep(0.25)
+        yield "event: done\ndata: {}\n\n"
+
+    out = [chunk async for chunk in with_keepalive(slow(), interval=0.05)]
+
+    assert any(c.startswith(":") for c in out), "expected keepalive comments"
+    assert out[0].startswith("event: text")
+    assert out[-1].startswith("event: done")
+
+
+async def test_keepalive_preserves_event_order_and_content():
+    from src.agent.streaming import with_keepalive
+
+    async def fast():
+        for i in range(4):
+            yield f"event: text\ndata: {i}\n\n"
+
+    out = [c async for c in with_keepalive(fast(), interval=5)]
+    assert out == [
+        f"event: text\ndata: {i}\n\n" for i in range(4)
+    ], "events must pass through intact"
+
+
+async def test_keepalive_is_an_sse_comment():
+    """Clients must ignore it — a stray event would render in the transcript."""
+    from src.agent.streaming import sse_keepalive
+
+    k = sse_keepalive()
+    assert k.startswith(":")
+    assert "event:" not in k and "data:" not in k
+
+
+async def test_keepalive_propagates_upstream_errors():
+    from src.agent.streaming import with_keepalive
+
+    async def boom():
+        yield "event: text\ndata: {}\n\n"
+        raise RuntimeError("upstream died")
+
+    got = []
+    with pytest.raises(RuntimeError, match="upstream died"):
+        async for c in with_keepalive(boom(), interval=5):
+            got.append(c)
+    assert got, "events before the failure should still have been delivered"

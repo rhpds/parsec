@@ -1,5 +1,7 @@
 """SSE (Server-Sent Events) helpers for streaming agent responses."""
 
+import asyncio
+import contextlib
 import json
 import logging
 
@@ -50,6 +52,58 @@ def sse_agent_start(agent_type: str, agent_name: str) -> str:
 def sse_agent_done(agent_type: str) -> str:
     """Signal that a sub-agent has finished execution."""
     return sse_event("agent_done", {"agent": agent_type})
+
+
+#: Seconds of silence before a keepalive comment is emitted. OpenShift's HAProxy
+#: router defaults ``timeout server`` to 30s and drops a connection that goes
+#: quiet for longer, so this must stay comfortably under it.
+SSE_KEEPALIVE_SECONDS = 10.0
+
+
+def sse_keepalive() -> str:
+    """An SSE comment line. Resets router/proxy idle timers; clients ignore it.
+
+    Per the SSE spec a line beginning with ``:`` is a comment and is discarded by
+    ``EventSource`` and by the hand-rolled parser in ``static/app.js``, so this is
+    invisible to the UI.
+    """
+    return ": keepalive\n\n"
+
+
+async def with_keepalive(stream, interval: float = SSE_KEEPALIVE_SECONDS):
+    """Wrap an SSE generator so it never goes silent for longer than ``interval``.
+
+    An investigation is mostly quiet on the wire: tool calls run for tens of
+    seconds, and after the last one the model composes the answer with nothing
+    to send. Through an OpenShift route that silence exceeds HAProxy's 30s
+    ``timeout server`` and the connection is dropped — the browser shows
+    "network error" after a long, apparently-healthy run.
+
+    This never reproduced in testing because the harness drove the app directly
+    on ``localhost:8000``, bypassing the router and the oauth-proxy entirely.
+    Both runtimes are affected; this wraps the shared entry point so both are
+    covered.
+    """
+    it = stream.__aiter__()
+    pending: asyncio.Task | None = None
+    try:
+        while True:
+            if pending is None:
+                pending = asyncio.ensure_future(it.__anext__())
+            done, _ = await asyncio.wait({pending}, timeout=interval)
+            if not done:
+                yield sse_keepalive()
+                continue
+            task, pending = pending, None
+            try:
+                yield task.result()
+            except StopAsyncIteration:
+                return
+    finally:
+        if pending is not None:
+            pending.cancel()
+            with contextlib.suppress(BaseException):
+                await pending
 
 
 def sse_skill_used(skill: str, agent_type: str | None = None, source: str = "invoked") -> str:

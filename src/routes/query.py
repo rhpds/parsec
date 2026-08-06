@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from src.agent.orchestrator import REPORTS_DIR, run_agent
+from src.agent.streaming import with_keepalive
 from src.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -244,7 +245,11 @@ async def query(
             yield event
 
     return StreamingResponse(
-        event_stream(),
+        # Keepalive comments during quiet stretches. Without them the OpenShift
+        # router drops the connection after 30s of silence — which is exactly
+        # what a long investigation looks like on the wire — and the browser
+        # reports "network error" mid-answer.
+        with_keepalive(event_stream()),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

@@ -486,6 +486,13 @@ kind: Route
 metadata:
   name: parsec-sdk
   labels: {app: parsec-sdk}
+  annotations:
+    # HAProxy defaults `timeout server` to 30s and drops a connection that goes
+    # quiet for longer. An investigation is silent on the wire while tools run
+    # and while the model composes, so without this the browser shows
+    # "network error" mid-answer. The app also emits SSE keepalives
+    # (src/agent/streaming.py) — this is the belt to that pair of braces.
+    haproxy.router.openshift.io/timeout: 900s
 spec:
   to: {kind: Service, name: parsec-sdk-oauth}
   port: {targetPort: public}
