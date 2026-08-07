@@ -187,9 +187,39 @@ class MetricsCollector:
             "cost_usd": self.resolved_cost_usd(),
         }
 
+    def log_summary(self) -> None:
+        """Emit one line of usage to the app log.
+
+        MLflow is the intended sink, but it is not always reachable — from
+        rh-ace-aiops a NetworkPolicy blocks the mlflow namespace outright, and
+        `flush_to_mlflow` returns quietly in that case. Token and cache counts
+        were then collected and discarded, which made prompt-cache behaviour
+        impossible to observe anywhere. This keeps them in the log regardless of
+        whether the tracking server answers.
+        """
+        cached_in = self.input_tokens + self.cache_read_tokens + self.cache_creation_tokens
+        hit_pct = (self.cache_read_tokens / cached_in * 100) if cached_in else 0.0
+        logger.info(
+            "usage runtime=%s agent=%s in=%d out=%d cache_read=%d cache_write=%d "
+            "cache_hit=%.1f%% tools=%d errors=%d cost_usd=%.4f latency_ms=%.0f",
+            self.runtime or "-",
+            self.agent_type or "-",
+            self.input_tokens,
+            self.output_tokens,
+            self.cache_read_tokens,
+            self.cache_creation_tokens,
+            hit_pct,
+            self.tool_calls,
+            self.tool_errors,
+            self.resolved_cost_usd(),
+            self.total_latency_ms,
+        )
+
     async def flush_to_mlflow(self) -> None:
         """Flush accumulated metrics to MLflow. Fire-and-forget safe."""
         global _last_error_time
+
+        self.log_summary()
 
         client = get_mlflow_client()
         if client is None:
