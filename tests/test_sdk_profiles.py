@@ -131,14 +131,30 @@ def test_max_turns_exceeds_legacy_max_rounds(_fake_sdk):
         assert profile["max_turns"] > cfg.max_rounds
 
 
-def test_skill_attached_when_one_exists(_fake_sdk):
-    assert sdk_profile_for("icinga", _cfg())["skills"] == ["icinga-triage"]
-    assert sdk_profile_for("cost", _cfg())["skills"] == ["cost-anomaly-triage"]
+def test_skills_attached_to_the_agents_that_declare_them(_fake_sdk):
+    """An agent gets every skill mapped to it, not just the first.
+
+    These were one-skill-per-agent assertions. Three shipped skills were then
+    reachable by no agent at all — a SKILL.md nobody can load is dead weight —
+    so _AGENT_SKILLS maps each agent to a tuple and the profile carries all of
+    them. Asserting a superset keeps this from breaking every time a skill is
+    added, while still catching a skill silently detaching.
+    """
+    icinga = sdk_profile_for("icinga", _cfg())["skills"]
+    assert icinga == ["icinga-triage"]
+
+    cost = sdk_profile_for("cost", _cfg())["skills"]
+    assert "cost-anomaly-triage" in cost
+    assert len(cost) > 1, "cost declares several skills; only one was attached"
+
+    aap2 = sdk_profile_for("aap2", _cfg())["skills"]
+    assert "root-cause-analysis" in aap2, "the vendored rhdp-rca-plugin skill is orphaned"
 
 
-def test_agent_without_a_skill_still_gets_tools(_fake_sdk):
-    profile = sdk_profile_for("babylon", _cfg())
-    assert "skills" not in profile
+def test_agent_with_no_skills_still_gets_tools(_fake_sdk):
+    """ocpv maps to no skill, and must still be a usable agent."""
+    profile = sdk_profile_for("ocpv", _cfg())
+    assert not profile.get("skills")
     assert profile["allowed_tools"]
 
 
