@@ -564,3 +564,59 @@ async def test_keepalive_preserves_contextvar_set_reset_pairing():
 
     assert reset_ok["value"], "ContextVar reset did not complete — contexts straddled"
     assert out[-1].startswith("event: done"), "terminating event must survive"
+
+
+# --------------------------------------------------------------- failure surfacing
+
+
+def test_turn_limit_is_reported_as_an_error_not_an_empty_answer(tr):
+    """A run that ran out of turns must not look like a successful empty answer.
+
+    finish() previously emitted `(no output)` and a normal `done` for any run
+    with no text, so a turn-limited investigation was indistinguishable from the
+    model legitimately having nothing to say.
+    """
+    tr._capture_result(_result(is_error=True, subtype="error_max_turns", num_turns=23))
+    blob = "".join(tr.finish(_Collector()))
+
+    assert "event: error" in blob
+    assert "turn limit" in blob
+    assert "23" in blob
+    assert "event: done" in blob, "the stream must still terminate"
+
+
+def test_runtime_error_is_reported(tr):
+    tr._capture_result(_result(is_error=True, subtype="error_during_execution", result="boom"))
+    blob = "".join(tr.finish(_Collector()))
+    assert "event: error" in blob
+    assert "boom" in blob
+
+
+def test_silent_empty_answer_is_reported(tr):
+    """No error flag, but nothing produced — still a failure worth surfacing."""
+    tr._capture_result(_result(is_error=False))
+    blob = "".join(tr.finish(_Collector()))
+    assert "event: error" in blob
+    assert "without producing an answer" in blob
+
+
+def test_successful_run_emits_no_error(tr):
+    tr._text_parts.append("here is the answer")
+    tr._capture_result(_result(is_error=False, result="here is the answer"))
+    blob = "".join(tr.finish(_Collector()))
+    assert "event: error" not in blob
+    assert "event: done" in blob
+
+
+def test_unknown_invoked_skill_is_not_surfaced(tr, monkeypatch):
+    """The skill name comes from raw model output; don't echo one that isn't real."""
+    import src.agent.sdk_stream as mod
+
+    monkeypatch.setattr(mod, "discoverable_skill_names", lambda: frozenset({"icinga-triage"}))
+    msg = _assistant(
+        [ToolUseBlock(id="tu-x", name="Skill", input={"command": "<img src=x onerror=1>"})]
+    )
+    blob = _blob(_events(tr, msg))
+
+    assert "skill_used" not in blob
+    assert "onerror" not in blob

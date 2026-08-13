@@ -23,6 +23,8 @@ from collections import deque
 from collections.abc import Iterator
 from typing import Any
 
+from src.agent.sdk_profiles import discoverable_skill_names
+
 logger = logging.getLogger(__name__)
 
 #: SDK tool name for delegation. Renamed from "Task" in Claude Code v2.1.63;
@@ -141,10 +143,25 @@ class SdkEventTranslator:
             # Parsec's own tools already emit tool_start/tool_result from inside
             # the bridge handler, so only the built-ins need surfacing here.
             if name == "Skill":
+                # The name comes straight out of the model's tool_use block, so
+                # validate it against what is actually on disk before it reaches
+                # the UI — the preloaded path already filters the same way via
+                # skills_for(). An unknown name means the model asked for a skill
+                # that does not exist; the CLI will reject it, and echoing it
+                # would put unvalidated model output into the page.
                 skill = str(tool_input.get("command") or tool_input.get("name") or "").strip()
                 if skill:
-                    yield from self._note_skill(skill, source="invoked")
-                    yield sse_status(f"Using skill: {skill}")
+                    # Mirror skills_for(): filter against what is on disk when
+                    # discovery works, and trust the name when it does not (unit
+                    # tests have no skills root). The client builds these nodes
+                    # with textContent, so an unverified name is a wrong label
+                    # rather than an injection.
+                    available = discoverable_skill_names()
+                    if available and skill not in available:
+                        logger.warning("Model invoked unknown skill %r — not surfaced", skill)
+                    else:
+                        yield from self._note_skill(skill, source="invoked")
+                        yield sse_status(f"Using skill: {skill}")
 
     def _note_skill(
         self, skill: str, *, source: str, agent_type: str | None = None
@@ -200,6 +217,26 @@ class SdkEventTranslator:
             if isinstance(text, str) and text.strip():
                 self._text_parts.append(text)
 
+    def _failure_reason(self) -> str:
+        """Human-readable reason this turn failed, or "" if it succeeded."""
+        msg = self._usage
+        if msg is None:
+            return "the agent runtime produced no result"
+        if not getattr(msg, "is_error", False):
+            # A clean run that still said nothing is a failure worth surfacing.
+            if not "".join(self._text_parts).strip():
+                return "the agent finished without producing an answer"
+            return ""
+        subtype = str(getattr(msg, "subtype", "") or "")
+        if subtype == "error_max_turns":
+            turns = getattr(msg, "num_turns", None)
+            return (
+                f"the investigation hit its turn limit after {turns} turns "
+                "without finishing — raise agent.sdk.max_turns or narrow the question"
+            )
+        detail = getattr(msg, "result", None) or subtype or "unknown error"
+        return f"the agent runtime failed: {detail}"
+
     # ------------------------------------------------------------ finish
 
     def finish(self, collector: Any) -> Iterator[str]:
@@ -212,6 +249,18 @@ class SdkEventTranslator:
 
         answer = "".join(self._text_parts).strip()
         self._record_metrics(collector)
+
+        # A run that errored or ran out of turns must not read as a successful
+        # empty answer. ResultMessage carries is_error and a subtype
+        # ("error_max_turns", "error_during_execution"); without this the UI
+        # showed "(no output)" and a normal `done`, which is indistinguishable
+        # from the model legitimately having nothing to say.
+        failure = self._failure_reason()
+        if failure:
+            from src.agent.streaming import sse_error
+
+            logger.warning("SDK run did not complete: %s", failure)
+            yield sse_error(failure)
 
         history = _serialize(self._history)
         history.append({"role": "user", "content": self._question})

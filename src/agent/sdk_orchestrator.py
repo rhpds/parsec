@@ -377,6 +377,14 @@ async def run_agent_via_sdk(
 
     # The bridge pushes tool events onto the same queue the translator drains,
     # so a tool call inside a subagent still reaches the browser.
+    # The bridge's per-request tool-result cache lives in a ContextVar that the
+    # legacy path sets after this function returns, so on the SDK path it was
+    # never initialised and every repeated tool call re-executed. Set it here,
+    # in the same place and for the same lifetime as sse_sink.
+    from src.agent.orchestrator import _tool_cache  # local: avoids a cycle
+
+    cache_token = _tool_cache.set({})
+
     token = sse_sink.set(translator.push)
     try:
         from claude_agent_sdk import ClaudeSDKClient
@@ -394,6 +402,7 @@ async def run_agent_via_sdk(
         yield sse_error(str(e))
     finally:
         sse_sink.reset(token)
+        _tool_cache.reset(cache_token)
 
     for event in translator.finish(collector):
         yield event
