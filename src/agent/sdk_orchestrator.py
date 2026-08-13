@@ -29,13 +29,52 @@ produced them.
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncGenerator
-from typing import Any
+from collections.abc import AsyncGenerator, Iterable
+from typing import Any, cast
+
+from claude_agent_sdk.types import PermissionMode, SettingSource
 
 logger = logging.getLogger(__name__)
 
 #: Tools the orchestrator itself may call. Delegation is deliberately excluded —
 #: the SDK's ``Agent`` tool replaces the ``investigate_*`` wrappers.
+#: The SDK types these as Literals. Config is free-form strings, so validate
+#: rather than cast: a typo in ``agent.sdk.permission_mode`` should fall back to
+#: the safe default with a warning, not be silently coerced into an invalid
+#: value the SDK then rejects at runtime.
+_PERMISSION_MODES: tuple[PermissionMode, ...] = (
+    "default",
+    "acceptEdits",
+    "plan",
+    "bypassPermissions",
+    "dontAsk",
+    "auto",
+)
+_SETTING_SOURCES: tuple[SettingSource, ...] = ("user", "project", "local")
+
+
+def _permission_mode(raw: object, fallback: str) -> PermissionMode:
+    for candidate in (str(raw or "").strip(), str(fallback or "").strip()):
+        if candidate in _PERMISSION_MODES:
+            return cast(PermissionMode, candidate)
+        if candidate:
+            logger.warning(
+                "Unknown agent.sdk.permission_mode %r — falling back to 'dontAsk'", candidate
+            )
+    return "dontAsk"
+
+
+def _setting_sources(raw: Iterable[str]) -> list[SettingSource]:
+    out: list[SettingSource] = []
+    for item in raw:
+        name = str(item).strip()
+        if name in _SETTING_SOURCES:
+            out.append(cast(SettingSource, name))
+        elif name:
+            logger.warning("Unknown agent.sdk.setting_sources entry %r — ignored", name)
+    return out
+
+
 _ORCHESTRATOR_EXTRA_TOOLS = ("Agent",)
 
 
@@ -179,9 +218,9 @@ def build_orchestrator_options(config: Any, *, system: str) -> Any:
         # Availability, not just auto-approval — see agent_sdk_client._build_options.
         # "Agent" must be present or delegation cannot happen at all.
         tools=[*defaults.builtin_tools, *_ORCHESTRATOR_EXTRA_TOOLS],
-        permission_mode=str(sdk_cfg.get("permission_mode") or defaults.permission_mode),
+        permission_mode=_permission_mode(sdk_cfg.get("permission_mode"), defaults.permission_mode),
         strict_mcp_config=True,
-        setting_sources=list(defaults.setting_sources),
+        setting_sources=_setting_sources(defaults.setting_sources),
         env=build_subprocess_env(_tracing_env(config)),
         cwd=str(sdk_cfg.get("cwd") or "") or None,
         # Token-level deltas, so the UI streams like the legacy path.

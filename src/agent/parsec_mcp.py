@@ -192,11 +192,15 @@ async def _dispatch_cached(name: str, args: dict) -> dict:
         _tool_cache,
     )
 
+    # Bind the narrowed dict rather than tracking "is it cacheable" in a separate
+    # bool: the flag does not narrow `cache` for a type checker, and the three
+    # later uses each had to re-assert something the flag already implied.
     cache = _tool_cache.get(None)
-    cacheable = cache is not None and name not in _UNCACHEABLE_TOOLS
-    key = _cache_key(name, args) if cacheable else ""
+    if cache is not None and name in _UNCACHEABLE_TOOLS:
+        cache = None
+    key = _cache_key(name, args) if cache is not None else ""
 
-    if cacheable and key in cache:
+    if cache is not None and key in cache:
         return cache[key]
 
     try:
@@ -205,7 +209,7 @@ async def _dispatch_cached(name: str, args: dict) -> dict:
         logger.exception("Bridged tool %s failed", name)
         return {"error": str(e)}
 
-    if cacheable and isinstance(result, dict) and "error" not in result:
+    if cache is not None and isinstance(result, dict) and "error" not in result:
         cache[key] = result
     return result
 
