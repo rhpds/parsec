@@ -50,3 +50,21 @@ ocpv_kubeconfigs:
   ocpv08: "{{ lookup('env', 'HOME') }}/secrets/ocpv-readonly/ocpv08.kubeconfig"
   ocpv09: "{{ lookup('env', 'HOME') }}/secrets/ocpv-readonly/ocpv09.kubeconfig"
   ocpv10: "{{ lookup('env', 'HOME') }}/secrets/ocpv-readonly/ocpv10.kubeconfig"
+
+# --- Agent runtime -----------------------------------------------------------
+# Defaults reproduce today's behaviour exactly. Override per environment in
+# dev.yml / prod.yml to advance a stage; revert the same line to roll back.
+#
+#   stage 0  runtime legacy                                   (here — no SDK at all)
+#   stage 1  runtime sdk, agents [icinga],  orchestrator no   the Phase-2 pilot
+#   stage 2  runtime sdk, agents [all],     orchestrator no   all sub-agents on the SDK
+#   stage 3  runtime sdk, agents [all],     orchestrator yes  full cutover
+#
+# Note stage 2 does NOT deliver the routing fix: with orchestrator false the
+# legacy loop still calls classify_fast, so an Icinga alert naming "Babylon"
+# still goes to the babylon agent. The routing benefit only arrives at stage 3.
+agent_runtime: legacy
+sdk_enabled_agents: ["icinga"]
+sdk_orchestrator: false
+sdk_allow_writes: false
+sdk_timeout: 300

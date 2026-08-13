@@ -18,6 +18,23 @@ data:
       model: "{{ anthropic_model | default('claude-sonnet-4@20250514') }}"
       max_tokens: 4096
       max_tool_rounds: 10
+    # Which runtime serves a turn. The ConfigMap replaces /app/config/config.yaml
+    # wholesale (see the subPath mount below), so the repo's defaults do NOT
+    # reach a deployed pod — this block is the only thing that decides it in the
+    # cluster, and it is why flipping the switch is a deploy-var change rather
+    # than a code change.
+    #
+    # Three independent gates, defaulting to today's behaviour:
+    #   agent_runtime: legacy       universal kill switch; nothing else matters
+    #   sdk_enabled_agents          which sub-agents may run on the SDK
+    #   sdk_orchestrator: false     legacy loop still routes (classify_fast)
+    agent:
+      runtime: "{{ agent_runtime | default('legacy') }}"
+      sdk:
+        enabled_agents: {{ sdk_enabled_agents | default(['icinga']) | to_json }}
+        orchestrator: {{ sdk_orchestrator | default(false) | bool | to_json }}
+        allow_writes: {{ sdk_allow_writes | default(false) | bool | to_json }}
+        timeout: {{ sdk_timeout | default(300) }}
     provision_db:
       max_rows: 500
     aws:
