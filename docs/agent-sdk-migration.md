@@ -2,7 +2,7 @@
 
 *A grounded, code-level walkthrough of how Parsec is being migrated from the raw Anthropic API to the **Claude Agent SDK**, written for an engineer joining the workstream. Every claim cites `file:line` and the PR it came from.*
 
-> **One-sentence model.** Parsec has always hand-written its own Claude tool-use loop (`for _round in range(max_rounds): client.messages.create(...)`). The migration introduces a **second runtime** — the Claude Agent SDK, which runs *its own* agentic loop inside a bundled `claude` CLI subprocess — selected by a single config flag `agent.runtime` (default `legacy`). It is **additive and dormant by default**. Phase 1 built the seam; Phase 2 piloted one sub-agent (Icinga); **Phase 3 ([#40](https://github.com/rhpds/parsec/pull/40)) moves the whole turn — orchestrator and all six sub-agents — onto the SDK**, still behind the flag.
+> **One-sentence model.** Parsec has always hand-written its own Claude tool-use loop (`for _round in range(max_rounds): client.messages.create(...)`). The migration introduces a **second runtime** — the Claude Agent SDK, which runs *its own* agentic loop inside a bundled `claude` CLI subprocess — selected by a single config flag `agent.runtime` (default `legacy`). It is **additive and dormant by default**. Phase 1 built the seam; Phase 2 piloted one sub-agent (Icinga); **Phase 3 ([#40](https://github.com/rhpds/parsec/pull/40)) builds the ability to run the whole turn — orchestrator and all six sub-agents — on the SDK, and ships it switched off.** Nothing merged so far changes what a request does: see §12 for the three switches and their defaults.
 
 ---
 
@@ -189,8 +189,27 @@ These are **not** created by the migration, **not** derived from usage, **not** 
 
 ## 12. Phase 3 — the whole turn on the SDK (#40)
 
-Phases 1–2 ran *one sub-agent* through the SDK. Phase 3 makes the SDK the
-orchestrator too, so a request can be served end to end without the legacy loop.
+Phases 1–2 ran *one sub-agent* through the SDK. Phase 3 adds the ability for the
+SDK to be the orchestrator too, so a request *can* be served end to end without
+the legacy loop — but the shipped defaults do not do that.
+
+**Three switches, all shipped in the legacy position**
+
+| key | shipped default | to run the whole turn on the SDK |
+|---|---|---|
+| `agent.runtime` | `legacy` | `sdk` |
+| `agent.sdk.enabled_agents` | `["icinga"]` | `["all"]` |
+| `agent.sdk.orchestrator` | `false` | `true` |
+
+`_should_orchestrate_via_sdk` (`src/agent/orchestrator.py`) requires `runtime: sdk`
+**and** `orchestrator: true`, and fails safe to legacy on any exception. With the
+defaults, `run_agent` never reaches `run_agent_via_sdk`. The only place all three
+are set is `playbooks/parsec-sdk-e2e.yaml`, which deploys a *separate* evaluation
+instance — not `parsec-dev` and not `parsec`.
+
+They are separate on purpose: migrate one sub-agent, then several, then the
+orchestrator, rolling back each step independently. Flipping them in a real
+environment is a follow-up decision, not part of this PR.
 
 **The pieces**
 
