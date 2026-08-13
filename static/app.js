@@ -548,11 +548,15 @@ marked.setOptions({ renderer: renderer });
             document.getElementById("query-form").style.display = "none";
             const el = document.createElement("div");
             el.className = "access-denied";
-            el.innerHTML =
-                "<h2>Access Denied</h2>" +
-                "<p>" + (err.detail || "You are not authorized to use Parsec.") + "</p>" +
-                "<p>If you believe this is an error, contact an RHDP administrator " +
-                "to be added to an authorized group.</p>";
+            const heading = document.createElement("h2");
+            heading.textContent = "Access Denied";
+            const detailP = document.createElement("p");
+            detailP.textContent = err.detail || "You are not authorized to use Parsec.";
+            const helpP = document.createElement("p");
+            helpP.textContent =
+                "If you believe this is an error, contact an RHDP administrator " +
+                "to be added to an authorized group.";
+            el.append(heading, detailP, helpP);
             messagesEl.appendChild(el);
             return;
         }
@@ -585,7 +589,10 @@ marked.setOptions({ renderer: renderer });
     // Check for shared session link
     const urlParams = new URLSearchParams(window.location.search);
     const shareId = urlParams.get("share");
-    if (shareId) {
+    // Share IDs are server-generated UUIDs; validate before using in a request
+    // URL to prevent client-side request forgery via a crafted ?share= param.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (shareId && UUID_RE.test(shareId)) {
         try {
             const shareResp = await fetch("/api/share/" + encodeURIComponent(shareId));
             if (shareResp.ok) {
@@ -754,13 +761,13 @@ function _handleAgentStartEvent(data, state) {
     // Same reason as the skill badge: under the SDK the agent label can come
     // from the model's own `subagent_type` when it names an agent the registry
     // does not know, so this is no longer a fixed string from a six-entry map.
-    var aIcon = document.createElement("span");
+    const aIcon = document.createElement("span");
     aIcon.className = "agent-icon";
     aIcon.textContent = "\u2699";
-    var aLabel = document.createElement("span");
+    const aLabel = document.createElement("span");
     aLabel.className = "agent-label";
     aLabel.textContent = data.name || data.agent || "";
-    var aStatus = document.createElement("span");
+    const aStatus = document.createElement("span");
     aStatus.className = "agent-status";
     aStatus.textContent = "investigating…";
     agentBanner.appendChild(aIcon);
@@ -777,30 +784,30 @@ function _handleSkillUsedEvent(data, state) {
     // preloaded skills are in the agent's context from turn one. Without this
     // badge there is no way to tell from the UI that one was in play.
     _ensureStreamStarted(state);
-    var skill = data.skill || "";
+    const skill = data.skill || "";
     if (!skill) return;
     // Build with DOM APIs, not innerHTML. Skill names come from SKILL.md
     // directories, which include ones mounted from skills.plugin_paths — an
     // external repo. A name containing markup would otherwise be executed, and a
     // name containing a quote would break the selector below. Everything else in
     // this file uses textContent for the same reason.
-    var badges = state.contentEl.querySelectorAll(".skill-badge");
-    for (var i = 0; i < badges.length; i++) {
-        if (badges[i].dataset.skill === skill) return;
+    const badges = state.contentEl.querySelectorAll(".skill-used-badge");
+    for (const existing of badges) {
+        if (existing.dataset.skill === skill) return;
     }
-    var badge = document.createElement("div");
-    badge.className = "skill-badge skill-" + (data.source === "preloaded" ? "preloaded" : "invoked");
+    const badge = document.createElement("div");
+    badge.className = "skill-used-badge skill-" + (data.source === "preloaded" ? "preloaded" : "invoked");
     badge.dataset.skill = skill;
 
-    var icon = document.createElement("span");
+    const icon = document.createElement("span");
     icon.className = "skill-icon";
     icon.textContent = "\uD83D\uDCDA";
 
-    var label = document.createElement("span");
+    const label = document.createElement("span");
     label.className = "skill-label";
     label.textContent = "skill: " + skill;
 
-    var how = document.createElement("span");
+    const how = document.createElement("span");
     how.className = "skill-how";
     how.textContent = (data.source === "preloaded" ? "loaded" : "invoked") +
         (data.agent ? " by " + data.agent : "");
@@ -817,7 +824,7 @@ function _handleSkillUsedEvent(data, state) {
 function _handleAgentDoneEvent(data, contentEl) {
     // Match on the dataset rather than building a selector from server data:
     // an agent name containing a quote would otherwise throw here.
-    const banners = [].filter.call(
+    const banners = Array.prototype.filter.call(
         contentEl.querySelectorAll(".agent-banner"),
         function (b) { return b.dataset.agent === data.agent; }
     );
@@ -837,7 +844,7 @@ function _handleStatusEvent(data, state) {
     si.className = "status-indicator";
     // data.message can carry model-derived text (e.g. "Using skill: X").
     si.textContent = "";
-    var sp = document.createElement("div");
+    const sp = document.createElement("div");
     sp.className = "spinner";
     si.appendChild(sp);
     si.appendChild(document.createTextNode(" " + (data.message || "")));

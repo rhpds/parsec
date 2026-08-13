@@ -198,7 +198,7 @@ def sdk_profile_for(agent_type: str, config: Any) -> dict[str, Any]:
     return profile
 
 
-def _extra_mcp_servers(agent_type: str, config: Any) -> dict[str, Any]:
+def _extra_mcp_servers(_agent_type: str, _config: Any) -> dict[str, Any]:
     """Remote MCP servers to expose *in addition to* the bridge.
 
     Empty by design. Every Parsec backend — including Icinga and GitHub, which

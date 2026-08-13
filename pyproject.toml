@@ -69,6 +69,8 @@ module = [
     "google.*",
     "azure.*",
     "anthropic.*",
+    "claude_agent_sdk",
+    "claude_agent_sdk.*",
     "dynaconf.*",
     "httpx.*",
     "fastapi",
