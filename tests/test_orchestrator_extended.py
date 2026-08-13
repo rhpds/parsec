@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.agent.client_factory import build_client
 from src.agent.orchestrator import (
-    _build_client,
     _cache_key,
     _check_tool_cache,
     _drop_oldest_turn,
@@ -658,7 +658,7 @@ class TestBuildClient:
             gcp={},
             aws={},
         )
-        client = _build_client(cfg)
+        client = build_client(cfg)
         import anthropic
 
         assert isinstance(client, anthropic.Anthropic)
@@ -671,20 +671,22 @@ class TestBuildClient:
                 "vertex_region": "us-east5",
             },
             gcp={"project_id": "fallback-project"},
+            aws={},
         )
         with patch("anthropic.AnthropicVertex") as mock_vertex:
             mock_vertex.return_value = MagicMock()
-            _build_client(cfg)
+            build_client(cfg)
             mock_vertex.assert_called_once_with(project_id="my-project", region="us-east5")
 
     def test_bedrock_backend(self, monkeypatch):
         cfg = SimpleNamespace(
             anthropic={"backend": "bedrock", "bedrock_region": "us-west-2"},
+            gcp={},
             aws={"region": "us-east-1"},
         )
         with patch("anthropic.AnthropicBedrock") as mock_bedrock:
             mock_bedrock.return_value = MagicMock()
-            _build_client(cfg)
+            build_client(cfg)
             mock_bedrock.assert_called_once_with(aws_region="us-west-2")
 
     def test_raises_when_api_key_missing(self, monkeypatch):
@@ -692,9 +694,10 @@ class TestBuildClient:
         cfg = SimpleNamespace(
             anthropic={"backend": "api", "api_key": ""},
             gcp={},
+            aws={},
         )
         with pytest.raises(ValueError, match="ANTHROPIC_API_KEY not configured"):
-            _build_client(cfg)
+            build_client(cfg)
 
     def test_raises_when_vertex_project_id_missing(self):
         cfg = SimpleNamespace(
@@ -704,9 +707,10 @@ class TestBuildClient:
                 "vertex_region": "us-east5",
             },
             gcp={"project_id": ""},
+            aws={},
         )
         with pytest.raises(ValueError, match="vertex_project_id"):
-            _build_client(cfg)
+            build_client(cfg)
 
     def test_vertex_uses_gcp_project_id_fallback(self, monkeypatch):
         cfg = SimpleNamespace(
@@ -716,10 +720,11 @@ class TestBuildClient:
                 "vertex_region": "us-east5",
             },
             gcp={"project_id": "gcp-fallback"},
+            aws={},
         )
         with patch("anthropic.AnthropicVertex") as mock_vertex:
             mock_vertex.return_value = MagicMock()
-            _build_client(cfg)
+            build_client(cfg)
             mock_vertex.assert_called_once_with(project_id="gcp-fallback", region="us-east5")
 
     def test_direct_api_uses_env_var_fallback(self, monkeypatch):
@@ -727,8 +732,9 @@ class TestBuildClient:
         cfg = SimpleNamespace(
             anthropic={"backend": "api", "api_key": ""},
             gcp={},
+            aws={},
         )
-        client = _build_client(cfg)
+        client = build_client(cfg)
         import anthropic
 
         assert isinstance(client, anthropic.Anthropic)

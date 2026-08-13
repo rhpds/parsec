@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.tools.aap2_fix import (
-    _create_anthropic_client,
     _filter_sensitive_vars,
     _parse_ai_fix_response,
     _resolve_agnosticd_role,
@@ -232,68 +231,6 @@ class TestResolveAgnosticdRole:
 
 
 # ---------------------------------------------------------------------------
-# _create_anthropic_client
-# ---------------------------------------------------------------------------
-
-
-class TestCreateAnthropicClient:
-    def test_api_backend_with_key(self):
-        cfg = SimpleNamespace(
-            anthropic={"backend": "api", "api_key": "sk-ant-test123"},
-        )
-        mock_anthropic_mod = MagicMock()
-        with patch.dict("sys.modules", {"anthropic": mock_anthropic_mod}):
-            result = _create_anthropic_client(cfg)
-            mock_anthropic_mod.Anthropic.assert_called_once_with(api_key="sk-ant-test123")
-            assert result is not None
-
-    def test_api_backend_no_key(self, monkeypatch):
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        cfg = SimpleNamespace(
-            anthropic={"backend": "api", "api_key": ""},
-        )
-        mock_anthropic_mod = MagicMock()
-        with patch.dict("sys.modules", {"anthropic": mock_anthropic_mod}):
-            result = _create_anthropic_client(cfg)
-            assert result is None
-
-    def test_bedrock_backend(self):
-        cfg = SimpleNamespace(
-            anthropic={"backend": "bedrock", "bedrock_region": "us-west-2"},
-        )
-        mock_anthropic_mod = MagicMock()
-        with patch.dict("sys.modules", {"anthropic": mock_anthropic_mod}):
-            _create_anthropic_client(cfg)
-            mock_anthropic_mod.AnthropicBedrock.assert_called_once_with(aws_region="us-west-2")
-
-    def test_vertex_backend(self):
-        cfg = SimpleNamespace(
-            anthropic={
-                "backend": "vertex",
-                "vertex_project_id": "my-project",
-                "vertex_region": "us-east5",
-                "vertex_credentials_path": "",
-            },
-            gcp={"project_id": "fallback-project"},
-        )
-        mock_anthropic_mod = MagicMock()
-        mock_google_mod = MagicMock()
-        with patch.dict(
-            "sys.modules",
-            {
-                "anthropic": mock_anthropic_mod,
-                "google.oauth2": mock_google_mod,
-                "google.oauth2.service_account": mock_google_mod.service_account,
-            },
-        ):
-            _create_anthropic_client(cfg)
-            mock_anthropic_mod.AnthropicVertex.assert_called_once()
-            call_kwargs = mock_anthropic_mod.AnthropicVertex.call_args[1]
-            assert call_kwargs["project_id"] == "my-project"
-            assert call_kwargs["region"] == "us-east5"
-
-
-# ---------------------------------------------------------------------------
 # ai_analyze_fix
 # ---------------------------------------------------------------------------
 
@@ -304,8 +241,16 @@ class TestAiAnalyzeFix:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         mock_cfg = SimpleNamespace(
             anthropic={"backend": "api", "api_key": "", "model": "claude-sonnet-4-6"},
+            gcp={},
+            aws={},
         )
-        with patch("src.tools.aap2_fix.get_config", return_value=mock_cfg):
+        with (
+            patch("src.tools.aap2_fix.get_config", return_value=mock_cfg),
+            patch(
+                "src.tools.aap2_fix.build_client",
+                side_effect=ValueError("No API key configured"),
+            ),
+        ):
             result = await ai_analyze_fix(
                 {"taskName": "test", "errorMessage": "something broke"},
             )
@@ -330,10 +275,12 @@ class TestAiAnalyzeFix:
 
         mock_cfg = SimpleNamespace(
             anthropic={"backend": "api", "api_key": "test-key", "model": "claude-sonnet-4-6"},
+            gcp={},
         )
         with (
             patch("src.tools.aap2_fix.get_config", return_value=mock_cfg),
-            patch("src.tools.aap2_fix._create_anthropic_client", return_value=mock_client),
+            patch("src.tools.aap2_fix.build_client", return_value=mock_client),
+            patch("src.tools.aap2_fix.resolve_model", return_value="claude-sonnet-4-6"),
             patch(
                 "src.tools.aap2_fix._resolve_role_source",
                 new_callable=AsyncMock,
@@ -353,13 +300,14 @@ class TestAiAnalyzeFix:
     async def test_ai_exception_returns_none(self):
         mock_cfg = SimpleNamespace(
             anthropic={"backend": "api", "api_key": "test-key", "model": "claude-sonnet-4-6"},
+            gcp={},
         )
+        mock_client = MagicMock()
+        mock_client.messages.create.side_effect = Exception("API error")
         with (
             patch("src.tools.aap2_fix.get_config", return_value=mock_cfg),
-            patch(
-                "src.tools.aap2_fix._create_anthropic_client",
-                side_effect=Exception("API error"),
-            ),
+            patch("src.tools.aap2_fix.build_client", return_value=mock_client),
+            patch("src.tools.aap2_fix.resolve_model", return_value="claude-sonnet-4-6"),
         ):
             result = await ai_analyze_fix(
                 {"taskName": "test", "errorMessage": "fail"},
@@ -386,8 +334,16 @@ class TestRecommendFix:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         mock_cfg = SimpleNamespace(
             anthropic={"backend": "api", "api_key": "", "model": "claude-sonnet-4-6"},
+            gcp={},
+            aws={},
         )
-        with patch("src.tools.aap2_fix.get_config", return_value=mock_cfg):
+        with (
+            patch("src.tools.aap2_fix.get_config", return_value=mock_cfg),
+            patch(
+                "src.tools.aap2_fix.build_client",
+                side_effect=ValueError("No API key configured"),
+            ),
+        ):
             result = await recommend_fix(
                 {"errorMessage": "some unknown error that matches no pattern"},
             )
