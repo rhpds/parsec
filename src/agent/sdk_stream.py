@@ -18,8 +18,8 @@ Two SDK details make real streaming possible:
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections import deque
 from collections.abc import Iterator
 from typing import Any
 
@@ -38,7 +38,7 @@ class SdkEventTranslator:
     def __init__(self, *, question: str, history: list) -> None:
         self._question = question
         self._history = history or []
-        self._queue: deque[str] = deque()
+        self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._text_parts: list[str] = []
         self._active_agents: dict[str, str] = {}
         self._skills_seen: set[str] = set()
@@ -73,11 +73,11 @@ class SdkEventTranslator:
 
     async def push(self, event: str) -> None:
         """Sink for events emitted from inside a bridged tool handler."""
-        self._queue.append(event)
+        await self._queue.put(event)
 
     def drain(self) -> Iterator[str]:
-        while self._queue:
-            yield self._queue.popleft()
+        while not self._queue.empty():
+            yield self._queue.get_nowait()
 
     # --------------------------------------------------------- translate
 
@@ -126,8 +126,6 @@ class SdkEventTranslator:
     def _translate_assistant(self, message: Any) -> Iterator[str]:
         from claude_agent_sdk import ToolUseBlock
 
-        from src.agent.streaming import sse_status
-
         for block in getattr(message, "content", None) or []:
             if not isinstance(block, ToolUseBlock):
                 continue
@@ -138,30 +136,34 @@ class SdkEventTranslator:
                 agent_type = str(tool_input.get("subagent_type") or "").strip()
                 if agent_type:
                     yield from self._start_agent(agent_type, getattr(block, "id", ""))
-                continue
+            elif name == "Skill":
+                # Parsec's own tools already emit tool_start/tool_result from
+                # inside the bridge handler, so only the built-in Skill tool
+                # needs surfacing here.
+                yield from self._translate_skill_use(tool_input)
 
-            # Parsec's own tools already emit tool_start/tool_result from inside
-            # the bridge handler, so only the built-ins need surfacing here.
-            if name == "Skill":
-                # The name comes straight out of the model's tool_use block, so
-                # validate it against what is actually on disk before it reaches
-                # the UI — the preloaded path already filters the same way via
-                # skills_for(). An unknown name means the model asked for a skill
-                # that does not exist; the CLI will reject it, and echoing it
-                # would put unvalidated model output into the page.
-                skill = str(tool_input.get("command") or tool_input.get("name") or "").strip()
-                if skill:
-                    # Mirror skills_for(): filter against what is on disk when
-                    # discovery works, and trust the name when it does not (unit
-                    # tests have no skills root). The client builds these nodes
-                    # with textContent, so an unverified name is a wrong label
-                    # rather than an injection.
-                    available = discoverable_skill_names()
-                    if available and skill not in available:
-                        logger.warning("Model invoked unknown skill %r — not surfaced", skill)
-                    else:
-                        yield from self._note_skill(skill, source="invoked")
-                        yield sse_status(f"Using skill: {skill}")
+    def _translate_skill_use(self, tool_input: dict) -> Iterator[str]:
+        """Surface a built-in Skill tool call as ``skill_used`` + a status line."""
+        from src.agent.streaming import sse_status
+
+        # The name comes straight out of the model's tool_use block, so validate
+        # it against what is actually on disk before it reaches the UI — the
+        # preloaded path already filters the same way via skills_for(). An unknown
+        # name means the model asked for a skill that does not exist; the CLI will
+        # reject it, and echoing it would put unvalidated model output into the page.
+        skill = str(tool_input.get("command") or tool_input.get("name") or "").strip()
+        if not skill:
+            return
+        # Mirror skills_for(): filter against what is on disk when discovery works,
+        # and trust the name when it does not (unit tests have no skills root). The
+        # client builds these nodes with textContent, so an unverified name is a
+        # wrong label rather than an injection.
+        available = discoverable_skill_names()
+        if available and skill not in available:
+            logger.warning("Model invoked unknown skill %r — not surfaced", skill)
+            return
+        yield from self._note_skill(skill, source="invoked")
+        yield sse_status(f"Using skill: {skill}")
 
     def _note_skill(
         self, skill: str, *, source: str, agent_type: str | None = None

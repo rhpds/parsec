@@ -103,7 +103,7 @@ async def with_keepalive(stream, interval: float = SSE_KEEPALIVE_SECONDS):
         try:
             async for chunk in stream:
                 await queue.put(chunk)
-        except BaseException as exc:  # noqa: BLE001 - re-raised on the consumer side
+        except Exception as exc:  # noqa: BLE001 - re-raised on the consumer side
             await queue.put(exc)
         else:
             await queue.put(done_marker)
