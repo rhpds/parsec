@@ -27,6 +27,84 @@ class AgentSdkUnavailableError(RuntimeError):
     """Raised when ``claude_agent_sdk`` is not importable but was requested."""
 
 
+# --------------------------------------------------------------- subprocess env
+#
+# The SDK runs the ``claude`` CLI as a child process, so whatever we hand it as
+# ``env`` is readable by the model through the CLI's own tools. Parsec's pod
+# inherits every cloud credential the app needs (``envFrom`` on
+# ``parsec-cloud-credentials`` and ``parsec-aap2-credentials``: AWS secret key,
+# Azure client secret, Cosmos key, the AAP2 controller passwords, plus the
+# GitHub and reporting-MCP tokens), and customer-controlled text reaches the
+# model verbatim via Splunk pod logs and AAP2 job stdout. So the subprocess gets
+# an allowlist, not ``os.environ``.
+#
+# Anything an operator genuinely needs beyond this list can be added explicitly
+# through ``agent.sdk.env`` in config, which is merged on top.
+
+_ENV_ALLOWLIST_EXACT = frozenset(
+    {
+        # process basics
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TERM",
+        "TMPDIR",
+        "LANG",
+        "LC_ALL",
+        "TZ",
+        # Vertex / GCP backend (region + ADC path, not app credentials)
+        "CLOUD_ML_REGION",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "GOOGLE_CLOUD_PROJECT",
+        # Bedrock backend region. Deliberately NOT AWS_ACCESS_KEY_ID /
+        # AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN — a Bedrock deployment adds
+        # those through agent.sdk.env so the grant is explicit and reviewable.
+        "AWS_REGION",
+        "AWS_DEFAULT_REGION",
+        # corporate TLS + egress
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "NODE_EXTRA_CA_CERTS",
+        "NODE_OPTIONS",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+    }
+)
+
+#: Namespaces the CLI and its telemetry read directly.
+_ENV_ALLOWLIST_PREFIXES = ("CLAUDE_", "ANTHROPIC_", "OTEL_", "MLFLOW_")
+
+#: Parsec's own settings namespace (Dynaconf ``PARSEC_`` prefix). Every app
+#: secret lands here, so it is denied unconditionally — belt and braces, since
+#: no allowlist entry above starts with it.
+_ENV_DENY_PREFIX = "PARSEC_"
+
+
+def build_subprocess_env(extra_env: dict[str, str] | None = None) -> dict[str, str]:
+    """Return the environment handed to the ``claude`` CLI subprocess.
+
+    Allowlist-based: only the variables the CLI actually needs are inherited
+    from the app process. ``extra_env`` (tracing vars plus ``agent.sdk.env``)
+    is merged on top and is *not* filtered — it is operator-supplied, so an
+    explicit grant there is intentional.
+    """
+    inherited = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(_ENV_DENY_PREFIX)
+        and (key in _ENV_ALLOWLIST_EXACT or key.startswith(_ENV_ALLOWLIST_PREFIXES))
+    }
+    return {**inherited, **(extra_env or {})}
+
+
 @dataclass(frozen=True)
 class AgentSdkConfig:
     """Resolved configuration for a single ``complete()`` call.
@@ -40,6 +118,23 @@ class AgentSdkConfig:
     cwd: str | None = None
     setting_sources: tuple[str, ...] = ("project",)
     extra_env: dict[str, str] = field(default_factory=dict)
+    # Absolute path to the ``claude`` binary. ``None`` leaves the choice to the
+    # SDK, whose ``_find_cli()`` prefers a CLI bundled inside the Python wheel
+    # over anything on ``PATH`` — so the ``npm install -g
+    # @anthropic-ai/claude-code@<pin>`` in dockerfiles/Dockerfile does NOT
+    # determine which binary runs. Set this to make that pin authoritative.
+    cli_path: str | None = None
+    # Built-in CLI tools the model may use. Parsec serves its own tools over the
+    # in-process MCP bridge, so the default is just the two the SDK machinery
+    # needs: ``ToolSearch`` to load deferred MCP schemas, and ``Skill`` to
+    # activate a SKILL.md. Notably absent: Bash, Read, Write, Edit, WebFetch —
+    # the subprocess runs in /app alongside mounted kubeconfigs and GCP
+    # service-account JSON.
+    builtin_tools: tuple[str, ...] = ("ToolSearch", "Skill")
+    # ``dontAsk`` = "don't prompt for permissions; deny if not pre-approved".
+    # A headless run has nobody to prompt, so the default mode's prompt would
+    # resolve by accident rather than by policy.
+    permission_mode: str = "dontAsk"
     # Wall-clock ceiling for a single complete() call. ``sdk.query()`` runs an
     # agentic loop (up to max_turns rounds of possibly-slow tools), so a hung
     # query would otherwise leak the coroutine and child CLI process. ``None``
@@ -79,6 +174,9 @@ class AgentSdkClient:
           mounted skills under cwd are discovered
         - ``agent.sdk.timeout`` — per-call wall-clock ceiling in seconds
           (default 300; ``null``/``0`` disables it)
+        - ``agent.sdk.cli_path`` — absolute path to the ``claude`` binary;
+          empty leaves selection to the SDK (which prefers its own bundled CLI
+          over the image's pinned npm install)
         """
         agent_section = section(config, "agent")
         sdk_section = section(agent_section, "sdk") if agent_section else {}
@@ -103,6 +201,17 @@ class AgentSdkClient:
         extra_env = {**build_tracing_env(config), **explicit_env}
         timeout_raw = sdk_section.get("timeout", 300.0)
         timeout = float(timeout_raw) if timeout_raw else None
+        cli_path = str(sdk_section.get("cli_path", "") or "").strip() or None
+        builtin_raw = sdk_section.get("builtin_tools", None)
+        builtin = (
+            tuple(str(t) for t in builtin_raw)
+            if isinstance(builtin_raw, list | tuple)
+            else AgentSdkConfig.builtin_tools
+        )
+        permission_mode = (
+            str(sdk_section.get("permission_mode", "") or "").strip()
+            or AgentSdkConfig.permission_mode
+        )
 
         return cls(
             AgentSdkConfig(
@@ -111,6 +220,9 @@ class AgentSdkClient:
                 cwd=str(cwd) if cwd else None,
                 setting_sources=tuple(setting_sources_raw),
                 extra_env=dict(extra_env),
+                cli_path=cli_path,
+                builtin_tools=builtin,
+                permission_mode=permission_mode,
                 timeout=timeout,
             )
         )
@@ -128,15 +240,37 @@ class AgentSdkClient:
         mcp_servers: dict[str, Any] | None,
         max_turns: int | None,
     ) -> Any:
-        """Build ClaudeAgentOptions from call parameters and config."""
+        """Build ClaudeAgentOptions from call parameters and config.
+
+        Note the difference between the two tool knobs, which is easy to get
+        backwards: ``tools`` is the set of built-in tools that *exist*, while
+        ``allowed_tools`` only says which may run *without prompting*. Setting
+        ``allowed_tools`` alone therefore restricts nothing — the CLI's default
+        built-ins (Bash, Write, Edit, WebFetch, …) stay available to a
+        subprocess whose cwd is ``/app``. Parsec supplies its own tools over
+        MCP, so the built-in set is emptied and permissions are set to deny
+        anything not pre-approved.
+        """
         options_kwargs: dict[str, Any] = {
             "model": self._cfg.model,
             "max_turns": max_turns or self._cfg.max_turns,
             "setting_sources": list(self._cfg.setting_sources),
-            "env": {**os.environ, **self._cfg.extra_env},
+            "env": build_subprocess_env(self._cfg.extra_env),
+            # Availability, not just auto-approval. `Skill` is re-added by the
+            # SDK itself when `skills` is set, and `ToolSearch` is kept because
+            # the model uses it to load deferred MCP schemas — without it, a
+            # profile with ~24 bridged tools can end up unable to call any.
+            "tools": list(self._cfg.builtin_tools),
+            # Deny anything not explicitly allowed instead of prompting a user
+            # who does not exist in a headless run.
+            "permission_mode": self._cfg.permission_mode,
+            # Ignore any stray .mcp.json in the image or working directory.
+            "strict_mcp_config": True,
         }
         if self._cfg.cwd:
             options_kwargs["cwd"] = self._cfg.cwd
+        if self._cfg.cli_path:
+            options_kwargs["cli_path"] = self._cfg.cli_path
         if system:
             options_kwargs["system_prompt"] = system
         if skills is not None:

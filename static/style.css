@@ -1981,3 +1981,24 @@ footer {
     color: var(--text-muted);
     line-height: 1.5;
 }
+
+/* Skill badge — a skill can shape an answer with no tool call of its own
+   (preloaded skills sit in the agent's context from turn one), so this is the
+   only signal in the UI that one was in play. */
+.skill-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0;
+    padding: 7px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    background: var(--bg-elevated, #1c1f2e);
+    border: 1px solid var(--border, #333752);
+    border-left: 3px solid #8b7ff8;
+}
+.skill-badge.skill-preloaded { border-left-color: #6b9ff8; }
+.skill-badge.skill-invoked   { border-left-color: #8b7ff8; }
+.skill-icon  { font-size: 14px; line-height: 1; }
+.skill-label { font-weight: 600; color: var(--text-bright, #e2e6f0); }
+.skill-how   { color: var(--text-muted, #7a82a0); font-size: 12px; }

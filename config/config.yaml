@@ -122,6 +122,12 @@ icinga:
   # localhost (not the service name).
   # Set in config.local.yaml or PARSEC_ICINGA__MCP_URL.
   mcp_url: ""
+  # --- Agent SDK runtime only (agent.runtime: sdk) ---
+  # Icinga is no longer a raw MCP server under the SDK: every tool now goes
+  # through the in-process bridge (src/agent/parsec_mcp.py), which gates writes
+  # centrally via WRITE_ACTIONS and `agent.sdk.allow_writes`. The per-connector
+  # sdk_allow_writes / sdk_allowed_tools keys that used to live here are gone —
+  # nothing reads them.
 
 splunk:
   # Red Hat Corporate Splunk REST API endpoint.
@@ -172,9 +178,32 @@ agent:
     # model: ""          # falls back to anthropic.model
     # max_turns: 10      # falls back to anthropic.max_tool_rounds
     # cwd: ""            # working directory for the SDK subprocess (default: pwd)
+    # Which sub-agents may run on the SDK. Requires runtime: sdk as well, so
+    # `agent.runtime: legacy` stays a universal kill switch. Use ["all"] for
+    # every agent, or a subset like ["icinga", "ocpv"] to migrate gradually.
+    enabled_agents: ["icinga"]
+    # Orchestrate the WHOLE turn with the SDK: one ClaudeSDKClient session with
+    # the sub-agents as native SDK subagents, delegating via the Agent tool.
+    # When false, only the individual sub-agents listed above run on the SDK and
+    # the legacy orchestrator loop still routes them.
+    orchestrator: false
+    # Permit state-mutating tool actions (currently only the Icinga writes:
+    # acknowledge, schedule/remove downtime, add/remove comment).
+    allow_writes: false
     setting_sources: ["project"]   # where the SDK discovers SKILL.md files
-    env: {}              # extra env vars merged into the subprocess (e.g. OTel)
+    # Extra env vars merged into the subprocess (e.g. OTel). The subprocess
+    # inherits an ALLOWLIST of the app's environment, never all of it — see
+    # build_subprocess_env() in src/llm/agent_sdk_client.py. Anything outside
+    # that list (for example AWS credentials for a Bedrock backend) has to be
+    # granted here explicitly.
+    env: {}
     timeout: 300         # per-call wall-clock ceiling (seconds); null/0 disables
+    # cli_path: ""       # absolute path to the `claude` binary. Empty leaves the
+    #                    # choice to the SDK, whose _find_cli() prefers the CLI
+    #                    # bundled inside the claude-agent-sdk wheel over the
+    #                    # npm-installed one on PATH — so the Dockerfile's
+    #                    # `npm install -g @anthropic-ai/claude-code@<pin>` does
+    #                    # NOT decide which binary runs. Set this to make it do so.
 
 skills:
   # Discovery roots for agent skills (SKILL.md directories).
@@ -184,6 +213,17 @@ skills:
   project_root: "skills"
   # plugin_paths: additional roots, typically mounted from external skill repos
   # (e.g. rhdp-rca-plugin). Listed paths are scanned for SKILL.md directories.
+  #
+  # Skills found here are BOTH listed by GET /api/skills and — since startup
+  # publishes every discovered skill into <cwd>/.claude/skills (see
+  # src/skills/sdk_root.py) — loadable by the Agent SDK. GET /api/skills reports
+  # `sdk_visible` per skill, so a mount that the SDK cannot see is visible as
+  # such rather than silently inert.
+  #
+  # Each listed path is a directory OF skill directories, i.e.
+  # /opt/rhdp-rca-plugin/skills/root-cause-analysis/SKILL.md, not the SKILL.md
+  # itself. Skill names must be unique across roots; project_root wins on a
+  # collision (see SkillLoader._deduplicate).
   plugin_paths: []
   #   - "/opt/rhdp-rca-plugin/skills"
   # user_root: per-user skill directory for local dev only.

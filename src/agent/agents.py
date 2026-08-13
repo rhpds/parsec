@@ -285,16 +285,22 @@ def classify_fast(question: str) -> str | None:
 
 
 def _should_use_sdk(agent_type: str, cfg: Any) -> bool:
-    """Whether this sub-agent task should run on the Agent SDK (Phase-2 pilot).
+    """Whether this sub-agent task should run on the Agent SDK.
 
     Single source of truth for the SDK dispatch rule, shared by both sub-agent
-    entry points (``run_sub_agent`` and ``run_sub_agent_streaming``): only Icinga
-    has an SDK profile today, and only when ``agent.runtime: sdk`` (default
-    ``legacy``). Add agents here as they gain SDK profiles.
+    entry points (``run_sub_agent`` and ``run_sub_agent_streaming``).
+
+    Two conditions must BOTH hold: the runtime flag is ``sdk``, and the agent is
+    listed in ``agent.sdk.enabled_agents``. Keeping ``agent.runtime`` in the
+    conjunction is deliberate — it stays a universal kill switch, so no agent
+    can be SDK-only and rollback is always one env var.
     """
+    from src.agent.sdk_profiles import enabled_sdk_agents
     from src.llm import RUNTIME_SDK, get_runtime
 
-    return agent_type == "icinga" and get_runtime(cfg) == RUNTIME_SDK
+    if get_runtime(cfg) != RUNTIME_SDK:
+        return False
+    return agent_type in enabled_sdk_agents(cfg)
 
 
 def _extract_user_context(history: list) -> str:
@@ -493,16 +499,13 @@ async def _try_sdk_streaming(
     conversation_history: list | None,
     metrics: MetricsCollector | None,
 ) -> AsyncGenerator[str, None]:
-    """Run a sub-agent via the Agent SDK, yielding SSE events.
-
-    Used for Phase-2 SDK pilot (currently Icinga only).
-    """
+    """Run a sub-agent via the Agent SDK, yielding SSE events."""
     from src.agent.orchestrator import _serialize_messages, _trim_history
     from src.agent.runner import AgentRunner
     from src.llm import RUNTIME_SDK
 
     yield sse_agent_start(agent_type, agent_cfg.name)
-    yield sse_status("Running via Claude Agent SDK (icinga-triage skill)…")
+    yield sse_status(f"Running {agent_cfg.name} via the Claude Agent SDK…")
     sdk_result = await AgentRunner(cfg, runtime=RUNTIME_SDK).run_sub_agent(
         agent_type,
         task,
@@ -515,9 +518,38 @@ async def _try_sdk_streaming(
     yield sse_agent_done(agent_type)
     sdk_history = _serialize_messages(_trim_history(conversation_history or []))
     sdk_history.append({"role": "user", "content": task})
-    sdk_history.append({"role": "assistant", "content": answer})
+    sdk_history.append({"role": "assistant", "content": _sdk_assistant_turn(answer, sdk_result)})
     yield sse_event("history", {"messages": sdk_history})
     yield sse_done()
+
+
+def _sdk_assistant_turn(answer: str, sdk_result: dict) -> list[dict]:
+    """Shape the SDK turn like a legacy one so the learnings loop still fires.
+
+    ``analyze_and_learn`` mines saved conversations for ``tool_use`` blocks and
+    returns early when it finds fewer than three (``learnings.py:159-160``). The
+    SDK branch used to append the answer as a bare string, so a saved SDK
+    conversation contained zero tool_use blocks and the learning loop silently
+    stopped contributing — reads kept working, so the only symptom was a slowly
+    staling learnings file.
+
+    ``SdkResult.tool_invocations`` has the same information, so it is replayed
+    into the block shape the analyser expects.
+    """
+    blocks: list[dict] = []
+    for inv in (sdk_result.get("data") or {}).get("tool_invocations") or []:
+        if not isinstance(inv, dict):
+            continue
+        blocks.append(
+            {
+                "type": "tool_use",
+                "id": inv.get("id") or "",
+                "name": inv.get("name") or "",
+                "input": inv.get("input") or {},
+            }
+        )
+    blocks.append({"type": "text", "text": answer})
+    return blocks
 
 
 async def run_sub_agent(  # noqa: C901

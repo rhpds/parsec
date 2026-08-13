@@ -1,5 +1,6 @@
 """Tool: query_aws_costs — query AWS Cost Explorer for cost data."""
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 
@@ -7,6 +8,17 @@ from src.config import get_config
 from src.connections.aws import get_ce_client
 
 logger = logging.getLogger(__name__)
+
+
+def _get_cost_and_usage(ce, kwargs: dict) -> dict:
+    """One Cost Explorer call (blocking — called via asyncio.to_thread).
+
+    boto3 is synchronous. A 30-day grouped CE query takes tens of seconds and is
+    issued once per page per account batch, so calling it directly from the
+    coroutine stalls the whole event loop: health probes time out, SSE keepalives
+    stop, and the router drops the connection mid-investigation.
+    """
+    return ce.get_cost_and_usage(**kwargs)
 
 
 async def query_aws_costs(
@@ -85,7 +97,7 @@ async def query_aws_costs(
 
             results_by_time = []
             while True:
-                response = ce.get_cost_and_usage(**kwargs)
+                response = await asyncio.to_thread(_get_cost_and_usage, ce, kwargs)
                 results_by_time.extend(response.get("ResultsByTime", []))
 
                 token = response.get("NextPageToken")
@@ -105,7 +117,7 @@ async def query_aws_costs(
                     kwargs.pop("NextPageToken", None)
                     # Simplify GroupBy to just the primary dimension (remove LINKED_ACCOUNT)
                     kwargs["GroupBy"] = [{"Type": "DIMENSION", "Key": group_by_upper}]
-                    response = ce.get_cost_and_usage(**kwargs)
+                    response = await asyncio.to_thread(_get_cost_and_usage, ce, kwargs)
                     all_results.extend(response.get("ResultsByTime", []))
                 except Exception as retry_e:
                     logger.exception("AWS CE retry also failed")

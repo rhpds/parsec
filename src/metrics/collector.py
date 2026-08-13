@@ -89,13 +89,26 @@ class MetricsCollector:
         max_rounds: int,
         status: str,
     ) -> None:
-        self.agent_type = agent_type
-        self.sub_agent_latency_ms = duration_seconds * 1000
-        self.tool_calls = tool_calls
-        self.tool_errors = tool_errors
-        self.rounds_used = rounds_used
-        self.max_rounds = max_rounds
-        self.status = status
+        # Accumulate rather than assign. A single turn can dispatch several
+        # sub-agents (the orchestrator fans out, and the SDK runtime can run
+        # subagents concurrently), and plain assignment made that last-writer-
+        # wins: a two-agent turn reported one agent's tool count as the whole
+        # turn's. That silently understated every multi-agent run and made
+        # mixed legacy/SDK turns report one arbitrary runtime tag.
+        if self.agent_type and self.agent_type != agent_type:
+            existing = self.agent_type.split("+")
+            if agent_type not in existing:
+                self.agent_type = "+".join([*existing, agent_type])
+        else:
+            self.agent_type = agent_type
+
+        self.sub_agent_latency_ms = (self.sub_agent_latency_ms or 0) + duration_seconds * 1000
+        self.tool_calls = (self.tool_calls or 0) + tool_calls
+        self.tool_errors = (self.tool_errors or 0) + tool_errors
+        self.rounds_used = (self.rounds_used or 0) + rounds_used
+        self.max_rounds = (self.max_rounds or 0) + max_rounds
+        # A single failure makes the turn a failure; success must not overwrite it.
+        self.status = status if self.status in (None, "", "success") else self.status
 
     def record_tokens(
         self,
@@ -174,9 +187,39 @@ class MetricsCollector:
             "cost_usd": self.resolved_cost_usd(),
         }
 
+    def log_summary(self) -> None:
+        """Emit one line of usage to the app log.
+
+        MLflow is the intended sink, but it is not always reachable — from
+        rh-ace-aiops a NetworkPolicy blocks the mlflow namespace outright, and
+        `flush_to_mlflow` returns quietly in that case. Token and cache counts
+        were then collected and discarded, which made prompt-cache behaviour
+        impossible to observe anywhere. This keeps them in the log regardless of
+        whether the tracking server answers.
+        """
+        cached_in = self.input_tokens + self.cache_read_tokens + self.cache_creation_tokens
+        hit_pct = (self.cache_read_tokens / cached_in * 100) if cached_in else 0.0
+        logger.info(
+            "usage runtime=%s agent=%s in=%d out=%d cache_read=%d cache_write=%d "
+            "cache_hit=%.1f%% tools=%d errors=%d cost_usd=%.4f latency_ms=%.0f",
+            self.runtime or "-",
+            self.agent_type or "-",
+            self.input_tokens,
+            self.output_tokens,
+            self.cache_read_tokens,
+            self.cache_creation_tokens,
+            hit_pct,
+            self.tool_calls,
+            self.tool_errors,
+            self.resolved_cost_usd(),
+            self.total_latency_ms,
+        )
+
     async def flush_to_mlflow(self) -> None:
         """Flush accumulated metrics to MLflow. Fire-and-forget safe."""
         global _last_error_time
+
+        self.log_summary()
 
         client = get_mlflow_client()
         if client is None:

@@ -85,6 +85,13 @@ class _ClaudeAgentOptions:
     skills: list | None = None
     allowed_tools: list | None = None
     mcp_servers: dict | None = None
+    # Availability + permission controls. `allowed_tools` alone only governs
+    # auto-approval, so without these the CLI's built-in Bash/Write/Edit stay
+    # reachable from a subprocess running in /app.
+    tools: list | None = None
+    permission_mode: str | None = None
+    strict_mcp_config: bool = False
+    cli_path: str | None = None
 
 
 class _FakeSdk:
@@ -451,3 +458,49 @@ def test_sdk_result_succeeded_property():
     bad = SdkResult(text="", is_error=True, error_message="boom")
     assert ok.succeeded is True
     assert bad.succeeded is False
+
+
+# --------------------------------------------------- tool availability controls
+
+
+async def test_builtin_tools_are_restricted_not_merely_unapproved(fake_sdk):
+    """`allowed_tools` governs auto-approval; `tools` governs availability.
+
+    Setting only `allowed_tools` leaves the CLI's built-in Bash/Read/Write/Edit
+    reachable from a subprocess whose cwd is /app — where the kubeconfigs and
+    the GCP service-account JSON are mounted. The adapter must set `tools`.
+    """
+    fake_sdk.stream = [_ResultMessage(result="ok")]
+    await AgentSdkClient(AgentSdkConfig(model="m")).complete(prompt="p")
+
+    opts = fake_sdk.captured_options
+    assert opts.tools is not None, "built-in tool set was left at the CLI default"
+    for dangerous in ("Bash", "Write", "Edit", "Read", "WebFetch", "NotebookEdit"):
+        assert dangerous not in opts.tools, f"{dangerous} must not be available"
+    # ToolSearch loads deferred MCP schemas; without it a profile carrying ~24
+    # bridged tools can end up unable to call any of them.
+    assert "ToolSearch" in opts.tools
+
+
+async def test_permissions_deny_rather_than_prompt(fake_sdk):
+    """A headless run has nobody to prompt, so denial must be explicit policy."""
+    fake_sdk.stream = [_ResultMessage(result="ok")]
+    await AgentSdkClient(AgentSdkConfig(model="m")).complete(prompt="p")
+    assert fake_sdk.captured_options.permission_mode == "dontAsk"
+
+
+async def test_stray_mcp_config_is_ignored(fake_sdk):
+    fake_sdk.stream = [_ResultMessage(result="ok")]
+    await AgentSdkClient(AgentSdkConfig(model="m")).complete(prompt="p")
+    assert fake_sdk.captured_options.strict_mcp_config is True
+
+
+def test_builtin_tools_and_permission_mode_are_configurable():
+    cfg = AgentSdkClient.from_config(
+        {
+            "anthropic": {"model": "m"},
+            "agent": {"sdk": {"builtin_tools": ["ToolSearch"], "permission_mode": "default"}},
+        }
+    )._cfg
+    assert cfg.builtin_tools == ("ToolSearch",)
+    assert cfg.permission_mode == "default"

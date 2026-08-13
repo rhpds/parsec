@@ -751,15 +751,76 @@ function _handleAgentStartEvent(data, state) {
     const agentBanner = document.createElement("div");
     agentBanner.className = "agent-banner agent-running";
     agentBanner.dataset.agent = data.agent;
-    agentBanner.innerHTML = '<span class="agent-icon">&#9881;</span> ' +
-        '<span class="agent-label">' + (data.name || data.agent) + '</span>' +
-        ' <span class="agent-status">investigating…</span>';
+    // Same reason as the skill badge: under the SDK the agent label can come
+    // from the model's own `subagent_type` when it names an agent the registry
+    // does not know, so this is no longer a fixed string from a six-entry map.
+    var aIcon = document.createElement("span");
+    aIcon.className = "agent-icon";
+    aIcon.textContent = "\u2699";
+    var aLabel = document.createElement("span");
+    aLabel.className = "agent-label";
+    aLabel.textContent = data.name || data.agent || "";
+    var aStatus = document.createElement("span");
+    aStatus.className = "agent-status";
+    aStatus.textContent = "investigating…";
+    agentBanner.appendChild(aIcon);
+    agentBanner.appendChild(document.createTextNode(" "));
+    agentBanner.appendChild(aLabel);
+    agentBanner.appendChild(document.createTextNode(" "));
+    agentBanner.appendChild(aStatus);
     state.contentEl.appendChild(agentBanner);
     scrollToBottom();
 }
 
+function _handleSkillUsedEvent(data, state) {
+    // A skill can shape an entire answer without ever producing a tool call —
+    // preloaded skills are in the agent's context from turn one. Without this
+    // badge there is no way to tell from the UI that one was in play.
+    _ensureStreamStarted(state);
+    var skill = data.skill || "";
+    if (!skill) return;
+    // Build with DOM APIs, not innerHTML. Skill names come from SKILL.md
+    // directories, which include ones mounted from skills.plugin_paths — an
+    // external repo. A name containing markup would otherwise be executed, and a
+    // name containing a quote would break the selector below. Everything else in
+    // this file uses textContent for the same reason.
+    var badges = state.contentEl.querySelectorAll(".skill-badge");
+    for (var i = 0; i < badges.length; i++) {
+        if (badges[i].dataset.skill === skill) return;
+    }
+    var badge = document.createElement("div");
+    badge.className = "skill-badge skill-" + (data.source === "preloaded" ? "preloaded" : "invoked");
+    badge.dataset.skill = skill;
+
+    var icon = document.createElement("span");
+    icon.className = "skill-icon";
+    icon.textContent = "\uD83D\uDCDA";
+
+    var label = document.createElement("span");
+    label.className = "skill-label";
+    label.textContent = "skill: " + skill;
+
+    var how = document.createElement("span");
+    how.className = "skill-how";
+    how.textContent = (data.source === "preloaded" ? "loaded" : "invoked") +
+        (data.agent ? " by " + data.agent : "");
+
+    badge.appendChild(icon);
+    badge.appendChild(document.createTextNode(" "));
+    badge.appendChild(label);
+    badge.appendChild(document.createTextNode(" "));
+    badge.appendChild(how);
+    state.contentEl.appendChild(badge);
+    scrollToBottom();
+}
+
 function _handleAgentDoneEvent(data, contentEl) {
-    const banners = contentEl.querySelectorAll('.agent-banner[data-agent="' + data.agent + '"]');
+    // Match on the dataset rather than building a selector from server data:
+    // an agent name containing a quote would otherwise throw here.
+    const banners = [].filter.call(
+        contentEl.querySelectorAll(".agent-banner"),
+        function (b) { return b.dataset.agent === data.agent; }
+    );
     banners.forEach(function(b) {
         b.classList.remove("agent-running");
         b.classList.add("agent-done");
@@ -774,7 +835,12 @@ function _handleStatusEvent(data, state) {
     if (oldStatus) oldStatus.remove();
     const si = document.createElement("div");
     si.className = "status-indicator";
-    si.innerHTML = '<div class="spinner"></div> ' + data.message;
+    // data.message can carry model-derived text (e.g. "Using skill: X").
+    si.textContent = "";
+    var sp = document.createElement("div");
+    sp.className = "spinner";
+    si.appendChild(sp);
+    si.appendChild(document.createTextNode(" " + (data.message || "")));
     state.contentEl.appendChild(si);
     scrollToBottom();
 }
@@ -966,6 +1032,9 @@ function processStreamEvent(eventType, data, state) {
             break;
         case "agent_done":
             _handleAgentDoneEvent(data, state.contentEl);
+            break;
+        case "skill_used":
+            _handleSkillUsedEvent(data, state);
             break;
         case "status":
             _handleStatusEvent(data, state);

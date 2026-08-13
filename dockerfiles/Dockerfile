@@ -37,12 +37,19 @@ COPY skills/ skills/
 COPY data/ec2_pricing.json data-seed/ec2_pricing.json
 COPY scripts/refresh_pricing.py scripts/refresh_pricing.py
 COPY scripts/refresh_azure_billing.py scripts/refresh_azure_billing.py
-COPY skills/ skills/
+COPY scripts/verify_sdk_cli.py scripts/verify_sdk_cli.py
 
 # Skills-layout bridge: the SDK's "project" setting source discovers skills at
-# <cwd>/.claude/skills/, but Parsec ships them under skills/. Symlink so the
-# baked icinga-triage skill is discoverable by the SDK runtime.
-RUN mkdir -p /app/.claude && ln -sfn /app/skills /app/.claude/skills
+# <cwd>/.claude/skills/, but Parsec ships them under skills/ and may also mount
+# external skill repos at skills.plugin_paths. So the root is a real directory
+# of per-skill symlinks rather than one symlink to skills/ — that lets baked and
+# mounted skills coexist as siblings. Startup rebuilds it from whatever the
+# loader discovers (src/skills/sdk_root.py); these links seed it so the image
+# is self-consistent before the app runs.
+RUN mkdir -p /app/.claude/skills && \
+    for d in /app/skills/*/; do \
+        [ -d "$d" ] && ln -sfn "$d" "/app/.claude/skills/$(basename "$d")"; \
+    done
 
 RUN mkdir -p /app/data/reports /app/data/debug /home/claude && \
     chgrp -R 0 /app /home/claude && \
@@ -63,6 +70,7 @@ USER 1001
 RUN python3 -c "import dynaconf, fastapi, uvicorn; print('Dependencies OK')" && \
     node --version && claude --version && \
     python3 -c "import claude_agent_sdk; print('claude-agent-sdk OK')" && \
+    python3 /app/scripts/verify_sdk_cli.py && \
     test -f /app/.claude/skills/icinga-triage/SKILL.md && echo "icinga-triage skill baked"
 
 EXPOSE 8000

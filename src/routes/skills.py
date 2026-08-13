@@ -12,16 +12,21 @@ import logging
 from fastapi import APIRouter, HTTPException
 
 from src.config import get_config
-from src.skills import SkillLoader, SkillManifest
+from src.skills import SkillLoader, SkillManifest, sdk_skills_root
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["skills"])
 
 
-def _serialize(m: SkillManifest) -> dict:
+def _serialize(m: SkillManifest, sdk_visible: bool) -> dict:
     return {
         "name": m.name,
+        # Whether the Agent SDK can actually load this skill, i.e. whether it is
+        # present under <cwd>/.claude/skills. Discovery by the loader alone does
+        # NOT imply executability — a plugin_paths mount is listed here but is
+        # only reachable by the SDK once it has been published into that root.
+        "sdk_visible": sdk_visible,
         "description": m.description,
         "source": m.source,
         "skill_path": str(m.skill_path),
@@ -44,13 +49,19 @@ def _serialize(m: SkillManifest) -> dict:
 async def list_skills():
     """Return all discoverable skills across configured sources."""
     try:
-        loader = SkillLoader.from_config(get_config())
+        cfg = get_config()
+        loader = SkillLoader.from_config(cfg)
         manifests = loader.load_all()
     except Exception as e:
         logger.exception("Failed to load skills")
         raise HTTPException(status_code=500, detail=f"Skill discovery failed: {e}") from e
 
+    sdk_root = sdk_skills_root(cfg.get("agent", {}).get("sdk", {}).get("cwd") or None)
+    visible = {m.name for m in manifests if (sdk_root / m.name).exists()}
+
     return {
         "count": len(manifests),
-        "skills": [_serialize(m) for m in manifests],
+        "sdk_visible_count": len(visible),
+        "sdk_skills_root": str(sdk_root),
+        "skills": [_serialize(m, m.name in visible) for m in manifests],
     }

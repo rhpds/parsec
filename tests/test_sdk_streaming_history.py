@@ -44,4 +44,12 @@ async def test_sdk_streaming_emits_history_event(monkeypatch: pytest.MonkeyPatch
     history_ev = next(e for e in events if e.startswith("event: history"))
     msgs = json.loads(history_ev.split("data: ", 1)[1].strip())["messages"]
     assert msgs[-2] == {"role": "user", "content": "triage alert X"}
-    assert msgs[-1] == {"role": "assistant", "content": "sdk answer"}
+
+    # The assistant turn is block-shaped rather than a bare string, so the saved
+    # conversation looks like a legacy one: `analyze_and_learn` mines tool_use
+    # blocks and bails below three, so a plain string left the learnings loop
+    # permanently dormant on the SDK path.
+    assistant = msgs[-1]
+    assert assistant["role"] == "assistant"
+    assert isinstance(assistant["content"], list)
+    assert {"type": "text", "text": "sdk answer"} in assistant["content"]
