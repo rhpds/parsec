@@ -2,7 +2,7 @@
 
 *A grounded, code-level walkthrough of how Parsec is being migrated from the raw Anthropic API to the **Claude Agent SDK**, written for an engineer joining the workstream. Every claim cites `file:line` and the PR it came from.*
 
-> **One-sentence model.** Parsec has always hand-written its own Claude tool-use loop (`for _round in range(max_rounds): client.messages.create(...)`). The migration introduces a **second runtime** — the Claude Agent SDK, which runs *its own* agentic loop inside a bundled `claude` CLI subprocess — selected by a single config flag `agent.runtime` (default `legacy`). It is **additive and dormant by default**: today, for one sub-agent (Icinga), behind that flag.
+> **One-sentence model.** Parsec has always hand-written its own Claude tool-use loop (`for _round in range(max_rounds): client.messages.create(...)`). The migration introduces a **second runtime** — the Claude Agent SDK, which runs *its own* agentic loop inside a bundled `claude` CLI subprocess — selected by a single config flag `agent.runtime` (default `legacy`). It is **additive and dormant by default**. Phase 1 built the seam; Phase 2 piloted one sub-agent (Icinga); **Phase 3 ([#40](https://github.com/rhpds/parsec/pull/40)) moves the whole turn — orchestrator and all six sub-agents — onto the SDK**, still behind the flag.
 
 ---
 
@@ -29,6 +29,9 @@ The migration sits on top of a pre-existing multi-agent architecture. Read these
 - [#34](https://github.com/rhpds/parsec/pull/34) — **the consolidated Phase-2 pilot** *(OPEN)*: runner + `icinga-triage` skill + Node-in-image + MLflow parity/cost harness. Most Phase-2 code below lives here (`migration/sdk-mlflow-metrics`).
 - [#31](https://github.com/rhpds/parsec/pull/31) — MLflow tracing for the SDK **subprocess** *(OPEN)* — a *complementary* observability layer (see §3, §7); **not** superseded by #34.
 - [#33](https://github.com/rhpds/parsec/pull/33) — document the icinga sub-agent in `CLAUDE.md` *(MERGED)*.
+
+**Phase 3 — the whole runtime (the active work):**
+- [#40](https://github.com/rhpds/parsec/pull/40) — **orchestrator + all six sub-agents on the SDK** *(DRAFT, `migration/full-sdk`)*. Adds the in-process MCP bridge (`src/agent/parsec_mcp.py`), the SDK orchestrator (`src/agent/sdk_orchestrator.py`), SSE parity (`src/agent/sdk_stream.py`), per-agent profiles (`src/agent/sdk_profiles.py`) and skill publishing (`src/skills/sdk_root.py`). Also carries fixes that apply to **both** runtimes — see §12.
 
 **Infra (related, coordinate on merge):**
 - [#26](https://github.com/rhpds/parsec/pull/26) — Helm chart for Parsec + MLflow *(OPEN)*.
@@ -181,3 +184,60 @@ These are **not** created by the migration, **not** derived from usage, **not** 
 - **Connectors:** `src/connections/*`, `src/tools/{icinga,github_files,provision_db}.py`, `src/agent/tool_definitions.py`
 - **Harnesses:** `scripts/parity_eval.py`, `scripts/ab_mlflow.py`, `scripts/icinga_eval_set.json`, `parsec-dependencies/pr2-test/PARITY-RUNBOOK.md`
 - **Pre-existing agents:** `src/agent/agents.py` (`AGENTS` :75), `src/agent/orchestrator.py` *(#6, #8)*
+
+---
+
+## 12. Phase 3 — the whole turn on the SDK (#40)
+
+Phases 1–2 ran *one sub-agent* through the SDK. Phase 3 makes the SDK the
+orchestrator too, so a request can be served end to end without the legacy loop.
+
+**The pieces**
+
+| file | what it does |
+|---|---|
+| `src/agent/parsec_mcp.py` | In-process MCP server exposing the existing `src/tools/*` to the SDK. Tool code is untouched; writes stay gated by `WRITE_ACTIONS`. |
+| `src/agent/sdk_orchestrator.py` | One `ClaudeSDKClient` session *is* the orchestrator. The six sub-agents become native `AgentDefinition`s, each with its own prompt, tool group, turn budget and skills. |
+| `src/agent/sdk_stream.py` | Translates SDK messages into the SSE vocabulary the UI already speaks (`text`, `tool_start`, `agent_start`, `skill_used`, `history`, `done`), so the frontend needed no rewrite. |
+| `src/agent/sdk_profiles.py` | Per-agent tool/skill/turn resolution. `_AGENT_SKILLS` maps each agent to **all** the skills it should carry. |
+| `src/skills/sdk_root.py` | Publishes loader-discovered skills into `<cwd>/.claude/skills` so the SDK can find them. |
+
+**Two failures that were silent**
+
+Both cost real debugging time and are worth knowing about:
+
+- **Sub-agents were denied every tool call.** `permission_mode="dontAsk"` with only the
+  *orchestrator's* tools in `allowed_tools` meant a delegated agent could call nothing —
+  and it did not error. Icinga returned a fluent *"unable to access the monitoring system
+  due to permission restrictions"* with **zero** tool calls. Fixed by approving the union
+  of every agent's tools (`allowed_tools` is session-wide approval; `AgentDefinition.tools`
+  is per-agent availability — they are not the same thing).
+- **Delegation never fired.** `config/prompts/orchestrator.md` still named 13
+  `investigate_*` tools that do not exist under the SDK. `_delegation_addendum()` translates
+  those instructions onto the `Agent` tool.
+
+**Routing — the finding that needs no judge**
+
+Only the legacy arm has the regex fast path: `run_agent_via_sdk` is dispatched at
+`orchestrator.py:1218`, *before* `classify_fast` is reached at `:1249`. So legacy's routing
+is pinned wherever the regexes resolve and the SDK's never is. In the n=20 A/B, **all 9
+ambiguous rounds mis-routed on legacy, in every repeat** — an Icinga alert whose name
+contains "Babylon" matches `\bbabylon\b`, so `classify_fast` hands it to the babylon
+agent, which has no Icinga tools. Deterministic and reproducible.
+
+**Prompt caching**
+
+The SDK marks its prompt prefix cacheable; the legacy runtime sets **no** `cache_control`
+breakpoints anywhere, so its cache counters are zero by construction. Over 50 calls:
+legacy 13,699,398 fresh input tokens and 0 cached; SDK 225 fresh and 6,173,328 cached
+(**93.6%** hit), for **46% less spend**. Note this cuts against latency — the SDK is
+~1.9× the tool calls and ~20% slower at the median.
+
+**Costs, stated plainly**
+
+1.9× tool calls, 1.4× tool errors, slower. The retry churn is a defect, not a tradeoff.
+
+**Evidence:** harness, raw runs, judge output and screenshots live in
+[`redhat-et/rhdp-parsec-integration/eval/`](https://github.com/redhat-et/rhdp-parsec-integration/tree/main/eval);
+gated pages at `/deck` (n=20, ten tabs), `/parity` (the original 10-query Icinga A/B),
+`/parity/v1` and `/parity/v2`.
