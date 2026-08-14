@@ -13,6 +13,7 @@ import asyncio
 import importlib
 import logging
 import os
+import shutil
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -195,6 +196,28 @@ def backend_cli_env(config: Any) -> dict[str, str]:
     return {"ANTHROPIC_API_KEY": api_key}
 
 
+def default_cli_path() -> str | None:
+    """The pinned ``claude`` binary, or ``None`` to let the SDK choose.
+
+    The SDK's own ``_find_cli()`` prefers a CLI bundled inside the Python wheel,
+    so ``npm install -g @anthropic-ai/claude-code@<pin>`` in the Dockerfile
+    decides nothing on its own — the wheel's copy floats with
+    ``claude-agent-sdk`` and the pin is decorative.
+
+    That is not cosmetic. The bundled CLI in the current image is 2.1.185 and
+    sends ``anthropic-beta: thinking-token-count-2026-05-13``; Parsec's LiteLLM
+    gateway forwards to Vertex, which rejects the header outright:
+
+        API Error: 400 Unexpected value(s) `thinking-token-count-2026-05-13`
+        for the `anthropic-beta` header
+
+    So every SDK turn failed on the gateway backend while the pinned 2.1.169
+    answered the same prompt fine. Preferring the pin puts the CLI version under
+    the Dockerfile's control, where it can be tested before it changes.
+    """
+    return shutil.which("claude")
+
+
 def build_subprocess_env(
     extra_env: dict[str, str] | None = None,
     backend_env: dict[str, str] | None = None,
@@ -247,7 +270,8 @@ class AgentSdkConfig:
     # SDK, whose ``_find_cli()`` prefers a CLI bundled inside the Python wheel
     # over anything on ``PATH`` — so the ``npm install -g
     # @anthropic-ai/claude-code@<pin>`` in dockerfiles/Dockerfile does NOT
-    # determine which binary runs. Set this to make that pin authoritative.
+    # determine which binary runs. ``from_config`` therefore defaults this to
+    # the pinned binary; see :func:`default_cli_path` for why that matters.
     cli_path: str | None = None
     # Built-in CLI tools the model may use. Parsec serves its own tools over the
     # in-process MCP bridge, so the default is just the two the SDK machinery
@@ -300,8 +324,8 @@ class AgentSdkClient:
         - ``agent.sdk.timeout`` — per-call wall-clock ceiling in seconds
           (default 300; ``null``/``0`` disables it)
         - ``agent.sdk.cli_path`` — absolute path to the ``claude`` binary;
-          empty leaves selection to the SDK (which prefers its own bundled CLI
-          over the image's pinned npm install)
+          empty falls back to the pinned binary on PATH (see
+          :func:`default_cli_path`), not to the SDK's bundled copy
         """
         agent_section = section(config, "agent")
         sdk_section = section(agent_section, "sdk") if agent_section else {}
@@ -326,7 +350,7 @@ class AgentSdkClient:
         extra_env = {**build_tracing_env(config), **explicit_env}
         timeout_raw = sdk_section.get("timeout", 300.0)
         timeout = float(timeout_raw) if timeout_raw else None
-        cli_path = str(sdk_section.get("cli_path", "") or "").strip() or None
+        cli_path = str(sdk_section.get("cli_path", "") or "").strip() or default_cli_path()
         builtin_raw = sdk_section.get("builtin_tools", None)
         builtin = (
             tuple(str(t) for t in builtin_raw)

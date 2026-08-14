@@ -272,3 +272,43 @@ def test_backend_credentials_do_not_reopen_the_parsec_namespace(
     env = build_subprocess_env(None, backend_cli_env(config))
 
     assert sorted(k for k in env if k.startswith("PARSEC_")) == []
+
+
+# ------------------------------------------------------------- CLI version
+#
+# The SDK's own _find_cli() prefers a CLI bundled inside the Python wheel, so
+# the Dockerfile's `npm install -g @anthropic-ai/claude-code@<pin>` decides
+# nothing unless cli_path is set. The bundled 2.1.185 in the current image sends
+# `anthropic-beta: thinking-token-count-2026-05-13`, which the LiteLLM gateway's
+# Vertex upstream rejects with a 400 — while the pinned 2.1.169 answered the same
+# prompt. Both entrypoints must therefore pin the binary, and the orchestrator
+# one never did.
+
+
+def test_config_default_pins_the_cli_instead_of_the_bundled_copy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.llm import agent_sdk_client
+
+    monkeypatch.setattr(agent_sdk_client.shutil, "which", lambda _: "/usr/local/bin/claude")
+
+    client = agent_sdk_client.AgentSdkClient.from_config({"anthropic": {"model": "m"}})
+
+    assert client._cfg.cli_path == "/usr/local/bin/claude"
+
+
+def test_explicit_cli_path_still_wins() -> None:
+    from src.llm.agent_sdk_client import AgentSdkClient
+
+    client = AgentSdkClient.from_config({"agent": {"sdk": {"cli_path": "/opt/other/claude"}}})
+
+    assert client._cfg.cli_path == "/opt/other/claude"
+
+
+def test_no_claude_on_path_leaves_the_choice_to_the_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Local dev without a global install must not break."""
+    from src.llm import agent_sdk_client
+
+    monkeypatch.setattr(agent_sdk_client.shutil, "which", lambda _: None)
+
+    assert agent_sdk_client.AgentSdkClient.from_config({})._cfg.cli_path is None
