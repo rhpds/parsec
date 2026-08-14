@@ -187,3 +187,35 @@ def test_writes_are_off_unless_configured(_fake_sdk, monkeypatch):
 
     sdk_profile_for("icinga", _cfg(allow_writes=True))
     assert captured["allow_writes"] is True
+
+
+def test_env_var_style_uppercase_config_is_honoured(_fake_sdk):
+    """agent.sdk.* supplied by environment must not be silently ignored.
+
+    Dynaconf materialises PARSEC_AGENT__SDK__ORCHESTRATOR=true as
+    {"AGENT": {"SDK": {"ORCHESTRATOR": True}}}. `section()` used to read the
+    second level off a plain dict, case-sensitively, so every agent.sdk.*
+    override set by env var was dropped — the runtime flipped but the
+    orchestrator, enabled_agents and allow_writes silently kept their defaults.
+    """
+    from src.agent.orchestrator import _should_orchestrate_via_sdk
+    from src.agent.sdk_profiles import _sdk_section, enabled_sdk_agents
+
+    cfg = {
+        "AGENT": {
+            "RUNTIME": "sdk",
+            "SDK": {"ORCHESTRATOR": True, "ENABLED_AGENTS": "all", "ALLOW_WRITES": True},
+        }
+    }
+    assert _sdk_section(cfg).get("orchestrator") is True
+    assert _sdk_section(cfg).get("allow_writes") is True
+    assert len(enabled_sdk_agents(cfg)) > 1, "ENABLED_AGENTS=all was dropped"
+    assert _should_orchestrate_via_sdk(cfg) is True
+
+
+def test_lowercase_yaml_style_config_still_works(_fake_sdk):
+    """The YAML path must be unchanged by the case-insensitive lookup."""
+    from src.agent.sdk_profiles import _sdk_section
+
+    cfg = {"agent": {"runtime": "sdk", "sdk": {"orchestrator": True}}}
+    assert _sdk_section(cfg).get("orchestrator") is True
