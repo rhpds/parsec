@@ -181,7 +181,7 @@ def build_orchestrator_options(config: Any, *, system: str) -> Any:
 
     from src.agent.parsec_mcp import SERVER_NAME, build_server, tool_names_for
     from src.agent.sdk_profiles import _sdk_section
-    from src.llm.agent_sdk_client import AgentSdkConfig, build_subprocess_env
+    from src.llm.agent_sdk_client import AgentSdkConfig, backend_cli_env, build_subprocess_env
 
     sdk_cfg = _sdk_section(config)
     allow_writes = bool(sdk_cfg.get("allow_writes", False))
@@ -221,7 +221,7 @@ def build_orchestrator_options(config: Any, *, system: str) -> Any:
         permission_mode=_permission_mode(sdk_cfg.get("permission_mode"), defaults.permission_mode),
         strict_mcp_config=True,
         setting_sources=_setting_sources(defaults.setting_sources),
-        env=build_subprocess_env(_tracing_env(config)),
+        env=build_subprocess_env(_tracing_env(config), backend_cli_env(config)),
         cwd=str(sdk_cfg.get("cwd") or "") or None,
         # Token-level deltas, so the UI streams like the legacy path.
         include_partial_messages=True,

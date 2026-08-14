@@ -88,13 +88,124 @@ _ENV_ALLOWLIST_PREFIXES = ("CLAUDE_", "ANTHROPIC_", "OTEL_", "MLFLOW_")
 _ENV_DENY_PREFIX = "PARSEC_"
 
 
-def build_subprocess_env(extra_env: dict[str, str] | None = None) -> dict[str, str]:
+# ------------------------------------------------------------ backend auth
+#
+# The CLI authenticates itself. It reads ``ANTHROPIC_*`` / ``CLAUDE_CODE_*`` and
+# knows nothing about Parsec's ``anthropic.*`` settings — which arrive as
+# ``PARSEC_ANTHROPIC__*`` and are denied above, that namespace being where every
+# app secret lives.
+#
+# Nothing bridged the two until this function. The SDK runtime was proven on a
+# deployment that happened to set ``CLAUDE_CODE_USE_VERTEX`` and
+# ``GOOGLE_APPLICATION_CREDENTIALS`` by hand on the pod; parsec-dev runs the
+# LiteLLM backend and sets neither, so the first SDK-routed question there died
+# with ``the agent runtime failed: Not logged in · Please run /login``. The app
+# was authenticated the whole time — the subprocess never was.
+#
+# Backend is read top-level rather than per-component, matching how the SDK path
+# picks its model (``agent.sdk.model`` or ``anthropic.model``); it does not
+# consult ``anthropic.overrides.*``.
+
+#: Keys this module owns once a backend resolves. They are cleared from the
+#: inherited environment before the derived values land, so a leftover
+#: ``CLAUDE_CODE_USE_VERTEX`` cannot send the CLI to Vertex while the app itself
+#: talks to a LiteLLM gateway — a split that would silently bill two accounts
+#: and answer from two different models.
+_MANAGED_CLI_KEYS = frozenset(
+    {
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_VERTEX_PROJECT_ID",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLOUD_ML_REGION",
+    }
+)
+
+#: Ambient variables that, on their own, are enough for the CLI to authenticate.
+#: Used only to decide whether an unresolvable backend is worth shouting about.
+_AMBIENT_AUTH_KEYS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+
+def _incomplete(backend: str, needs: str) -> dict[str, str]:
+    logger.warning(
+        "agent SDK: backend %r is selected but %s is not configured — the claude "
+        "CLI subprocess will fall back to whatever auth the pod environment "
+        "carries, and fail with 'Not logged in' if it carries none",
+        backend,
+        needs,
+    )
+    return {}
+
+
+def backend_cli_env(config: Any) -> dict[str, str]:
+    """Translate Parsec's LLM backend settings into the CLI's own auth env.
+
+    Returns an empty dict when the selected backend is not configured well
+    enough to derive credentials, which leaves any hand-wired pod environment
+    untouched rather than replacing working auth with nothing.
+
+    Bedrock is the one partial case: the region is derived, but AWS credentials
+    are deliberately not forwarded (see the allowlist above). A Bedrock
+    deployment grants those explicitly through ``agent.sdk.env``.
+    """
+    anthropic_cfg = section(config, "anthropic") or {}
+    backend = str(anthropic_cfg.get("backend", "api") or "api").strip().lower()
+
+    if backend == "litellm":
+        base_url = str(anthropic_cfg.get("litellm_base_url", "") or "").strip()
+        api_key = str(anthropic_cfg.get("litellm_api_key", "") or "").strip()
+        if not (base_url and api_key):
+            return _incomplete(backend, "anthropic.litellm_base_url + anthropic.litellm_api_key")
+        # A bearer token rather than ANTHROPIC_API_KEY's x-api-key header: this
+        # is a gateway, not the Anthropic API. LiteLLM accepts either.
+        return {"ANTHROPIC_BASE_URL": base_url, "ANTHROPIC_AUTH_TOKEN": api_key}
+
+    if backend == "vertex":
+        gcp_cfg = section(config, "gcp") or {}
+        project = (
+            str(anthropic_cfg.get("vertex_project_id", "") or "").strip()
+            or str(gcp_cfg.get("project_id", "") or "").strip()
+        )
+        if not project:
+            return _incomplete(backend, "anthropic.vertex_project_id or gcp.project_id")
+        env = {
+            "CLAUDE_CODE_USE_VERTEX": "1",
+            "ANTHROPIC_VERTEX_PROJECT_ID": project,
+            "CLOUD_ML_REGION": str(anthropic_cfg.get("vertex_region", "") or "us-east5").strip(),
+        }
+        creds = str(anthropic_cfg.get("vertex_credentials_path", "") or "").strip()
+        if creds:
+            env["GOOGLE_APPLICATION_CREDENTIALS"] = creds
+        return env
+
+    if backend == "bedrock":
+        aws_cfg = section(config, "aws") or {}
+        region = (
+            str(anthropic_cfg.get("bedrock_region", "") or "").strip()
+            or str(aws_cfg.get("region", "") or "").strip()
+            or "us-east-1"
+        )
+        return {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": region}
+
+    api_key = str(anthropic_cfg.get("api_key", "") or "").strip()
+    if not api_key:
+        return _incomplete(backend, "anthropic.api_key")
+    return {"ANTHROPIC_API_KEY": api_key}
+
+
+def build_subprocess_env(
+    extra_env: dict[str, str] | None = None,
+    backend_env: dict[str, str] | None = None,
+) -> dict[str, str]:
     """Return the environment handed to the ``claude`` CLI subprocess.
 
     Allowlist-based: only the variables the CLI actually needs are inherited
-    from the app process. ``extra_env`` (tracing vars plus ``agent.sdk.env``)
-    is merged on top and is *not* filtered — it is operator-supplied, so an
-    explicit grant there is intentional.
+    from the app process. ``backend_env`` (from :func:`backend_cli_env`) lands
+    on top of the inherited set, and ``extra_env`` (tracing vars plus
+    ``agent.sdk.env``) on top of that — neither is filtered, both being derived
+    from config an operator wrote deliberately.
     """
     inherited = {
         key: value
@@ -102,7 +213,19 @@ def build_subprocess_env(extra_env: dict[str, str] | None = None) -> dict[str, s
         if not key.startswith(_ENV_DENY_PREFIX)
         and (key in _ENV_ALLOWLIST_EXACT or key.startswith(_ENV_ALLOWLIST_PREFIXES))
     }
-    return {**inherited, **(extra_env or {})}
+    if backend_env:
+        # Config states the intent; ambient variables from some other backend
+        # are stale, so they lose outright instead of blending.
+        inherited = {k: v for k, v in inherited.items() if k not in _MANAGED_CLI_KEYS}
+    elif not any(inherited.get(k) for k in _AMBIENT_AUTH_KEYS) and not any(
+        inherited.get(k) for k in ("CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_BEDROCK")
+    ):
+        logger.error(
+            "agent SDK: no credentials for the claude CLI subprocess — neither "
+            "anthropic.* config nor the pod environment supplies any. Every SDK "
+            "run will fail with 'Not logged in · Please run /login'."
+        )
+    return {**inherited, **(backend_env or {}), **(extra_env or {})}
 
 
 @dataclass(frozen=True)
@@ -118,6 +241,8 @@ class AgentSdkConfig:
     cwd: str | None = None
     setting_sources: tuple[str, ...] = ("project",)
     extra_env: dict[str, str] = field(default_factory=dict)
+    #: CLI auth derived from ``anthropic.backend`` — see :func:`backend_cli_env`.
+    backend_env: dict[str, str] = field(default_factory=dict)
     # Absolute path to the ``claude`` binary. ``None`` leaves the choice to the
     # SDK, whose ``_find_cli()`` prefers a CLI bundled inside the Python wheel
     # over anything on ``PATH`` — so the ``npm install -g
@@ -220,6 +345,7 @@ class AgentSdkClient:
                 cwd=str(cwd) if cwd else None,
                 setting_sources=tuple(setting_sources_raw),
                 extra_env=dict(extra_env),
+                backend_env=backend_cli_env(config),
                 cli_path=cli_path,
                 builtin_tools=builtin,
                 permission_mode=permission_mode,
@@ -255,7 +381,7 @@ class AgentSdkClient:
             "model": self._cfg.model,
             "max_turns": max_turns or self._cfg.max_turns,
             "setting_sources": list(self._cfg.setting_sources),
-            "env": build_subprocess_env(self._cfg.extra_env),
+            "env": build_subprocess_env(self._cfg.extra_env, self._cfg.backend_env),
             # Availability, not just auto-approval. `Skill` is re-added by the
             # SDK itself when `skills` is set, and `ToolSearch` is kept because
             # the model uses it to load deferred MCP schemas — without it, a
