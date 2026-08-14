@@ -22,14 +22,13 @@ def get_runtime(config: Any) -> RuntimeName:
     coerced to legacy so a typo never silently routes traffic to the new
     untested path.
     """
-    section = config.get("agent", {}) if hasattr(config, "get") else getattr(config, "agent", {})
-    if section is None:
-        return RUNTIME_LEGACY
+    # Via the shared helper so the lookup is case-insensitive: Dynaconf turns
+    # PARSEC_AGENT__RUNTIME into an UPPERCASE key, and a plain-dict config (tests,
+    # and any caller passing to_dict() output) would otherwise miss it.
+    from src.llm.config_section import section as _section
 
-    if hasattr(section, "get"):
-        raw = section.get("runtime", RUNTIME_LEGACY)
-    else:
-        raw = getattr(section, "runtime", RUNTIME_LEGACY)
+    agent = _section(config, "agent")
+    raw = agent.get("runtime", RUNTIME_LEGACY) if agent else RUNTIME_LEGACY
 
     if raw not in _VALID:
         logger.warning(

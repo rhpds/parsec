@@ -79,3 +79,20 @@ github_token: "ghp_..."
 
 # Allowed users (comma-separated emails, empty = group-based auth only)
 allowed_users: ""
+
+# --- Agent runtime (see playbooks/vars/common.yml for the stage ladder) -------
+# Uncomment to advance a stage. Reverting the same lines and re-running the
+# playbook is the rollback — no image rebuild, no code change.
+#
+# stage 1 — the Phase-2 pilot: icinga sub-agent on the SDK, legacy routing
+# agent_runtime: sdk
+#
+# stage 2 — all sub-agents on the SDK, still routed by classify_fast.
+#           Does NOT fix mis-routing; that needs stage 3.
+# agent_runtime: sdk
+# sdk_enabled_agents: ["all"]
+#
+# stage 3 — full cutover: one SDK session drives the turn and does its own routing
+# agent_runtime: sdk
+# sdk_enabled_agents: ["all"]
+# sdk_orchestrator: true
