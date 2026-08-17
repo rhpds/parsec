@@ -1,0 +1,13 @@
+{{- if and .Values.deploy .Values.buildConfig.enabled -}}
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: {{ include "parsec.name" . }}
+  namespace: {{ include "parsec.namespaceName" . }}
+  labels:
+    {{- include "parsec.labels" . | nindent 4 }}
+    component: build
+spec:
+  lookupPolicy:
+    local: true
+{{- end -}}

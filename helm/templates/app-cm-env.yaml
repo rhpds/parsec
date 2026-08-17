@@ -1,0 +1,25 @@
+{{- if .Values.deploy -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "parsec.name" . }}-env
+  namespace: {{ include "parsec.namespaceName" . }}
+  labels:
+    {{- include "parsec.labels" . | nindent 4 }}
+data:
+  PARSEC_ANTHROPIC__BACKEND: {{ .Values.config.anthropic.backend | quote }}
+  PARSEC_ANTHROPIC__VERTEX_PROJECT_ID: {{ required "config.vertex.project_id is required" .Values.config.vertex.project_id | quote }}
+  PARSEC_ANTHROPIC__VERTEX_REGION: {{ .Values.config.vertex.region | quote }}
+  PARSEC_ANTHROPIC__VERTEX_CREDENTIALS_PATH: "/app/gcp/service-account.json"
+  PARSEC_GCP__CREDENTIALS_PATH: "/app/gcp-billing/service-account.json"
+  PARSEC_REPORTING_MCP__MCP_URL: {{ required "config.reporting_mcp.mcp_url is required" .Values.config.reporting_mcp.mcp_url | quote }}
+  {{- range $cluster, $_ := .Values.secrets.kubeconfigs.babylon }}
+  PARSEC_BABYLON__CLUSTERS__{{ $cluster | upper }}__KUBECONFIG: "/app/babylon/{{ $cluster }}.kubeconfig"
+  {{- end }}
+  {{- range $cluster, $_ := .Values.secrets.kubeconfigs.ocpv }}
+  PARSEC_OCPV__CLUSTERS__{{ $cluster | upper }}__KUBECONFIG: "/app/ocpv/{{ $cluster }}.kubeconfig"
+  {{- end }}
+  {{- if .Values.icinga.enabled }}
+  PARSEC_ICINGA__MCP_URL: "http://localhost:{{ .Values.icinga.port }}/sse"
+  {{- end }}
+{{- end -}}

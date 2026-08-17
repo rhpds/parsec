@@ -1,0 +1,93 @@
+{{- if and .Values.deploy .Values.oauth.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow-oauth-proxy
+  namespace: {{ include "mlflow.namespaceName" . }}
+  labels:
+    {{- include "mlflow.labels" . | nindent 4 }}
+    component: oauth-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mlflow
+      component: oauth-proxy
+  template:
+    metadata:
+      labels:
+        app: mlflow
+        component: oauth-proxy
+    spec:
+      serviceAccountName: mlflow-oauth
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: oauth-proxy
+          image: {{ .Values.oauth.image.repository }}:{{ .Values.oauth.image.tag }}
+          ports:
+            - containerPort: 8443
+              name: https
+              protocol: TCP
+          args:
+            - -provider=openshift
+            - -https-address=:8443
+            - -http-address=
+            - -email-domain=*
+            - -upstream=http://mlflow-tracking:5000/
+            - -client-id={{ .Values.oauth.clientName }}
+            - -client-secret-file=/etc/proxy/secrets/client-secret
+            - -cookie-secret-file=/etc/proxy/secrets/session_secret
+            - -openshift-service-account=mlflow-oauth
+            - -openshift-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            - -tls-cert=/etc/tls/private/tls.crt
+            - -tls-key=/etc/tls/private/tls.key
+            - -pass-user-headers=true
+            - -openshift-sar={"namespace":"{{ include "mlflow.namespaceName" . }}","resource":"services","verb":"get"}
+          volumeMounts:
+            - name: oauth-secret
+              mountPath: /etc/proxy/secrets
+              readOnly: true
+            - name: oauth-serving-cert
+              mountPath: /etc/tls/private
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+          readinessProbe:
+            httpGet:
+              path: /oauth/healthz
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            timeoutSeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /oauth/healthz
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            timeoutSeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: oauth-secret
+          secret:
+            secretName: mlflow-oauth-secret
+        - name: oauth-serving-cert
+          secret:
+            secretName: mlflow-serving-cert
+{{- end -}}

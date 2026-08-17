@@ -1,0 +1,20 @@
+{{- if .Values.deploy -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow-tracking
+  namespace: {{ include "mlflow.namespaceName" . }}
+  labels:
+    {{- include "mlflow.labels" . | nindent 4 }}
+    component: tracking
+spec:
+  type: ClusterIP
+  selector:
+    app: mlflow
+    component: tracking
+  ports:
+    - name: http
+      port: 5000
+      targetPort: 5000
+      protocol: TCP
+{{- end -}}
