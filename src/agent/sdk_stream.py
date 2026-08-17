@@ -31,6 +31,22 @@ logger = logging.getLogger(__name__)
 #: both are matched so a pinned older CLI still works.
 _AGENT_TOOL_NAMES = frozenset({"Agent", "Task"})
 
+#: Runtime failures that are really deployment failures, and what to say instead.
+#: Matched case-insensitively against the ``ResultMessage`` text.
+_CLI_ERROR_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        ("not logged in", "please run /login", "invalid api key", "authentication_error"),
+        "the agent runtime could not authenticate to the model backend — this is a "
+        "Parsec deployment problem, not something to fix from this chat; check "
+        "anthropic.backend and its credentials reach the agent subprocess",
+    ),
+    (
+        ("invalid model name", "model not found"),
+        "the agent runtime asked the model gateway for a model it does not serve — "
+        "check anthropic.model against the gateway's model list",
+    ),
+)
+
 
 class SdkEventTranslator:
     """Stateful translator for one orchestrator turn."""
@@ -220,7 +236,15 @@ class SdkEventTranslator:
                 self._text_parts.append(text)
 
     def _failure_reason(self) -> str:
-        """Human-readable reason this turn failed, or "" if it succeeded."""
+        """Human-readable reason this turn failed, or "" if it succeeded.
+
+        The runtime's own wording is written for someone sitting at a terminal,
+        and it reaches the chat box verbatim. ``Not logged in · Please run
+        /login`` did exactly what it says on the tin: an investigator read it as
+        an instruction and typed ``/login`` into Parsec, which is not a thing.
+        So misconfiguration is named as misconfiguration, with the raw text kept
+        alongside for whoever reads the log.
+        """
         msg = self._usage
         if msg is None:
             return "the agent runtime produced no result"
@@ -236,7 +260,11 @@ class SdkEventTranslator:
                 f"the investigation hit its turn limit after {turns} turns "
                 "without finishing — raise agent.sdk.max_turns or narrow the question"
             )
-        detail = getattr(msg, "result", None) or subtype or "unknown error"
+        detail = str(getattr(msg, "result", None) or subtype or "unknown error")
+        lowered = detail.lower()
+        for needles, hint in _CLI_ERROR_HINTS:
+            if any(needle in lowered for needle in needles):
+                return f"{hint} (the runtime said: {detail})"
         return f"the agent runtime failed: {detail}"
 
     # ------------------------------------------------------------ finish

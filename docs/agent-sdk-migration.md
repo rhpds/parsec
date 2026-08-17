@@ -30,8 +30,12 @@ The migration sits on top of a pre-existing multi-agent architecture. Read these
 - [#31](https://github.com/rhpds/parsec/pull/31) — MLflow tracing for the SDK **subprocess** *(OPEN)* — a *complementary* observability layer (see §3, §7); **not** superseded by #34.
 - [#33](https://github.com/rhpds/parsec/pull/33) — document the icinga sub-agent in `CLAUDE.md` *(MERGED)*.
 
-**Phase 3 — the whole runtime (the active work):**
-- [#40](https://github.com/rhpds/parsec/pull/40) — **orchestrator + all six sub-agents on the SDK** *(DRAFT, `migration/full-sdk`)*. Adds the in-process MCP bridge (`src/agent/parsec_mcp.py`), the SDK orchestrator (`src/agent/sdk_orchestrator.py`), SSE parity (`src/agent/sdk_stream.py`), per-agent profiles (`src/agent/sdk_profiles.py`) and skill publishing (`src/skills/sdk_root.py`). Also carries fixes that apply to **both** runtimes — see §12.
+**Phase 3 — the whole runtime:**
+- [#40](https://github.com/rhpds/parsec/pull/40) — **orchestrator + all six sub-agents on the SDK** *(MERGED, `b4d1d43`)*. Adds the in-process MCP bridge (`src/agent/parsec_mcp.py`), the SDK orchestrator (`src/agent/sdk_orchestrator.py`), SSE parity (`src/agent/sdk_stream.py`), per-agent profiles (`src/agent/sdk_profiles.py`) and skill publishing (`src/skills/sdk_root.py`). Also carries fixes that apply to **both** runtimes — see §12.
+- [#41](https://github.com/rhpds/parsec/pull/41) — **the runtime becomes a deploy variable** *(MERGED)*. Puts `agent.*` in the ConfigMap template and fixes `section()`, which lowercased nothing and so silently dropped every `agent.sdk.*` set by environment variable — Dynaconf uppercases env keys, so `PARSEC_AGENT__SDK__ORCHESTRATOR` had been a no-op.
+- [#43](https://github.com/rhpds/parsec/pull/43) — the flip, stacked *(CLOSED — superseded by #44)*.
+- [#44](https://github.com/rhpds/parsec/pull/44) — **flips the shipped defaults to the full cutover** *(MERGED, `ccdb746`)*. `playbooks/vars/common.yml` is now `agent_runtime: sdk`, `sdk_enabled_agents: ["all"]`, `sdk_orchestrator: true`. See §12 — the table there describes the *pre-#44* position.
+- [#45](https://github.com/rhpds/parsec/pull/45) — **the cutover did not survive contact with a real deployment** *(OPEN)*. Two blockers, both in §13.
 
 **Infra (related, coordinate on merge):**
 - [#26](https://github.com/rhpds/parsec/pull/26) — Helm chart for Parsec + MLflow *(OPEN)*.
@@ -193,13 +197,17 @@ Phases 1–2 ran *one sub-agent* through the SDK. Phase 3 adds the ability for t
 SDK to be the orchestrator too, so a request *can* be served end to end without
 the legacy loop — but the shipped defaults do not do that.
 
-**Three switches, all shipped in the legacy position**
+**Three switches** — shipped in the legacy position by #40, made deploy variables by #41,
+and flipped to the SDK position by [#44](https://github.com/rhpds/parsec/pull/44):
 
-| key | shipped default | to run the whole turn on the SDK |
+| key | #40 default | shipped default today |
 |---|---|---|
 | `agent.runtime` | `legacy` | `sdk` |
 | `agent.sdk.enabled_agents` | `["icinga"]` | `["all"]` |
 | `agent.sdk.orchestrator` | `false` | `true` |
+
+`agent.sdk.allow_writes` stays `false`. The rest of this section describes the #40
+position, which is still the useful mental model for how the switches interact.
 
 `_should_orchestrate_via_sdk` (`src/agent/orchestrator.py`) requires `runtime: sdk`
 **and** `orchestrator: true`, and fails safe to legacy on any exception. With the
@@ -260,3 +268,62 @@ legacy 13,699,398 fresh input tokens and 0 cached; SDK 225 fresh and 6,173,328 c
 [`redhat-et/rhdp-parsec-integration/eval/`](https://github.com/redhat-et/rhdp-parsec-integration/tree/main/eval);
 gated pages at `/deck` (n=20, ten tabs), `/parity` (the original 10-query Icinga A/B),
 `/parity/v1` and `/parity/v2`.
+
+---
+
+## 13. What the cutover hit in a real deployment (#45)
+
+Flipping the defaults (#44) was not the end of it. `parsec-dev` was switched to
+`runtime: sdk` and every question came back:
+
+```
+the agent runtime failed: Not logged in · Please run /login
+```
+
+Two separate bugs, neither a logic error, both in the same blind spot: **something the
+app process has that never reaches the CLI subprocess the SDK forks.** That subprocess is
+a different process with different configuration, and every test mocks the SDK, so nothing
+caught either one. Worth internalising as a category before adding anything else here.
+
+**1 — The subprocess had no credentials.** The CLI authenticates itself from
+`ANTHROPIC_*` / `CLAUDE_CODE_*`. It cannot see Parsec's `anthropic.*` settings: they arrive
+as `PARSEC_ANTHROPIC__*`, and `build_subprocess_env` denies that namespace deliberately,
+since it holds every app secret (§7). Nothing translated one into the other. It looked fine
+because the runtime was only ever proven on `playbooks/parsec-sdk-e2e.yaml`, which sets
+`CLAUDE_CODE_USE_VERTEX` and `GOOGLE_APPLICATION_CREDENTIALS` **by hand on the pod**;
+`parsec-dev` and `parsec` run the LiteLLM backend and set neither.
+`backend_cli_env()` now derives the CLI's auth from `anthropic.backend` for all four
+backends, and evicts the other backends' keys so a stale `CLAUDE_CODE_USE_VERTEX` cannot
+send the CLI to Vertex while the app talks to the gateway.
+
+**2 — The Dockerfile's CLI pin was decorative.** `npm install -g
+@anthropic-ai/claude-code@2.1.169` decides nothing on its own: the SDK's `_find_cli()`
+prefers a CLI bundled inside the `claude-agent-sdk` wheel, which floats with the Python
+package. The bundled 2.1.185 sends `anthropic-beta: thinking-token-count-2026-05-13`, and
+the gateway's Vertex upstream rejects it with a 400 — while the pinned 2.1.169 answered the
+same prompt. `cli_path` now defaults to the pinned binary, **and the orchestrator path
+passes it at all**, which it never did: only `AgentSdkClient._build_options` set it, so the
+whole-turn cutover ignored even an explicit `agent.sdk.cli_path`.
+
+**How it was verified, and why that mattered.** `parsec-dev`'s configuration was reproduced
+on a separate instance and the real production query run at each step — the first fix alone
+was not enough, and only running it end to end showed that:
+
+| build | outcome |
+|---|---|
+| before | fails **silently** — no error event, empty answer, 0 tokens, 2s |
+| + credentials fix | authenticates, then 400s on the beta header |
+| + CLI pin | completes: `icinga` agent, `icinga-triage` skill, 20 tool calls, 2718-char answer |
+
+**Error surfacing.** The runtime's wording reached the chat box verbatim, and an
+investigator read "Please run /login" as an instruction and typed it into Parsec.
+`_failure_reason` now names deployment faults as deployment faults, keeping the raw text
+alongside for the log.
+
+**Still open.** A parallel audit confirmed 12 further SDK-path defects — dead
+`agent.sdk.timeout` on the orchestrator, `total_latency_ms` / `tool_calls` / `tool_errors`
+always 0, history written as a bare string (so the learnings loop is dormant and reloaded
+conversations lose their tool calls), `icinga-triage/SKILL.md` naming tools the MCP bridge
+replaced, container CPU never raised for the Node subprocess, and Icinga **writes**
+reachable from the SDK orchestrator that the legacy orchestrator could not reach. None of
+them block the cutover; all of them are real.

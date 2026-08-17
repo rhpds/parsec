@@ -620,3 +620,27 @@ def test_unknown_invoked_skill_is_not_surfaced(tr, monkeypatch):
 
     assert "skill_used" not in blob
     assert "onerror" not in blob
+
+
+def test_orchestrator_pins_the_cli_binary(_sdk_stub, monkeypatch):
+    """Regression: the orchestrator path never passed cli_path at all.
+
+    Only the sub-agent path (AgentSdkClient._build_options) set it, so the
+    orchestrated turn ran on whatever CLI ships inside the claude-agent-sdk
+    wheel. In the current image that is 2.1.185, which sends an
+    `anthropic-beta: thinking-token-count-*` header that Parsec's LiteLLM
+    gateway rejects with a 400 — the pinned 2.1.169 answers the same prompt.
+    """
+    from src.llm import agent_sdk_client
+
+    monkeypatch.setattr(agent_sdk_client.shutil, "which", lambda _: "/usr/local/bin/claude")
+
+    assert _opts(_sdk_stub).cli_path == "/usr/local/bin/claude"
+
+
+def test_orchestrator_cli_path_is_configurable(_sdk_stub):
+    from src.agent.sdk_orchestrator import build_orchestrator_options
+
+    cfg = {"agent": {"runtime": "sdk", "sdk": {"cli_path": "/opt/pinned/claude"}}}
+
+    assert build_orchestrator_options(cfg, system="sys").cli_path == "/opt/pinned/claude"

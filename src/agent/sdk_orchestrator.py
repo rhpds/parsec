@@ -181,7 +181,12 @@ def build_orchestrator_options(config: Any, *, system: str) -> Any:
 
     from src.agent.parsec_mcp import SERVER_NAME, build_server, tool_names_for
     from src.agent.sdk_profiles import _sdk_section
-    from src.llm.agent_sdk_client import AgentSdkConfig, build_subprocess_env
+    from src.llm.agent_sdk_client import (
+        AgentSdkConfig,
+        backend_cli_env,
+        build_subprocess_env,
+        default_cli_path,
+    )
 
     sdk_cfg = _sdk_section(config)
     allow_writes = bool(sdk_cfg.get("allow_writes", False))
@@ -208,8 +213,15 @@ def build_orchestrator_options(config: Any, *, system: str) -> Any:
     max_turns = int(sdk_cfg.get("max_turns") or anthropic_cfg.get("max_tool_rounds") or 10)
 
     defaults = AgentSdkConfig(model=str(model))
+    # Pin the binary here too. Without it the SDK picks the CLI bundled in its
+    # own wheel, which floats with claude-agent-sdk: the image's 2.1.185 sends
+    # an `anthropic-beta: thinking-token-count-*` header that the LiteLLM
+    # gateway's Vertex upstream rejects with a 400, so every orchestrated turn
+    # died on a backend the sub-agent path had already been fixed for.
+    cli_path = str(sdk_cfg.get("cli_path", "") or "").strip() or default_cli_path()
     return ClaudeAgentOptions(
         model=str(model),
+        cli_path=cli_path,
         system_prompt=system,
         max_turns=max_turns,
         agents=_agent_definitions(config),
@@ -221,7 +233,7 @@ def build_orchestrator_options(config: Any, *, system: str) -> Any:
         permission_mode=_permission_mode(sdk_cfg.get("permission_mode"), defaults.permission_mode),
         strict_mcp_config=True,
         setting_sources=_setting_sources(defaults.setting_sources),
-        env=build_subprocess_env(_tracing_env(config)),
+        env=build_subprocess_env(_tracing_env(config), backend_cli_env(config)),
         cwd=str(sdk_cfg.get("cwd") or "") or None,
         # Token-level deltas, so the UI streams like the legacy path.
         include_partial_messages=True,
