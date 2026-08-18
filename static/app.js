@@ -349,6 +349,11 @@ function buildInstallForm() {
     subdir.value = "skills";
     subdir.setAttribute("aria-label", "Subdirectory containing skill folders");
 
+    const only = el("input", "skills-input");
+    only.type = "text";
+    only.placeholder = "leave blank for all, or: root-cause-analysis, rca-annotator";
+    only.setAttribute("aria-label", "Only these skills");
+
     const go = el("button", "skills-btn skills-btn-primary", "Install");
     go.addEventListener("click", function() {
         go.disabled = true;
@@ -356,7 +361,12 @@ function buildInstallForm() {
         fetch("/api/skills/install", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ repo_url: repo.value.trim(), ref: ref.value.trim(), subdir: subdir.value.trim() })
+            body: JSON.stringify((function() {
+                const b = { repo_url: repo.value.trim(), ref: ref.value.trim(), subdir: subdir.value.trim() };
+                const picked = only.value.split(",").map(function(x) { return x.trim(); }).filter(Boolean);
+                if (picked.length) b.skills = picked;
+                return b;
+            })())
         }).then(function(r) {
             return r.json().then(function(b) { return { ok: r.ok, body: b }; });
         }).then(function(res) {
@@ -378,6 +388,8 @@ function buildInstallForm() {
     form.appendChild(ref);
     form.appendChild(el("div", "skills-install-label", "Subdirectory"));
     form.appendChild(subdir);
+    form.appendChild(el("div", "skills-install-label", "Install only these (recommended — a whole repo drags in skills that cannot run here)"));
+    form.appendChild(only);
     form.appendChild(go);
     return form;
 }
@@ -450,6 +462,23 @@ function renderSkills(skills) {
             const path = el("div", "skill-path", s.skill_path);
             path.title = "Discovered from " + s.skill_path;
             card.appendChild(path);
+        }
+
+        if (skillsState.is_admin && s.removable) {
+            const rm = el("button", "skill-revert", "uninstall");
+            rm.type = "button";
+            rm.title = "Delete this installed bundle skill from " + s.skill_path;
+            rm.addEventListener("click", function() {
+                rm.disabled = true;
+                fetch("/api/skills/" + encodeURIComponent(s.name), { method: "DELETE" })
+                    .then(function(r) { return r.json().then(function(b) {
+                        if (!r.ok) throw new Error(b.detail || "could not uninstall");
+                        return b;
+                    }); })
+                    .then(function() { skillsFlash("Uninstalled " + s.name); loadSkills(); })
+                    .catch(function(err) { skillsFlash(err.message, true); rm.disabled = false; });
+            });
+            card.appendChild(rm);
         }
 
         skillsListEl.appendChild(card);

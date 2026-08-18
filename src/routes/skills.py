@@ -122,12 +122,29 @@ def _collect(cfg: Any) -> tuple[list[SkillManifest], dict[str, Attachment]]:
     return manifests, attachments
 
 
+def _is_removable(skill_path: Path, install_root: str | None) -> bool:
+    """Whether DELETE /api/skills/{name} would accept this skill.
+
+    Only what the installer wrote is removable. In-repo skills ship in the image
+    and are removed by a PR, so the UI must not offer a button that would 404 —
+    or worse, imply the API can edit the repo.
+    """
+    if not install_root:
+        return False
+    try:
+        skill_path.resolve().relative_to(Path(str(install_root)).resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
 def _serialize(
     m: SkillManifest,
     *,
     attachment: Attachment,
     health_dict: dict[str, Any],
     sdk_visible: bool,
+    removable: bool = False,
 ) -> dict[str, Any]:
     return {
         "name": m.name,
@@ -150,6 +167,7 @@ def _serialize(
         "attachment": attachment.to_dict(),
         "health": health_dict,
         "provenance": _read_provenance(m.skill_path),
+        "removable": removable,
     }
 
 
@@ -200,6 +218,8 @@ async def list_skills(
         visible = set()
 
     surface = build_tool_surface()
+    section_cfg = _skills_section(cfg)
+    install_root = section_cfg.get("install_root")
     out: list[dict[str, Any]] = []
     counts = {"ok": 0, "degraded": 0, "orphaned": 0, "unusable": 0}
 
@@ -213,16 +233,17 @@ async def list_skills(
                 attachment=att,
                 health_dict=health.to_dict(),
                 sdk_visible=m.name in visible,
+                removable=_is_removable(m.skill_path, install_root),
             )
         )
 
-    section = _skills_section(cfg)
+    section_cfg = _skills_section(cfg)
     return {
         "count": len(out),
         "sdk_visible_count": sum(1 for s in out if s["sdk_visible"]),
         "sdk_skills_root": str(root),
-        "plugin_paths": list(section.get("plugin_paths") or []),
-        "install_enabled": bool(section.get("install_enabled", False)),
+        "plugin_paths": list(section_cfg.get("plugin_paths") or []),
+        "install_enabled": bool(section_cfg.get("install_enabled", False)),
         "is_admin": await is_admin_user_async(user),
         "health_counts": counts,
         "agents": sorted(_known_agents()),
@@ -390,6 +411,16 @@ async def install_skills(
     ref = str(payload.get("ref", "")).strip()
     subdir = str(payload.get("subdir", "skills")).strip().strip("/")
 
+    raw_only = payload.get("skills")
+    only: set[str] | None = None
+    if raw_only is not None:
+        if not isinstance(raw_only, list):
+            raise HTTPException(status_code=400, detail="'skills' must be a list of names")
+        only = {str(x) for x in raw_only}
+        bad = sorted(n for n in only if not _SKILL_NAME_RE.match(n))
+        if bad:
+            raise HTTPException(status_code=400, detail=f"Invalid skill names: {', '.join(bad)}")
+
     match = _REPO_RE.match(repo_url)
     if not match:
         raise HTTPException(status_code=400, detail="repo_url must be https://<host>/<org>/<repo>")
@@ -412,7 +443,7 @@ async def install_skills(
         )
 
     try:
-        installed, sha = await _clone_and_install(repo_url, ref, subdir, root)
+        installed, sha = await _clone_and_install(repo_url, ref, subdir, root, only)
     except HTTPException:
         raise
     except Exception as e:
@@ -438,6 +469,61 @@ async def install_skills(
         "published": sorted(published),
         "hint": "Newly installed skills are attached by parsec.domain; set attachment explicitly if they declare none.",
     }
+
+
+@router.delete("/skills/{name}", responses={403: {"description": "Forbidden"}})
+async def uninstall_skill(
+    request: Request,
+    name: str,
+    x_forwarded_user: Annotated[str | None, Header()] = None,
+    x_forwarded_email: Annotated[str | None, Header()] = None,
+):
+    """Remove a skill that was installed into the writable install root.
+
+    Deliberately narrow. It resolves the target and refuses unless the path sits
+    inside ``skills.install_root`` — so an in-repo skill under ``skills/``, which
+    is part of the image and belongs to a PR, can never be deleted through the
+    API. Without this, install was a one-way door: a bundle that turned out to
+    contain skills Parsec cannot run had to be removed by rebuilding the pod.
+    """
+    user = x_forwarded_email or x_forwarded_user
+    await _check_user_allowed(request, user)
+    await _require_admin(user)
+
+    if not _SKILL_NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="Invalid skill name")
+
+    cfg = get_config()
+    install_root = _skills_section(cfg).get("install_root")
+    if not install_root:
+        raise HTTPException(status_code=409, detail="skills.install_root is not configured")
+
+    root = Path(str(install_root)).resolve()
+    target = (root / name).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="Refusing to delete outside install_root"
+        ) from None
+    if not target.is_dir():
+        raise HTTPException(
+            status_code=404,
+            detail=f"{name!r} is not an installed skill (in-repo skills are removed by a PR, not here)",
+        )
+
+    shutil.rmtree(target)
+
+    # Republish so the SDK root loses its symlink on the same request.
+    try:
+        manifests = SkillLoader.from_config(cfg).load_all()
+        published = sync_sdk_skill_root(manifests, cwd=_sdk_cwd(cfg))
+    except Exception:
+        logger.exception("Removed %s but reload failed", name)
+        published = {}
+
+    logger.info("Skill %r uninstalled by %s", name, user)
+    return {"uninstalled": name, "remaining": len(published), "published": sorted(published)}
 
 
 async def _run(*args: str, cwd: str | None = None) -> tuple[int, str, str]:
@@ -469,7 +555,7 @@ def _dir_size(path: Path) -> int:
 
 
 async def _clone_and_install(
-    repo_url: str, ref: str, subdir: str, root: Path
+    repo_url: str, ref: str, subdir: str, root: Path, only: set[str] | None = None
 ) -> tuple[list[str], str]:
     """Clone at ``ref``, copy each skill directory into ``root``, record provenance.
 
@@ -527,6 +613,12 @@ async def _clone_and_install(
             if not _SKILL_NAME_RE.match(child.name):
                 logger.warning("Skipping skill dir with unusable name: %s", child.name)
                 continue
+            if only is not None and child.name not in only:
+                # Selective install. Pulling a whole repo drags in skills that
+                # cannot run here (ET's shell-based ones) and templates that
+                # were never meant to ship, and every one of them then needs
+                # explaining in the UI.
+                continue
             dest = root / child.name
             if dest.exists():
                 shutil.rmtree(dest, ignore_errors=True)
@@ -546,6 +638,7 @@ async def _clone_and_install(
             "resolved_sha": sha,
             "subdir": subdir,
             "skills": installed,
+            "requested": sorted(only) if only is not None else None,
         }
         try:
             (root / ".parsec-provenance.json").write_text(

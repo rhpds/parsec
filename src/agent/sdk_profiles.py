@@ -64,7 +64,13 @@ class SdkProfile:
 _AGENT_SKILLS: dict[str, tuple[str, ...]] = {
     "icinga": ("icinga-triage",),
     "cost": ("cost-anomaly-triage", "cost-spike-investigation", "provision-lookup"),
-    "aap2": ("aap2-job-failure-rca", "aap2-job-failure-triage", "root-cause-analysis"),
+    # `root-cause-analysis` was vendored here as a SKILL.md only. It requested
+    # Bash/Read/Write (which this runtime does not grant), drove a `scripts/`
+    # directory that was never copied, and — because project_root wins
+    # `_deduplicate` — shadowed the real 32-file skill whenever the upstream
+    # bundle was mounted. `aap2-job-failure-rca` carries the same method against
+    # bridged tools. Mount the ET bundle if you want the original.
+    "aap2": ("aap2-job-failure-rca", "aap2-job-failure-triage"),
     "security": ("abuse-account-detection", "provision-lookup"),
     "babylon": ("provision-lookup",),
     "ocpv": (),
