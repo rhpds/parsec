@@ -1982,6 +1982,178 @@ footer {
     line-height: 1.5;
 }
 
+/* Skills control plane — health, attachment, install.
+   Status is encoded in both a left stripe and a word, never colour alone. */
+
+.skills-toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.skills-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.skills-stat {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    background: var(--bg-tool);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 2px 7px;
+}
+
+.skills-stat-bad { color: var(--error); border-color: var(--error); }
+.skills-stat-warn { color: var(--warning); border-color: var(--warning); }
+.skills-stat-good { color: var(--success); border-color: var(--success); }
+
+.skills-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.skills-btn {
+    font-family: inherit;
+    font-size: 11px;
+    color: var(--text);
+    background: var(--bg-tool);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 4px 10px;
+    cursor: pointer;
+}
+
+.skills-btn:hover:not(:disabled) { border-color: var(--accent-bright); color: var(--accent-bright); }
+.skills-btn:disabled { opacity: 0.55; cursor: default; }
+.skills-btn:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 1px; }
+.skills-btn-primary { color: var(--accent-bright); border-color: var(--accent-dim); }
+
+.skills-hint, .skills-install-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+
+.skills-install {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 10px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+}
+
+.skills-input {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text);
+    background: var(--bg-tool);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 5px 7px;
+    width: 100%;
+}
+
+.skills-input:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 1px; }
+
+.skills-flash {
+    font-size: 11px;
+    color: var(--success);
+    line-height: 1.45;
+    word-break: break-word;
+}
+
+.skills-flash-error { color: var(--error); }
+
+/* Left stripe carries status at a glance; the word carries it for everyone else. */
+.skill-card-unusable { border-left: 3px solid var(--error); }
+.skill-card-orphaned { border-left: 3px solid var(--warning); }
+
+.skill-status {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-radius: var(--radius-sm);
+    padding: 1px 6px;
+    margin-left: auto;
+}
+
+.skill-status-unusable { color: var(--error); border: 1px solid var(--error); }
+.skill-status-orphaned { color: var(--warning); border: 1px solid var(--warning); }
+
+.skill-reason {
+    font-size: 10.5px;
+    color: var(--error);
+    line-height: 1.45;
+    margin-top: 3px;
+    word-break: break-word;
+}
+
+.skill-note {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    line-height: 1.45;
+    margin-top: 3px;
+    word-break: break-word;
+}
+
+.skill-agents {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-top: 7px;
+}
+
+.skill-agents-label, .skill-agents-none, .skill-origin {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.skill-origin { margin-left: auto; }
+
+.skill-chip {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px dashed var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 1px 7px;
+    cursor: pointer;
+}
+
+.skill-chip:hover:not(:disabled) { border-color: var(--accent-bright); color: var(--accent-bright); }
+.skill-chip:disabled { cursor: default; opacity: 0.6; }
+.skill-chip:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 1px; }
+
+.skill-chip-on {
+    color: var(--accent-bright);
+    border-style: solid;
+    border-color: var(--accent-dim);
+    background: var(--bg-tool);
+}
+
+.skill-revert {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 0 2px;
+}
+
+.skill-revert:hover:not(:disabled) { color: var(--accent-bright); }
+
 /* Skill badge — a skill can shape an answer with no tool call of its own
    (preloaded skills sit in the agent's context from turn one), so this is the
    only signal in the UI that one was in play. */
