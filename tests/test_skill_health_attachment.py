@@ -289,3 +289,54 @@ def test_usable_covers_reachable_states(status):
 
     assert SkillHealth(status=status).usable is True
     assert SkillHealth(status="unusable").usable is False
+
+
+# ------------------------------------------------------- env-var config casing
+
+
+def test_env_var_style_uppercase_skills_config_is_honoured(tmp_path):
+    """skills.* supplied purely by environment must not be silently ignored.
+
+    Found on a live pod, not in review. Dynaconf materialises
+    ``PARSEC_SKILLS__INSTALL_ENABLED=true`` as ``{"SKILLS": {"INSTALL_ENABLED":
+    True}}`` — UPPERCASE, because config.yaml did not already declare that key.
+    Keys that *are* in config.yaml (``plugin_paths``) stay lowercase, so a
+    mixed-case section is the normal deployed state and a plain lowercase read
+    silently dropped every deploy-var override: install stayed off and the state
+    file went to the wrong path.
+
+    This is the same class of bug as ``agent.sdk.*``, which is why
+    ``src.llm.config_section.section`` exists. Every skills config read now goes
+    through it.
+    """
+    from src.routes.skills import _skills_section
+    from src.skills.attachment import state_path
+
+    cfg = {
+        "SKILLS": {
+            "plugin_paths": ["/app/data/installed-skills"],
+            "INSTALL_ENABLED": True,
+            "INSTALL_ROOT": "/app/data/installed-skills",
+            "STATE_PATH": str(tmp_path / "state.json"),
+        }
+    }
+
+    resolved = _skills_section(cfg)
+    assert resolved["install_enabled"] is True, "uppercase env key was dropped"
+    assert resolved["install_root"] == "/app/data/installed-skills"
+    assert resolved["plugin_paths"] == ["/app/data/installed-skills"]
+    assert state_path(cfg) == tmp_path / "state.json"
+
+
+def test_loader_reads_uppercase_env_supplied_roots(tmp_path):
+    """The loader has the same exposure: env-only roots must still be found."""
+    _write_skill(
+        tmp_path,
+        "env-mounted",
+        "name: env-mounted\ndescription: Discovered from an env-var-supplied project root.\n",
+    )
+    manifests = SkillLoader.from_config(
+        {"SKILLS": {"PROJECT_ROOT": str(tmp_path), "PLUGIN_PATHS": [], "USER_ROOT": ""}}
+    ).load_all()
+
+    assert [m.name for m in manifests] == ["env-mounted"]

@@ -41,6 +41,7 @@ from fastapi import APIRouter, Body, Header, HTTPException, Request
 
 from src.agent.learnings import is_admin_user_async
 from src.config import get_config
+from src.llm.config_section import section
 from src.routes.query import _check_user_allowed
 from src.skills import SkillLoader, SkillManifest, sync_sdk_skill_root
 from src.skills.attachment import (
@@ -80,15 +81,23 @@ _REPO_RE = re.compile(r"^https://([a-zA-Z0-9.-]+)/([\w.-]+/[\w.-]+?)(?:\.git)?$"
 def _sdk_cwd(cfg: Any) -> str | None:
     """The cwd the SDK subprocess uses, which is also where its skills root lives."""
     try:
-        return cfg.get("agent", {}).get("sdk", {}).get("cwd") or None
+        return section(section(cfg, "agent"), "sdk").get("cwd") or None
     except Exception:
         return None
 
 
 def _skills_section(cfg: Any) -> dict[str, Any]:
+    """The ``skills`` block, with keys normalised to lowercase.
+
+    Read through :func:`section` rather than ``cfg.get("skills")`` because
+    Dynaconf materialises env-supplied settings with UPPERCASE keys when the
+    YAML does not already declare them. On a deployed pod,
+    ``PARSEC_SKILLS__INSTALL_ENABLED=true`` arrives as ``INSTALL_ENABLED`` while
+    ``plugin_paths`` (present in config.yaml) stays lowercase — so a plain
+    lowercase read silently ignored every deploy-var override.
+    """
     try:
-        raw = cfg.get("skills", {}) or {}
-        return raw.to_dict() if hasattr(raw, "to_dict") else dict(raw)
+        return section(cfg, "skills")
     except Exception:
         return {}
 

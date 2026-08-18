@@ -75,9 +75,9 @@ def state_path(config: Any = None) -> Path:
     """
     if config is not None:
         try:
-            raw = config.get("skills", {}) or {}
-            section = raw.to_dict() if hasattr(raw, "to_dict") else dict(raw)
-            configured = section.get("state_path")
+            from src.llm.config_section import section
+
+            configured = section(config, "skills").get("state_path")
             if configured:
                 return Path(str(configured))
         except Exception:

@@ -235,12 +235,13 @@ def _get_skills_section(config: Any) -> dict[str, Any]:
     Dynaconf exposes nested sections as dotted attribute access but also as
     a ``.get`` method that returns a Box. We coerce to dict for simplicity.
     """
-    raw = config.get("skills", {}) if hasattr(config, "get") else getattr(config, "skills", {})
-    if raw is None:
-        return {}
-    if hasattr(raw, "to_dict"):
-        return raw.to_dict()
-    return dict(raw)
+    from src.llm.config_section import section
+
+    # Case-insensitive: Dynaconf materialises env-supplied settings with
+    # UPPERCASE keys when config.yaml does not already declare them, so a
+    # deployment that sets only PARSEC_SKILLS__PROJECT_ROOT would otherwise be
+    # read as if it had set nothing.
+    return section(config, "skills")
 
 
 def _split_frontmatter(path: Path, raw: str) -> tuple[str, str]:
