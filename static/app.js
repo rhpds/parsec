@@ -443,7 +443,7 @@ function renderSkills(skills) {
         if (s.parsec?.domain) bits.push(s.parsec.domain);
         if (s.allowed_tools?.length) bits.push(s.allowed_tools.length + " tools");
         if (s.provenance?.resolved_sha) bits.push("pinned " + String(s.provenance.resolved_sha).slice(0, 8));
-        else if (s.source === "project") bits.push("unpinned");
+        else if (s.source !== "project") bits.push("unpinned");
         if (bits.length) card.appendChild(el("div", "skill-meta", bits.join(" · ")));
 
         (health.reasons || []).forEach(function(r) {
@@ -517,13 +517,18 @@ function buildAgentRow(s) {
         row.appendChild(chip);
     });
 
-    if (!attached.size) row.appendChild(el("span", "skill-agents-none", "none"));
-
-    const src = el("span", "skill-origin", origin === "override" ? "manual" : origin);
+    const foot = el("div", "skill-agents-foot");
+    let originText;
+    if (!attached.size) {
+        originText = origin === "override" ? "switched off" : "not attached — declare parsec.domain";
+    } else {
+        originText = origin === "override" ? "set manually" : "from " + origin;
+    }
+    const src = el("span", "skill-origin", originText);
     src.title = origin === "override"
-        ? "Set manually; overrides the derived attachment"
-        : "Derived from " + (origin === "none" ? "nothing — declare parsec.domain" : origin);
-    row.appendChild(src);
+        ? "An operator set this explicitly; it overrides the derived attachment"
+        : "Derived from the skill's own frontmatter and the shipped agent map";
+    foot.appendChild(src);
 
     if (skillsState.is_admin && origin === "override") {
         const revert = el("button", "skill-revert", "reset");
@@ -536,9 +541,10 @@ function buildAgentRow(s) {
                 .then(function() { skillsFlash(s.name + " reverted to derived attachment"); loadSkills(); })
                 .catch(function(err) { skillsFlash(err.message, true); revert.disabled = false; });
         });
-        row.appendChild(revert);
+        foot.appendChild(revert);
     }
 
+    row.appendChild(foot);
     return row;
 }
 

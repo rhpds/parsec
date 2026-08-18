@@ -1948,6 +1948,10 @@ footer {
 }
 
 .skill-desc {
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
     font-size: 11px;
     color: var(--text);
     line-height: 1.5;
@@ -1973,7 +1977,10 @@ footer {
     margin-top: 6px;
     padding-top: 6px;
     border-top: 1px solid var(--border-subtle);
-    word-break: break-all;
+    /* Install paths are long and have no spaces. break-all splits mid-token
+       into nonsense like "root-cau / se-analysis"; anywhere prefers the
+       hyphens and slashes that are already there. */
+    overflow-wrap: anywhere;
 }
 
 .skills-empty {
@@ -2079,7 +2086,8 @@ footer {
     letter-spacing: 0.05em;
     border-radius: var(--radius-sm);
     padding: 1px 6px;
-    margin-left: auto;
+    /* No margin-left:auto — in a wrapping flex it pushes the badge onto a line
+       of its own, detached from the name it describes. */
 }
 
 .skill-status-unusable { color: var(--error); border: 1px solid var(--error); }
@@ -2109,14 +2117,20 @@ footer {
     margin-top: 7px;
 }
 
-.skill-agents-label, .skill-agents-none, .skill-origin {
+.skill-agents-label, .skill-origin {
     font-size: 9px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--text-muted);
 }
 
-.skill-origin { margin-left: auto; }
+.skill-agents-foot {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    width: 100%;
+    margin-top: 4px;
+}
 
 .skill-chip {
     font-family: var(--font-mono);
