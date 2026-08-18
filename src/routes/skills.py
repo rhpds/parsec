@@ -178,17 +178,14 @@ def _read_provenance(skill_path: Path) -> dict[str, Any] | None:
     unverified, which is exactly the state the vendored ``root-cause-analysis``
     copy is in.
     """
-    for candidate in (
-        skill_path / ".parsec-provenance.json",
-        skill_path.parent / ".parsec-provenance.json",
-    ):
-        try:
-            if candidate.is_file():
-                data = json.loads(candidate.read_text(encoding="utf-8"))
-                if isinstance(data, dict):
-                    return data
-        except (OSError, ValueError):
-            logger.debug("Unreadable provenance at %s", candidate)
+    candidate = skill_path / ".parsec-provenance.json"
+    try:
+        if candidate.is_file():
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+    except (OSError, ValueError):
+        logger.debug("Unreadable provenance at %s", candidate)
     return None
 
 
@@ -640,11 +637,17 @@ async def _clone_and_install(
             "skills": installed,
             "requested": sorted(only) if only is not None else None,
         }
-        try:
-            (root / ".parsec-provenance.json").write_text(
-                json.dumps(provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-            )
-        except OSError:
-            logger.exception("Installed skills but could not write provenance")
+        # One record per installed skill, inside the skill. A single file at the
+        # install root would be read by every skill sharing that root via the
+        # parent lookup, so a later bundle would silently relabel an earlier
+        # one — and it would outlive an uninstall as a stale claim of provenance.
+        for name in installed:
+            try:
+                (root / name / ".parsec-provenance.json").write_text(
+                    json.dumps({**provenance, "skill": name}, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+            except OSError:
+                logger.exception("Installed %s but could not write its provenance", name)
 
         return installed, sha
