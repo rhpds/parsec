@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+inheritance: true
+reviews:
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  poem: false
+  path_instructions:
+    - path: "**"
+      instructions: >-
+        Focus on major issues impacting correctness, performance, readability,
+        maintainability, and security. Avoid nitpicks and avoid verbosity.
+    - path: "src/agent/**"
+      instructions: >-
+        Prioritize agent-orchestration correctness: tool routing, prompt/tool
+        definition consistency, error handling, retries/timeouts, and context
+        boundary leaks between sub-agents. Flag brittle assumptions that could
+        cause misleading answers or unsafe actions.
+    - path: "src/tools/**"
+      instructions: >-
+        Prioritize external-system safety and query correctness. Flag
+        over-permissive access, missing validation, weak error handling,
+        and data interpretation issues that could produce incorrect operational
+        conclusions.
+    - path: "tests/**"
+      instructions: >-
+        Focus on missing high-value coverage for regression-prone behavior,
+        especially tool dispatch, orchestration, and failure paths.
+  auto_review:
+    ignore_title_keywords:
+      - WIP
+      - DRAFT
+      - Draft
+    labels:
+      - "!work-in-progress"
+      - "!do-not-review"
+    ignore_usernames:
+      - app/dependabot
+      - dependabot
+      - renovate[bot]
+knowledge_base:
+  opt_out: true
+  web_search:
+    enabled: false
