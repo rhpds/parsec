@@ -140,6 +140,52 @@ def _incomplete(backend: str, needs: str) -> dict[str, str]:
     return {}
 
 
+def _litellm_cli_env(anthropic_cfg: dict[str, Any]) -> dict[str, str]:
+    base_url = str(anthropic_cfg.get("litellm_base_url", "") or "").strip()
+    api_key = str(anthropic_cfg.get("litellm_api_key", "") or "").strip()
+    if not (base_url and api_key):
+        return _incomplete("litellm", "anthropic.litellm_base_url + anthropic.litellm_api_key")
+    # A bearer token rather than ANTHROPIC_API_KEY's x-api-key header: this
+    # is a gateway, not the Anthropic API. LiteLLM accepts either.
+    return {"ANTHROPIC_BASE_URL": base_url, "ANTHROPIC_AUTH_TOKEN": api_key}
+
+
+def _vertex_cli_env(anthropic_cfg: dict[str, Any], config: Any) -> dict[str, str]:
+    gcp_cfg = section(config, "gcp") or {}
+    project = (
+        str(anthropic_cfg.get("vertex_project_id", "") or "").strip()
+        or str(gcp_cfg.get("project_id", "") or "").strip()
+    )
+    if not project:
+        return _incomplete("vertex", "anthropic.vertex_project_id or gcp.project_id")
+    env = {
+        "CLAUDE_CODE_USE_VERTEX": "1",
+        "ANTHROPIC_VERTEX_PROJECT_ID": project,
+        "CLOUD_ML_REGION": str(anthropic_cfg.get("vertex_region", "") or "us-east5").strip(),
+    }
+    creds = str(anthropic_cfg.get("vertex_credentials_path", "") or "").strip()
+    if creds:
+        env["GOOGLE_APPLICATION_CREDENTIALS"] = creds
+    return env
+
+
+def _bedrock_cli_env(anthropic_cfg: dict[str, Any], config: Any) -> dict[str, str]:
+    aws_cfg = section(config, "aws") or {}
+    region = (
+        str(anthropic_cfg.get("bedrock_region", "") or "").strip()
+        or str(aws_cfg.get("region", "") or "").strip()
+        or "us-east-1"
+    )
+    return {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": region}
+
+
+def _api_cli_env(anthropic_cfg: dict[str, Any]) -> dict[str, str]:
+    api_key = str(anthropic_cfg.get("api_key", "") or "").strip()
+    if not api_key:
+        return _incomplete("api", "anthropic.api_key")
+    return {"ANTHROPIC_API_KEY": api_key}
+
+
 def backend_cli_env(config: Any) -> dict[str, str]:
     """Translate Parsec's LLM backend settings into the CLI's own auth env.
 
@@ -155,45 +201,12 @@ def backend_cli_env(config: Any) -> dict[str, str]:
     backend = str(anthropic_cfg.get("backend", "api") or "api").strip().lower()
 
     if backend == "litellm":
-        base_url = str(anthropic_cfg.get("litellm_base_url", "") or "").strip()
-        api_key = str(anthropic_cfg.get("litellm_api_key", "") or "").strip()
-        if not (base_url and api_key):
-            return _incomplete(backend, "anthropic.litellm_base_url + anthropic.litellm_api_key")
-        # A bearer token rather than ANTHROPIC_API_KEY's x-api-key header: this
-        # is a gateway, not the Anthropic API. LiteLLM accepts either.
-        return {"ANTHROPIC_BASE_URL": base_url, "ANTHROPIC_AUTH_TOKEN": api_key}
-
+        return _litellm_cli_env(anthropic_cfg)
     if backend == "vertex":
-        gcp_cfg = section(config, "gcp") or {}
-        project = (
-            str(anthropic_cfg.get("vertex_project_id", "") or "").strip()
-            or str(gcp_cfg.get("project_id", "") or "").strip()
-        )
-        if not project:
-            return _incomplete(backend, "anthropic.vertex_project_id or gcp.project_id")
-        env = {
-            "CLAUDE_CODE_USE_VERTEX": "1",
-            "ANTHROPIC_VERTEX_PROJECT_ID": project,
-            "CLOUD_ML_REGION": str(anthropic_cfg.get("vertex_region", "") or "us-east5").strip(),
-        }
-        creds = str(anthropic_cfg.get("vertex_credentials_path", "") or "").strip()
-        if creds:
-            env["GOOGLE_APPLICATION_CREDENTIALS"] = creds
-        return env
-
+        return _vertex_cli_env(anthropic_cfg, config)
     if backend == "bedrock":
-        aws_cfg = section(config, "aws") or {}
-        region = (
-            str(anthropic_cfg.get("bedrock_region", "") or "").strip()
-            or str(aws_cfg.get("region", "") or "").strip()
-            or "us-east-1"
-        )
-        return {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": region}
-
-    api_key = str(anthropic_cfg.get("api_key", "") or "").strip()
-    if not api_key:
-        return _incomplete(backend, "anthropic.api_key")
-    return {"ANTHROPIC_API_KEY": api_key}
+        return _bedrock_cli_env(anthropic_cfg, config)
+    return _api_cli_env(anthropic_cfg)
 
 
 def default_cli_path() -> str | None:
