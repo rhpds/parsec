@@ -11,7 +11,7 @@ const attachmentNameEl = document.getElementById("attachment-name");
 const attachmentRemoveBtn = document.getElementById("attachment-remove");
 
 const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 10 MB
-let pendingAttachment = null; // { name, content }
+let pendingAttachment = null;
 
 let conversationHistory = [];
 let currentConversationId = null;
@@ -131,7 +131,7 @@ function showAdminChatToggle() {
     toggle.className = "admin-chat-toggle";
     const myBtn = document.createElement("button");
     myBtn.id = "admin-toggle-my";
-    myBtn.className = "admin-toggle-btn" + (!adminViewAllChats ? " active" : "");
+    myBtn.className = "admin-toggle-btn" + (adminViewAllChats ? "" : " active");
     myBtn.textContent = "My Chats";
     const allBtn = document.createElement("button");
     allBtn.id = "admin-toggle-all";
@@ -328,7 +328,7 @@ function renderSkills(skills) {
         if (!resp.ok) return;
         return resp.json();
     }).then(function(data) {
-        if (!data || !data.is_admin) return;
+        if (!data?.is_admin) return;
         // Admin: show history tab and learnings
         isAdmin = true;
         tabHistory.style.display = "block";
@@ -560,8 +560,9 @@ marked.setOptions({ renderer: renderer });
             messagesEl.appendChild(el);
             return;
         }
-    } catch (e) {
+    } catch (authErr) {
         // Network error or no proxy (local dev) — proceed normally
+        console.debug("Auth check skipped:", authErr);
     }
 
     // Authorized (or local dev with no proxy) — show welcome
@@ -1073,7 +1074,9 @@ function _buildToolResultMap(messages) {
             if (block.type === "tool_result" && block.tool_use_id) {
                 try {
                     map[block.tool_use_id] = JSON.parse(block.content);
-                } catch (e) {
+                } catch (parseErr) {
+                    // Tool results are often plain text, not JSON
+                    console.debug("Tool result is not JSON:", parseErr);
                     map[block.tool_use_id] = block.content;
                 }
             }
@@ -1646,7 +1649,7 @@ form.addEventListener("submit", async (e) => {
                         const data = JSON.parse(line.slice(6));
                         processEvent(eventType, data);
                     } catch (parseErr) {
-                        console.warn("Failed to parse SSE data:", line);
+                        console.warn("Failed to parse SSE data:", parseErr, line);
                     }
                     eventType = null;
                 }
@@ -2410,7 +2413,7 @@ function renderFixTab() {
     html += '</div>';
 
     if (fix.before) {
-        html += '<div class="debug-section-title">Before' + (fix.line != null ? ' (line ' + fix.line + ')' : '') + '</div>';
+        html += '<div class="debug-section-title">Before' + (fix.line == null ? '' : ' (line ' + fix.line + ')') + '</div>';
         html += '<div class="debug-code">' + escHtml(fix.before) + '</div>';
     }
     if (fix.after) {
@@ -2548,7 +2551,7 @@ window.toggleEEFile = function(id, btn) {
 };
 
 function renderFixPreview() {
-    if (!debugResult || !debugResult.fix || debugActiveTab === "fix") {
+    if (!debugResult?.fix || debugActiveTab === "fix") {
         debugFixPreviewEl.style.display = "none";
         return;
     }

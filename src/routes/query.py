@@ -84,11 +84,7 @@ def _log_identity_debug(request: Request) -> None:
     identity_headers = {}
     for header_name, header_value in request.headers.items():
         lower = header_name.lower()
-        if (
-            lower.startswith("x-forwarded-")
-            or lower.startswith("x-auth-")
-            or lower.startswith("x-remote-")
-        ):
+        if lower.startswith(("x-forwarded-", "x-auth-", "x-remote-")):
             identity_headers[header_name] = header_value
 
     if identity_headers:

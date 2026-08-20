@@ -182,7 +182,7 @@ def _run_query(ct_client: Any, query: str, max_results: int) -> dict:
 
     # Extract column names from the header row
     header = all_rows[0]
-    columns = [list(cell.keys())[0] for cell in header]
+    columns = [next(iter(cell.keys())) for cell in header]
 
     # Parse data rows, auto-parsing Java-style maps in responseElements/requestParameters
     parsed_rows = []

@@ -204,8 +204,7 @@ def _find_fatal_context(lines: list[str]) -> set[int]:
     indices: set[int] = set()
     for i, line in enumerate(lines):
         if "fatal:" in line or "FAILED!" in line or line.lstrip().startswith("failed:"):
-            for j in range(max(0, i - 2), min(total, i + 4)):
-                indices.add(j)
+            indices.update(range(max(0, i - 2), min(total, i + 4)))
     return indices
 
 
@@ -213,7 +212,7 @@ def _find_recap_start(lines: list[str]) -> int | None:
     """Find the PLAY RECAP / TASKS RECAP section start index."""
     for i in range(len(lines) - 1, -1, -1):
         stripped = lines[i].strip()
-        if stripped.startswith("PLAY RECAP") or stripped.startswith("TASKS RECAP"):
+        if stripped.startswith(("PLAY RECAP", "TASKS RECAP")):
             return i
     return None
 

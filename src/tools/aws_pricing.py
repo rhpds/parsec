@@ -88,13 +88,13 @@ async def query_aws_pricing(
     hourly_price = region_pricing.get(os_type)
 
     if hourly_price is None:
-        available_regions = list(instance.get("pricing", {}).keys())
+        available_regions = sorted(instance.get("pricing", {}))[:5]
         return {
             "instance_type": instance_type,
             "region": region,
             "error": (
                 f"No {os_type} pricing for {instance_type} in {region}. "
-                f"Available regions: {', '.join(sorted(available_regions)[:5])}"
+                f"Available regions: {', '.join(available_regions)}"
             ),
         }
 

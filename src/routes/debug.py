@@ -127,7 +127,7 @@ async def diagnose(body: DiagnoseRequest):
     except PermissionError as e:
         raise HTTPException(status_code=401, detail=str(e)) from e
     except Exception as e:
-        logger.error("Diagnosis failed: %s", e, exc_info=True)
+        logger.exception("Diagnosis failed")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -144,7 +144,7 @@ async def correlation(body: CorrelationRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        logger.error("Correlation fetch failed: %s", e, exc_info=True)
+        logger.exception("Correlation fetch failed")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -161,5 +161,5 @@ async def ee_info(body: EERequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        logger.error("EE fetch failed: %s", e, exc_info=True)
+        logger.exception("EE fetch failed")
         raise HTTPException(status_code=500, detail=str(e)) from e

@@ -13,8 +13,8 @@ def sse_event(event: str, data: dict | str) -> str:
     if isinstance(data, dict):
         try:
             data = json.dumps(data)
-        except (TypeError, ValueError) as exc:
-            logger.error("Failed to serialize SSE %s event: %s", event, exc)
+        except (TypeError, ValueError):
+            logger.exception("Failed to serialize SSE %s event", event)
             data = json.dumps(data, default=str)
     return f"event: {event}\ndata: {data}\n\n"
 
