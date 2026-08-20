@@ -540,29 +540,27 @@ marked.setOptions({ renderer: renderer });
 
 // Auth check and welcome message on load
 (async function checkAuthAndShowWelcome() {
-    try {
-        const resp = await fetch("/api/auth/check");
-        if (resp.status === 403) {
-            // User is authenticated but not authorized
-            const err = await resp.json().catch(() => ({}));
-            document.getElementById("query-form").style.display = "none";
-            const el = document.createElement("div");
-            el.className = "access-denied";
-            const heading = document.createElement("h2");
-            heading.textContent = "Access Denied";
-            const detailP = document.createElement("p");
-            detailP.textContent = err.detail || "You are not authorized to use Parsec.";
-            const helpP = document.createElement("p");
-            helpP.textContent =
-                "If you believe this is an error, contact an RHDP administrator " +
-                "to be added to an authorized group.";
-            el.append(heading, detailP, helpP);
-            messagesEl.appendChild(el);
-            return;
-        }
-    } catch (authErr) {
-        // Network error or no proxy (local dev) — proceed normally
-        console.debug("Auth check skipped:", authErr);
+    const resp = await fetch("/api/auth/check").catch(function(err) {
+        console.debug("Auth check skipped:", err);
+        return null;
+    });
+    if (resp?.status === 403) {
+        // User is authenticated but not authorized
+        const err = await resp.json().catch(() => ({}));
+        document.getElementById("query-form").style.display = "none";
+        const el = document.createElement("div");
+        el.className = "access-denied";
+        const heading = document.createElement("h2");
+        heading.textContent = "Access Denied";
+        const detailP = document.createElement("p");
+        detailP.textContent = err.detail || "You are not authorized to use Parsec.";
+        const helpP = document.createElement("p");
+        helpP.textContent =
+            "If you believe this is an error, contact an RHDP administrator " +
+            "to be added to an authorized group.";
+        el.append(heading, detailP, helpP);
+        messagesEl.appendChild(el);
+        return;
     }
 
     // Authorized (or local dev with no proxy) — show welcome
@@ -1066,19 +1064,26 @@ function processStreamEvent(eventType, data, state) {
 
 // ─── renderSharedMessages helpers ───
 
+function _parseToolResultContent(content) {
+    if (typeof content !== "string") return content;
+    try {
+        return JSON.parse(content);
+    } catch (err) {
+        // Tool results are often plain text, not JSON — only SyntaxError is expected
+        if (err instanceof SyntaxError) {
+            return content;
+        }
+        throw err;
+    }
+}
+
 function _buildToolResultMap(messages) {
     const map = {};
     messages.forEach(function(msg) {
         if (msg.role !== "user" || !Array.isArray(msg.content)) return;
         msg.content.forEach(function(block) {
             if (block.type === "tool_result" && block.tool_use_id) {
-                try {
-                    map[block.tool_use_id] = JSON.parse(block.content);
-                } catch (parseErr) {
-                    // Tool results are often plain text, not JSON
-                    console.debug("Tool result is not JSON:", parseErr);
-                    map[block.tool_use_id] = block.content;
-                }
+                map[block.tool_use_id] = _parseToolResultContent(block.content);
             }
         });
     });
