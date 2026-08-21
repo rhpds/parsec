@@ -236,6 +236,17 @@ document.querySelectorAll(".sidebar-examples-list li").forEach(function(li) {
 // which comes from arbitrary on-disk SKILL.md files — can't inject markup.
 
 const skillsListEl = document.getElementById("skills-list");
+const skillsToolbarEl = document.getElementById("skills-toolbar");
+
+// Last payload, so a toggle can re-render without a round trip losing context.
+let skillsState = { skills: [], agents: [], is_admin: false, install_enabled: false };
+
+function el(tag, className, text) {
+    const n = document.createElement(tag);
+    if (className) n.className = className;
+    if (text !== undefined && text !== null) n.textContent = text;
+    return n;
+}
 
 function loadSkills() {
     skillsListEl.textContent = "Loading…";
@@ -243,82 +254,298 @@ function loadSkills() {
         if (!resp.ok) throw new Error("HTTP " + resp.status);
         return resp.json();
     }).then(function(data) {
+        skillsState = data;
+        renderSkillsToolbar(data);
         renderSkills(data.skills || []);
     }).catch(function(err) {
         skillsListEl.textContent = "";
-        const e = document.createElement("div");
-        e.className = "skills-empty";
-        e.textContent = "Could not load skills: " + err.message;
-        skillsListEl.appendChild(e);
+        skillsListEl.appendChild(el("div", "skills-empty", "Could not load skills: " + err.message));
+    });
+}
+
+function skillsFlash(msg, isError) {
+    const existing = document.getElementById("skills-flash");
+    if (existing) existing.remove();
+    const n = el("div", "skills-flash" + (isError ? " skills-flash-error" : ""), msg);
+    n.id = "skills-flash";
+    skillsToolbarEl.appendChild(n);
+    if (!isError) setTimeout(function() { n.remove(); }, 4000);
+}
+
+function renderSkillsToolbar(data) {
+    skillsToolbarEl.textContent = "";
+
+    const counts = data.health_counts || {};
+    const summary = el("div", "skills-summary");
+    summary.appendChild(el("span", "skills-stat", (data.count || 0) + " discovered"));
+    if (counts.unusable) {
+        summary.appendChild(el("span", "skills-stat skills-stat-bad", counts.unusable + " unusable"));
+    }
+    if (counts.orphaned) {
+        summary.appendChild(el("span", "skills-stat skills-stat-warn", counts.orphaned + " orphaned"));
+    }
+    if (!counts.unusable && !counts.orphaned) {
+        summary.appendChild(el("span", "skills-stat skills-stat-good", "all usable"));
+    }
+    skillsToolbarEl.appendChild(summary);
+
+    if (!data.is_admin) return;
+
+    const actions = el("div", "skills-actions");
+    const reload = el("button", "skills-btn", "Reload from disk");
+    reload.title = "Re-runs discovery and republishes the SDK skills root. No pod restart.";
+    reload.addEventListener("click", function() {
+        reload.disabled = true;
+        reload.textContent = "Reloading…";
+        fetch("/api/skills/reload", { method: "POST" }).then(function(r) {
+            return r.json().then(function(b) { return { ok: r.ok, body: b }; });
+        }).then(function(res) {
+            if (!res.ok) throw new Error(res.body.detail || "reload failed");
+            skillsFlash("Reloaded: " + res.body.discovered + " discovered, " + (res.body.published || []).length + " published.");
+            loadSkills();
+        }).catch(function(err) {
+            skillsFlash(err.message, true);
+        }).finally(function() {
+            reload.disabled = false;
+            reload.textContent = "Reload from disk";
+        });
+    });
+    actions.appendChild(reload);
+
+    if (data.install_enabled) {
+        const add = el("button", "skills-btn", "Add from Git");
+        add.addEventListener("click", function() {
+            const form = document.getElementById("skills-install-form");
+            if (form) { form.remove(); return; }
+            skillsToolbarEl.appendChild(buildInstallForm());
+        });
+        actions.appendChild(add);
+    }
+    skillsToolbarEl.appendChild(actions);
+
+    if (!data.install_enabled) {
+        skillsToolbarEl.appendChild(
+            el("div", "skills-hint", "Install from Git is off. Set skills.install_enabled and skills.install_root to enable.")
+        );
+    }
+}
+
+function buildInstallForm() {
+    const form = el("div", "skills-install");
+    form.id = "skills-install-form";
+
+    const repo = el("input", "skills-input");
+    repo.type = "text";
+    repo.placeholder = "https://github.com/redhat-et/rhdp-rca-plugin";
+    repo.setAttribute("aria-label", "Repository URL");
+
+    const ref = el("input", "skills-input");
+    ref.type = "text";
+    ref.placeholder = "main, a tag, or a full commit SHA";
+    ref.setAttribute("aria-label", "Git ref");
+
+    const subdir = el("input", "skills-input");
+    subdir.type = "text";
+    subdir.value = "skills";
+    subdir.setAttribute("aria-label", "Subdirectory containing skill folders");
+
+    const only = el("input", "skills-input");
+    only.type = "text";
+    only.placeholder = "leave blank for all, or: root-cause-analysis, rca-annotator";
+    only.setAttribute("aria-label", "Only these skills");
+
+    const go = el("button", "skills-btn skills-btn-primary", "Install");
+    go.addEventListener("click", function() {
+        go.disabled = true;
+        go.textContent = "Installing…";
+        fetch("/api/skills/install", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify((function() {
+                const b = { repo_url: repo.value.trim(), ref: ref.value.trim(), subdir: subdir.value.trim() };
+                const picked = only.value.split(",").map(function(x) { return x.trim(); }).filter(Boolean);
+                if (picked.length) b.skills = picked;
+                return b;
+            })())
+        }).then(function(r) {
+            return r.json().then(function(b) { return { ok: r.ok, body: b }; });
+        }).then(function(res) {
+            if (!res.ok) throw new Error(res.body.detail || "install failed");
+            skillsFlash("Installed " + res.body.installed.join(", ") + " at " + String(res.body.resolved_sha).slice(0, 8));
+            form.remove();
+            loadSkills();
+        }).catch(function(err) {
+            skillsFlash(err.message, true);
+        }).finally(function() {
+            go.disabled = false;
+            go.textContent = "Install";
+        });
+    });
+
+    form.appendChild(el("div", "skills-install-label", "Repository"));
+    form.appendChild(repo);
+    form.appendChild(el("div", "skills-install-label", "Ref (pin to a SHA for production)"));
+    form.appendChild(ref);
+    form.appendChild(el("div", "skills-install-label", "Subdirectory"));
+    form.appendChild(subdir);
+    form.appendChild(el("div", "skills-install-label", "Install only these (recommended — a whole repo drags in skills that cannot run here)"));
+    form.appendChild(only);
+    form.appendChild(go);
+    return form;
+}
+
+function setAttachment(name, agents, enabled) {
+    return fetch("/api/skills/" + encodeURIComponent(name) + "/attachment", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agents: agents, enabled: enabled })
+    }).then(function(r) {
+        return r.json().then(function(b) {
+            if (!r.ok) throw new Error(b.detail || "could not save");
+            return b;
+        });
     });
 }
 
 function renderSkills(skills) {
     skillsListEl.textContent = "";
     if (!skills.length) {
-        const empty = document.createElement("div");
-        empty.className = "skills-empty";
-        empty.textContent = "No skills discovered. Set skills.plugin_paths to mount a skill repo.";
-        skillsListEl.appendChild(empty);
+        skillsListEl.appendChild(
+            el("div", "skills-empty", "No skills discovered. Set skills.plugin_paths to mount a skill repo.")
+        );
         return;
     }
-    skills.forEach(function(s) {
-        const card = document.createElement("div");
-        card.className = "skill-card";
+    // Broken first: the whole point of the health view is that a problem is the
+    // thing you see, not the thing you scroll to.
+    const order = { unusable: 0, orphaned: 1, ok: 2 };
+    const sorted = skills.slice().sort(function(a, b) {
+        const d = (order[a.health?.status] ?? 3) - (order[b.health?.status] ?? 3);
+        return d !== 0 ? d : a.name.localeCompare(b.name);
+    });
 
-        const head = document.createElement("div");
-        head.className = "skill-card-head";
-        const name = document.createElement("span");
-        name.className = "skill-name";
-        name.textContent = s.name;
-        head.appendChild(name);
-        if (s.source) {
-            const src = document.createElement("span");
-            src.className = "skill-badge";
-            src.textContent = s.source;
-            head.appendChild(src);
-        }
-        if (s.is_parsec_native) {
-            const nat = document.createElement("span");
-            nat.className = "skill-badge skill-badge-native";
-            nat.textContent = "parsec";
-            head.appendChild(nat);
+    sorted.forEach(function(s) {
+        const health = s.health || {};
+        const card = el("div", "skill-card skill-card-" + (health.status || "ok"));
+
+        const head = el("div", "skill-card-head");
+        head.appendChild(el("span", "skill-name", s.name));
+        if (s.source) head.appendChild(el("span", "skill-badge", s.source));
+        if (s.is_parsec_native) head.appendChild(el("span", "skill-badge skill-badge-native", "parsec"));
+        if (health.status && health.status !== "ok") {
+            head.appendChild(el("span", "skill-status skill-status-" + health.status, health.status));
         }
         card.appendChild(head);
 
-        const desc = document.createElement("div");
-        desc.className = "skill-desc";
-        desc.textContent = s.description || "";
-        card.appendChild(desc);
+        card.appendChild(el("div", "skill-desc", s.description || ""));
 
         const bits = [];
         if (s.parsec?.version) bits.push("v" + s.parsec.version);
         if (s.parsec?.domain) bits.push(s.parsec.domain);
         if (s.allowed_tools?.length) bits.push(s.allowed_tools.length + " tools");
-        if (bits.length) {
-            const meta = document.createElement("div");
-            meta.className = "skill-meta";
-            meta.textContent = bits.join(" · ");
-            card.appendChild(meta);
-        }
+        if (s.provenance?.resolved_sha) bits.push("pinned " + String(s.provenance.resolved_sha).slice(0, 8));
+        else if (s.source !== "project") bits.push("unpinned");
+        if (bits.length) card.appendChild(el("div", "skill-meta", bits.join(" · ")));
 
+        (health.reasons || []).forEach(function(r) {
+            card.appendChild(el("div", "skill-reason", "✕ " + r));
+        });
+        (health.notes || []).forEach(function(n) {
+            card.appendChild(el("div", "skill-note", "· " + n));
+        });
         (s.warnings || []).forEach(function(w) {
-            const warn = document.createElement("div");
-            warn.className = "skill-warning";
-            warn.textContent = "⚠ " + w;
-            card.appendChild(warn);
+            card.appendChild(el("div", "skill-warning", "⚠ " + w));
         });
 
+        card.appendChild(buildAgentRow(s));
+
         if (s.skill_path) {
-            const path = document.createElement("div");
-            path.className = "skill-path";
-            path.textContent = s.skill_path;
+            const path = el("div", "skill-path", s.skill_path);
             path.title = "Discovered from " + s.skill_path;
             card.appendChild(path);
         }
 
+        if (skillsState.is_admin && s.removable) {
+            const rm = el("button", "skill-revert", "uninstall");
+            rm.type = "button";
+            rm.title = "Delete this installed bundle skill from " + s.skill_path;
+            rm.addEventListener("click", function() {
+                rm.disabled = true;
+                fetch("/api/skills/" + encodeURIComponent(s.name), { method: "DELETE" })
+                    .then(function(r) { return r.json().then(function(b) {
+                        if (!r.ok) throw new Error(b.detail || "could not uninstall");
+                        return b;
+                    }); })
+                    .then(function() { skillsFlash("Uninstalled " + s.name); loadSkills(); })
+                    .catch(function(err) { skillsFlash(err.message, true); rm.disabled = false; });
+            });
+            card.appendChild(rm);
+        }
+
         skillsListEl.appendChild(card);
     });
+}
+
+function buildAgentRow(s) {
+    const row = el("div", "skill-agents");
+    const attached = new Set((s.attachment?.agents) || []);
+    const origin = s.attachment?.origin || "none";
+
+    row.appendChild(el("span", "skill-agents-label", "agents"));
+
+    (skillsState.agents || []).forEach(function(agent) {
+        const on = attached.has(agent);
+        const chip = el("button", "skill-chip" + (on ? " skill-chip-on" : ""), agent);
+        chip.type = "button";
+        if (!skillsState.is_admin) {
+            chip.disabled = true;
+            chip.title = "Admin access required to change attachment";
+        } else {
+            chip.title = on ? "Detach from " + agent : "Attach to " + agent;
+            chip.addEventListener("click", function() {
+                const next = new Set(attached);
+                if (on) next.delete(agent); else next.add(agent);
+                chip.disabled = true;
+                setAttachment(s.name, Array.from(next), true).then(function() {
+                    skillsFlash(s.name + " → " + (Array.from(next).join(", ") || "no agents"));
+                    loadSkills();
+                }).catch(function(err) {
+                    skillsFlash(err.message, true);
+                    chip.disabled = false;
+                });
+            });
+        }
+        row.appendChild(chip);
+    });
+
+    const foot = el("div", "skill-agents-foot");
+    let originText;
+    if (!attached.size) {
+        originText = origin === "override" ? "switched off" : "not attached — declare parsec.domain";
+    } else {
+        originText = origin === "override" ? "set manually" : "from " + origin;
+    }
+    const src = el("span", "skill-origin", originText);
+    src.title = origin === "override"
+        ? "An operator set this explicitly; it overrides the derived attachment"
+        : "Derived from the skill's own frontmatter and the shipped agent map";
+    foot.appendChild(src);
+
+    if (skillsState.is_admin && origin === "override") {
+        const revert = el("button", "skill-revert", "reset");
+        revert.type = "button";
+        revert.title = "Drop the manual override and return to derived attachment";
+        revert.addEventListener("click", function() {
+            revert.disabled = true;
+            fetch("/api/skills/" + encodeURIComponent(s.name) + "/attachment", { method: "DELETE" })
+                .then(function(r) { if (!r.ok) throw new Error("could not reset"); })
+                .then(function() { skillsFlash(s.name + " reverted to derived attachment"); loadSkills(); })
+                .catch(function(err) { skillsFlash(err.message, true); revert.disabled = false; });
+        });
+        foot.appendChild(revert);
+    }
+
+    row.appendChild(foot);
+    return row;
 }
 
 // ─── Learnings panel (admin only) ───

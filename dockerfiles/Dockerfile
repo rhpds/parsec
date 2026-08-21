@@ -15,7 +15,11 @@ RUN /usr/libexec/s2i/assemble
 FROM registry.access.redhat.com/ubi9/python-311:latest
 
 USER 0
-RUN dnf install -y --nodocs libpq && dnf clean all
+# git is here for POST /api/skills/install, which clones an external skill
+# bundle at a pinned ref. That endpoint is admin-gated and off by default
+# (skills.install_enabled), so shipping the binary costs nothing when unused —
+# without it the endpoint can only return 501.
+RUN dnf install -y --nodocs libpq git && dnf clean all
 
 # Claude Agent SDK runtime: Node.js + the `claude` CLI that the SDK drives as a
 # subprocess (the Python claude-agent-sdk wrapper comes via requirements.txt).

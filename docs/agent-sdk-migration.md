@@ -17,6 +17,11 @@ The migration sits on top of a pre-existing multi-agent architecture. Read these
 - [#8](https://github.com/rhpds/parsec/pull/8) — **Icinga monitoring agent + MCP sidecar** *(MERGED, `dca36f8`, 2026-03-31, Andrew Jones)* — the icinga sub-agent the migration later pilots. Predates the SDK work.
 - [#15](https://github.com/rhpds/parsec/pull/15) / [#18](https://github.com/rhpds/parsec/pull/18) / [#21](https://github.com/rhpds/parsec/pull/21) — MLflow tool-tracing + session-id *(MERGED)* — the observability substrate.
 
+**Skills control plane (this branch — `feat/skills-control-plane`):** health verdicts on
+`GET /api/skills`, `POST /api/skills/reload`, per-agent attachment resolved from `parsec.domain`,
+install/uninstall of external bundles at a pinned ref, and deletion of the shadowing
+`root-cause-analysis` stub. See §14.
+
 **Phase 1 — the SDK seam, dormant (all MERGED):**
 - [#23](https://github.com/rhpds/parsec/pull/23) — `SKILL.md` loader + `GET /api/skills` (`74f5f29`).
 - [#24](https://github.com/rhpds/parsec/pull/24) — **Claude Agent SDK adapter** behind `agent.runtime` flag (`src/llm/` package).
@@ -84,14 +89,16 @@ The six dimensions below each zoom into one part of this picture.
 
 ## 4. Skill invocation
 
-**Mental model: skill = capability (inert data), agent = runner.** `routes/skills.py:1` says it out loud: *"Does not invoke skills — that's the agent runtime's job."*
+**Mental model: skill = capability (inert data), agent = runner.**
 
 - A skill is a folder with a `SKILL.md` = YAML frontmatter (`name`, `description`, `allowed-tools`, a Parsec `parsec:` block) + a Markdown workflow body. Canonical example: `skills/icinga-triage/SKILL.md` *( #32/#34 )*.
-- **Two independent discovery mechanisms** (conflating them is the #1 newcomer mistake):
-  - **The SDK** (what runs in production) discovers via `agent.sdk.setting_sources: ["project"]` → `<cwd>/.claude/skills/`. Parsec ships skills under `skills/`, so the Dockerfile bridges it: `ln -sfn /app/skills /app/.claude/skills` with a build-time assertion that `icinga-triage/SKILL.md` resolves *( #27 lineage; #34 )*.
-  - **Parsec's own `SkillLoader`** (`src/skills/loader.py`, #23) powers `GET /api/skills` + CI validation — it does **not** feed the SDK (strict mode rejects symlinked dirs for path-traversal safety, caps `SKILL.md` at 1 MiB).
-- **Activation** is separate from discovery: `build_icinga_sdk_profile()` (`src/agent/icinga_sdk.py`) returns `{"skills": ["icinga-triage"], ...}`; `sdk_profile_for(agent_type)` returns that **only for icinga** and `{}` for every other agent. `complete()` passes `skills=[…]` into `ClaudeAgentOptions`. That's the entire pilot surface: one agent, one skill.
-- **Subtlety:** the SKILL.md's `allowed-tools` frontmatter is **declarative/inert** in Parsec's loader; the *enforced* whitelist is the profile's `allowed_tools` (server-prefixes `mcp__icinga`, `mcp__github`) computed in `icinga_sdk.py`. Editing the frontmatter alone won't change what the agent can call.
+- **Two discovery planes that share a directory but not a code path** (conflating them is the #1 newcomer mistake):
+  - **`SkillLoader`** (`src/skills/loader.py`, #23) reads `skills.project_root` / `plugin_paths` / `user_root`. It backs `GET /api/skills` and the Skills tab, and validates in CI. It never executes anything.
+  - **The Agent SDK** discovers skills **only** under `<cwd>/.claude/skills/`, because `agent.sdk.setting_sources` is `["project"]`.
+- **`sync_sdk_skill_root()`** (`src/skills/sdk_root.py`, called from `src/app.py`) bridges them at startup by symlinking every discovered skill into the SDK's root. So **anything the loader discovers becomes SDK-executable** — there is no "listed but safe" state. The Dockerfile seeds that root as a real directory of per-skill symlinks (not one symlink to `skills/`), so baked and mounted skills coexist as siblings.
+- **Activation** is resolved per request, not hardcoded: operator override → the skill's own `parsec.domain` → the `_AGENT_SKILLS` supplement, unioned (`src/skills/attachment.py`). `skills_for(agent_type)` feeds `AgentDefinition.skills`. A well-formed mounted skill therefore attaches with **no code change**.
+- **`allowed-tools` in frontmatter is a request, not a grant.** Containment is `AgentSdkConfig.builtin_tools` (`("ToolSearch", "Skill")` — no Bash/Read/Write) plus the per-agent bridged `mcp__parsec__*` set. A skill declaring tools Parsec does not grant will make the model flail silently, which is why health flags it (§14).
+- **Name collisions:** `project_root` wins `SkillLoader._deduplicate`. An in-repo copy silently shadows a mounted copy of the same name — this bit us once, see §14.
 
 ## 5. Loop / harness
 
@@ -327,3 +334,65 @@ conversations lose their tool calls), `icinga-triage/SKILL.md` naming tools the 
 replaced, container CPU never raised for the Node subprocess, and Icinga **writes**
 reachable from the SDK orchestrator that the legacy orchestrator could not reach. None of
 them block the cutover; all of them are real.
+
+---
+
+## 14. Skills control plane — health, hot reload, attachment, install
+
+Adding a skill used to mean a config change, a PR, an image rebuild and a redeploy. Almost none of
+that was architectural. `discoverable_skill_names()` reads the filesystem on every call,
+`build_orchestrator_options()` runs per request, and the `claude` CLI is spawned fresh per query —
+**the only startup-bound step in the whole path is publishing the symlinks**.
+
+**The five stages, and when each runs**
+
+| | Stage | Runs |
+|---|---|---|
+| 1 | Source roots on disk (`project_root`, `plugin_paths`) | whenever bytes land |
+| 2 | `SkillLoader` discovery + dedup (`project_root` wins) | every call |
+| 3 | `sync_sdk_skill_root()` → `<cwd>/.claude/skills/` | **startup, or `POST /api/skills/reload`** |
+| 4 | Attachment: override → `parsec.domain` → supplement | every request |
+| 5 | SDK subprocess reads the root and activates | every request |
+
+**Health** (`src/skills/health.py`). The loader answers "did this parse", which is much weaker than
+"will this work". `GET /api/skills` now returns a verdict per skill:
+
+- `unusable` — requests withheld built-ins (Bash/Read/Write), **or** references files it did not
+  ship, **or** its procedure assumes a shell.
+- `orphaned` — attached to no agent, so nothing can activate it.
+- `ok` — plus `notes` for non-blocking observations.
+
+Calibration is deliberate: three shipped skills declare `mcp__reporting__*`, which never resolves
+(the Reporting tools are bridged as `mcp__parsec__db_*`). That is stale frontmatter, so it is a
+**note**, not a status. A check that fires on most of the fleet is one nobody reads.
+
+**Why this existed.** `skills/root-cause-analysis` was vendored from `redhat-et/rhdp-rca-plugin` as
+a `SKILL.md` with no payload. It drove `.venv/bin/python scripts/cli.py` against a `scripts/`
+directory that was never copied, and requested `Bash/Read/Write`, which this runtime does not grant.
+It parsed cleanly, reported `sdk_visible: true`, carried no warnings, and was inert. Worse, because
+`project_root` wins `_deduplicate`, it **shadowed the real 32-file bundle** whenever that was
+mounted — verified on the cluster: a freshly installed copy at `ea43c5c1` lost to it. The stub is
+deleted; `aap2-job-failure-rca` carries the same method against bridged tools.
+
+**Endpoints** (all admin-gated via the same `X-Forwarded-Email` path as `/api/learnings`):
+
+- `POST /api/skills/reload` — re-runs discovery and republishes the SDK root. No pod restart.
+- `PUT|DELETE /api/skills/{name}/attachment` — move a skill between agents, or switch it off.
+- `POST /api/skills/install` — clone a bundle at a pinned ref. **Off by default**
+  (`skills.install_enabled`), host-allowlisted, size-capped, symlinks stripped on copy, accepts a
+  `skills: [...]` filter, and records the resolved SHA inside each installed skill.
+- `DELETE /api/skills/{name}` — remove an installed skill. Refuses anything outside
+  `skills.install_root`, so in-repo skills can only be removed by a PR.
+
+**Config** (`config/config.yaml`, all settable as `PARSEC_SKILLS__*` deploy vars):
+`state_path`, `install_root`, `install_enabled`, `install_hosts`.
+
+**Gotcha worth knowing.** Dynaconf materialises env-supplied settings with **UPPERCASE** keys when
+`config.yaml` does not already declare them, so a deployed pod's skills section is genuinely
+mixed-case. Every skills config read goes through `src/llm/config_section.section`, which lowercases
+— the same helper the `agent.sdk.*` bug needed. Reading lowercase directly silently drops every
+deploy-var override.
+
+**Limits.** Adding a new `plugin_paths` *root* is still a pod-template change (restart). Hot install
+removes PR review as the gate, which is why it is off by default and provenance-recording; the
+production recommendation remains a digest-pinned bundle, not a free-text URL.

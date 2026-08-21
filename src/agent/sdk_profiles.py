@@ -64,11 +64,62 @@ class SdkProfile:
 _AGENT_SKILLS: dict[str, tuple[str, ...]] = {
     "icinga": ("icinga-triage",),
     "cost": ("cost-anomaly-triage", "cost-spike-investigation", "provision-lookup"),
-    "aap2": ("aap2-job-failure-rca", "aap2-job-failure-triage", "root-cause-analysis"),
+    # `root-cause-analysis` was vendored here as a SKILL.md only. It requested
+    # Bash/Read/Write (which this runtime does not grant), drove a `scripts/`
+    # directory that was never copied, and — because project_root wins
+    # `_deduplicate` — shadowed the real 32-file skill whenever the upstream
+    # bundle was mounted. `aap2-job-failure-rca` carries the same method against
+    # bridged tools. Mount the ET bundle if you want the original.
+    "aap2": ("aap2-job-failure-rca", "aap2-job-failure-triage"),
     "security": ("abuse-account-detection", "provision-lookup"),
     "babylon": ("provision-lookup",),
     "ocpv": (),
 }
+
+
+def supplement_map() -> dict[str, tuple[str, ...]]:
+    """``_AGENT_SKILLS`` inverted into skill -> agents.
+
+    Keeps the shipped mapping single-sourced: :mod:`src.skills.attachment`
+    layers domain-derivation and operator overrides on top of exactly this,
+    so adopting the new resolver can never attach *fewer* agents than before.
+    """
+    out: dict[str, list[str]] = {}
+    for agent, skills in _AGENT_SKILLS.items():
+        for skill in skills:
+            out.setdefault(skill, []).append(agent)
+    return {s: tuple(sorted(a)) for s, a in out.items()}
+
+
+def attachment_snapshot(config: Any = None) -> dict[str, Any]:
+    """Resolve attachment for every discovered skill, once.
+
+    Returns a mapping of skill name to
+    :class:`~src.skills.attachment.Attachment`. Callers that need the inverse
+    (agent -> skills) should use
+    :func:`src.skills.attachment.skills_by_agent`.
+
+    Falls back to an empty mapping on any failure: ``skills_for`` then reverts
+    to the static map, so a malformed override file degrades attachment to the
+    pre-existing behaviour rather than removing every skill from every agent.
+    """
+    from src.agent.agents import AGENTS
+    from src.skills.attachment import load_state, resolve, state_path
+    from src.skills.loader import SkillLoader
+
+    if config is None:
+        from src.config import get_config
+
+        config = get_config()
+
+    manifests = SkillLoader.from_config(config).load_all()
+    overrides = load_state(state_path(config))
+    return resolve(
+        manifests,
+        known_agents=frozenset(AGENTS),
+        overrides=overrides,
+        supplement=supplement_map(),
+    )
 
 
 def skills_for(agent_type: str) -> list[str]:
@@ -77,8 +128,24 @@ def skills_for(agent_type: str) -> list[str]:
     A name that is not on disk would be silently ignored by the SDK, so it is
     dropped here instead and logged — an agent quietly missing its skill is the
     failure mode this whole path is meant to make visible.
+
+    Attachment now comes from :func:`attachment_snapshot` (operator override ->
+    ``parsec.domain`` -> the static ``_AGENT_SKILLS`` supplement), so mounting a
+    well-formed skill no longer requires editing this file. If that resolution
+    fails for any reason we fall back to the static map, which is the behaviour
+    that shipped before overrides existed.
     """
-    wanted = _AGENT_SKILLS.get(agent_type, ())
+    try:
+        from src.skills.attachment import skills_by_agent
+
+        wanted = skills_by_agent(attachment_snapshot()).get(agent_type, ())
+    except Exception:
+        logger.exception(
+            "Attachment resolution failed for agent %s; falling back to the static map",
+            agent_type,
+        )
+        wanted = _AGENT_SKILLS.get(agent_type, ())
+
     if not wanted:
         return []
     available = discoverable_skill_names()
@@ -98,12 +165,17 @@ def skills_for(agent_type: str) -> list[str]:
     return present
 
 
-def discoverable_skill_names() -> frozenset[str]:
-    """Names the SDK can actually load, i.e. what is under its discovery root."""
+def discoverable_skill_names(cwd: str | None = None) -> frozenset[str]:
+    """Names the SDK can actually load, i.e. what is under its discovery root.
+
+    ``cwd`` must match ``agent.sdk.cwd`` when that is set; the other two callers
+    of ``sdk_skills_root`` already pass it, and this defaulting to ``Path.cwd()``
+    silently dropped every mounted skill whenever the two diverged.
+    """
     try:
         from src.skills.sdk_root import sdk_skills_root
 
-        root = sdk_skills_root()
+        root = sdk_skills_root(cwd)
         if not root.is_dir():
             return frozenset()
         return frozenset(p.name for p in root.iterdir() if (p / "SKILL.md").is_file())

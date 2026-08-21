@@ -229,6 +229,19 @@ skills:
   # user_root: per-user skill directory for local dev only.
   # Leave empty in production deploys.
   user_root: ""
+  # Where operator attachment overrides (set from the Skills tab) are persisted.
+  # Must be on a writable path; data/ already is.
+  state_path: "data/skills_state.json"
+  # Writable root that POST /api/skills/install copies bundles into. Add it to
+  # plugin_paths as well, or installed skills are fetched and never discovered.
+  install_root: ""
+  # Install is OFF by default. A SKILL.md is instruction text steering an agent
+  # that holds live credentials, so pulling one at runtime is a deliberate
+  # decision — not a default. Admin-gated even when enabled.
+  install_enabled: false
+  # Hosts an install may fetch from. Empty means the built-in allowlist
+  # (github.com, gitlab.com, gitlab.cee.redhat.com).
+  install_hosts: []
 
 auth:
   # Comma-separated list of allowed OpenShift groups (from X-Forwarded-Groups)
