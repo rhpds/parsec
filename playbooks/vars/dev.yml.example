@@ -88,7 +88,7 @@ allowed_users: ""
 # agent_runtime: sdk
 #
 # stage 2 — all sub-agents on the SDK, still routed by classify_fast.
-#           Does NOT fix mis-routing; that needs stage 3.
+#           Does NOT fix incorrect routing; that needs stage 3.
 # agent_runtime: sdk
 # sdk_enabled_agents: ["all"]
 #

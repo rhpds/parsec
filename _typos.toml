@@ -2,4 +2,5 @@
 # Azure GPU VM series names — not typos
 ND = "ND"
 nd = "nd"
-mis-routing = "mis-routing"
+"mis-routing" = "mis-routing"
+"mis-routed" = "mis-routed"

@@ -248,7 +248,7 @@ Both cost real debugging time and are worth knowing about:
 Only the legacy arm has the regex fast path: `run_agent_via_sdk` is dispatched at
 `orchestrator.py:1218`, *before* `classify_fast` is reached at `:1249`. So legacy's routing
 is pinned wherever the regexes resolve and the SDK's never is. In the n=20 A/B, **all 9
-ambiguous rounds mis-routed on legacy, in every repeat** — an Icinga alert whose name
+ambiguous rounds incorrectly routed on legacy, in every repeat** — an Icinga alert whose name
 contains "Babylon" matches `\bbabylon\b`, so `classify_fast` hands it to the babylon
 agent, which has no Icinga tools. Deterministic and reproducible.
 
