@@ -28,6 +28,11 @@ automatically substitutes the real event data store ID. Always include a
 default to the past 24 hours and tell them. Start narrow and only widen if needed.
 Never query more than 7 days unless explicitly requested.
 
+**Empty results → widen immediately.** If a CloudTrail query returns 0 rows for a
+narrow time window, retry with a wider range (±5–10 minutes around the alert
+timestamp, then hours) before treating it as a confirmed negative. Do NOT repeat
+the same narrow window.
+
 **Key columns:**
 - `eventTime` — when the event occurred (ISO 8601)
 - `eventName` — API action (e.g. `RunInstances`, `AcceptAgreementRequest`)
@@ -145,8 +150,8 @@ of compromised accounts (instances created through the AWS console by attackers)
 
 ### Investigate IAM Access Key Creation
 
-1. **Query CloudTrail first** — get the complete event details before checking provisions
-   or other databases. Use a **wider time range (±5-10 minutes)** around the alert
+1. **Query CloudTrail and provisions DB in parallel** — you need both event details
+   and user attribution. Use a **wider time range (±5-10 minutes)** around the alert
    timestamp, since exact timestamps may not match CloudTrail event times.
 2. **Search by event, not by username** — filter for `CreateAccessKey` events within the
    time window rather than trying to parse usernames from `requestParameters`.

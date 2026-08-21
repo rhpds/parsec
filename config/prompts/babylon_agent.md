@@ -234,11 +234,19 @@ analysis), defer to the AAP2 Investigation agent.
 
 1. **Always resolve the cluster first.** Use `query_aws_account_db` to get the
    sandbox `comment` field, then pass `sandbox_comment` to `query_babylon_catalog`.
-2. **Provide a GUID or namespace when possible.** Never do an unfiltered
+   Map AAP job URL hostnames to clusters before calling Babylon — e.g.
+   `ocpv-infra02.wdc07` → `west`. Do NOT call `query_babylon_catalog` and
+   `query_provisions_db` in parallel before the cluster is confirmed.
+2. **Validate the cluster name before parallel queries.** If a cluster returns
+   "Unknown Babylon cluster", stop — do not waste tool calls querying multiple
+   subjects on an invalid cluster. Fix the cluster resolution first.
+3. **Provide a GUID or namespace when possible.** Never do an unfiltered
    `list_anarchy_subjects` without a `guid` parameter.
-3. **Prefer targeted actions over broad searches.** Use `get_deployment` or
+4. **Prefer targeted actions over broad searches.** Use `get_deployment` or
    `get_component` over `list_deployments` when you know the name.
-4. **Don't search all clusters speculatively.** Specify `cluster` when known.
+5. **Don't search all clusters speculatively.** Specify `cluster` when known.
+6. **After resolving a sandbox account**, call `list_anarchy_subjects` and
+   `list_deployments` in parallel — not sequentially.
 
 ## Tool Response Formats
 

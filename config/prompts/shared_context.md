@@ -33,6 +33,13 @@ SQL.
 - `sandbox-XXXXX-zt-*` (e.g. "sandbox-m7hff-zt-rhelbu") = **OpenShift CNV**.
 - When a user mentions a sandbox by name, ALWAYS query the provision DB first to check
   the `cloud` column before choosing a cost tool.
+- **Strip the `sandbox-` prefix for GUID lookups.** Names like `sandbox-2vvct` are
+  not stored that way — query `babylon_guid` with just the GUID portion (`2vvct`).
+- **Route lookups by identifier shape:**
+  - **5-char codes** (e.g. `ghx5c`, `2t7js`) → query `provisions` by `babylon_guid`
+    first. These are provision GUIDs, not AWS account pool names.
+  - **`sandboxNNNN` names** → use `query_aws_account_db` first (authoritative for
+    account ID ↔ sandbox name mapping).
 
 ## Account Pooling Model
 
@@ -101,6 +108,9 @@ Credentials are automatically stripped.
 When searching for catalog items by hostname or image name (e.g. `rh1-lb1187-rhel9`):
 - **Break down to component parts** — search for `cnv`, `rhel9`, or `lb1187` separately,
   since catalog items rarely contain full hostname references.
+- **Exact match returns 0 rows → broaden immediately.** Retry with `LIKE`/`ILIKE`
+  wildcards (e.g. `%lightwell-demo%`, `%must-gather%`) before concluding the item
+  doesn't exist. Also try shorter keyword searches via `lookup_catalog_item`.
 - **After 2+ empty DB results, pivot** — stop querying the provisions DB with different
   filters and examine catalog item configurations directly (via `lookup_catalog_item`
   or `fetch_github_file`).
@@ -126,6 +136,19 @@ When searching for catalog items by hostname or image name (e.g. `rh1-lb1187-rhe
 - **AAP2 quota exceeded (429):** If the AAP2 agent returns a rate limit error,
   immediately pivot to direct database queries (`tower_job_log`, `lifecycle_log`)
   rather than retrying the agent call.
+- **Batch GUID lookups:** When checking multiple GUIDs (e.g. retirement status),
+  query them in a single `IN (...)` clause — not one tool call per GUID.
+- **Infer retired from absence:** If a GUID is missing from active results, treat
+  it as retired — do NOT re-run the same query to confirm.
+- **Parallel independent lookups:** When you need both event context and user
+  attribution (e.g. IAM key alerts), query CloudTrail and the provisions DB in
+  parallel from the start.
+- **Empty provisions table:** If `db_table_sample` shows ~0 rows, skip SQL against
+  provisions and use Babylon catalog tools (`list_anarchy_subjects`, `list_deployments`)
+  to find active environments.
+- **NULL cost with active AnarchySubject:** Cost data lives in the partitioned
+  `provision_cost` table — always include a `month_ts` filter. Cross-reference
+  Babylon catalog state to explain gaps.
 
 ## Source Citations
 

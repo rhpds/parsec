@@ -71,6 +71,17 @@ to find the job directly.
 - event0: event controller on ocpv-infra01
 - partner0: partner Babylon controller
 
+**Resolve the controller from job URLs before any Babylon calls.** Map hostnames
+in AAP URLs to controller short names — do NOT call `query_babylon_catalog` in
+parallel with cluster resolution; confirm the cluster first, then fan out:
+
+| Job URL hostname | Controller | Babylon cluster hint |
+|---|---|---|
+| `aap2-prod-us-east-2.*` | `east` | us-east-1 / us-east-2 |
+| `aap2-prod-us-west-2.*` | `west` | us-west-2 |
+| `ocpv-infra02.wdc07.*` | `west` | west |
+| `ocpv-infra01.*` | `event0` | event |
+
 ### Tips
 
 - Job name encodes catalog item and GUID: `RHPDS agd-v2.sovereign-cloud.prod-gm5ld-2-provision-...`
@@ -83,6 +94,29 @@ to find the job directly.
   sweep, check all remaining controllers in a single batch — don't try them one at a time.
 - **When the user provides a specific job ID**, use `get_job_log` directly with that
   ID — don't use `find_jobs` to search for it first.
+
+### Job Not Found in Database
+
+When AAP2 job IDs are missing from `tower_job_log`:
+
+1. Call `db_describe_table('tower_job_log')` — column is `deployer_job`, not `job_id`
+2. Search `tower_job_log` by `deployer_job`
+3. Search `lifecycle_log` for recent provisions referencing the job in comments
+4. If still not found, the job may be too recent for DB ingestion or on a different
+   controller — call `query_aap2` with `get_job_log` directly on the resolved controller
+
+Do NOT keep retrying SQL variations after step 4 — pivot to the AAP2 API.
+
+### Multi-Component Failures
+
+When a catalog item has both AWS and CNV components (e.g. MultiWorkshop):
+
+- The user-linked job URL may be the **succeeding** component (CNV) while the **failing**
+  job is on a different cluster or component.
+- Cross-reference AnarchySubject run data across **all** components and clusters
+  before assuming the linked job is the root cause.
+- When AWS provisions consistently fail while CNV succeeds, pivot directly to the
+  AWS-specific job logs — don't spend time on the CNV job the user linked.
 
 ### Investigate AAP2 Job Failures
 
@@ -435,11 +469,14 @@ The `get_component` action returns:
 
 1. **Always resolve the cluster first.** Use `query_aws_account_db` to get the
    sandbox `comment` field, then pass `sandbox_comment` to `query_babylon_catalog`.
+   Map AAP job URL hostnames to controller/cluster before fanning out (see table above).
 2. **Provide a GUID or namespace when possible.** Never do an unfiltered
    `list_anarchy_subjects` without a `guid` parameter.
 3. **Prefer targeted actions over broad searches.** Use `get_deployment` or
    `get_component` over `list_deployments` when you know the name.
 4. **Don't search all clusters speculatively.** Specify `cluster` when known.
+5. **After resolving a sandbox account**, call `list_anarchy_subjects` and
+   `list_deployments` in parallel.
 
 ## Tool Response Formats
 

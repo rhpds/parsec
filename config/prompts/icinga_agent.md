@@ -143,6 +143,17 @@ After identifying the alert, find and read the source of the monitoring script t
   to understand the percentage thresholds and node counting logic before analyzing
   the alert status. The script's threshold logic determines what percentage of
   NotReady nodes triggers WARNING vs CRITICAL.
+- **Disk / resource alerts:** Query the specific service with `detailed=true` —
+  do NOT list all services on the host. The check output contains thresholds and
+  usage; GitHub config search is usually unnecessary.
+- **LLM model via proxy alerts:** Host is `llm-models-via-proxy` — filter services
+  by model name in the service name. Fetch `check_llm_model_via_proxy.sh` from
+  `monitoring-scripts` first to understand failure conditions and timeouts. Service
+  definitions live in `groups/llm_models/` in `monitoring-config`, NOT `external_apis`.
+- **MaaS Pod Health alerts:** Fetch the monitoring script first to understand
+  which pod states trigger CRITICAL vs WARNING before diving into service details.
+- **Multi-word service display names:** Use `match()` with wildcards around key
+  terms (e.g. `*babylon*schema*`) rather than the full display name string.
 
 ### Host Configuration Shortcuts
 
