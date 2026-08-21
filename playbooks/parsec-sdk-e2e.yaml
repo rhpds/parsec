@@ -17,15 +17,15 @@ apiVersion: image.openshift.io/v1
 kind: ImageStream
 metadata:
   name: parsec-sdk
-  labels: {app: parsec-sdk}
+  labels: { app: parsec-sdk }
 spec:
-  lookupPolicy: {local: true}
+  lookupPolicy: { local: true }
 ---
 apiVersion: build.openshift.io/v1
 kind: BuildConfig
 metadata:
   name: parsec-sdk
-  labels: {app: parsec-sdk}
+  labels: { app: parsec-sdk }
 spec:
   source:
     type: Git
@@ -37,9 +37,9 @@ spec:
     dockerStrategy:
       dockerfilePath: dockerfiles/Dockerfile
   output:
-    to: {kind: ImageStreamTag, name: 'parsec-sdk:latest'}
+    to: { kind: ImageStreamTag, name: "parsec-sdk:latest" }
   resources:
-    limits: {cpu: '2', memory: 4Gi}
+    limits: { cpu: "2", memory: 4Gi }
   successfulBuildsHistoryLimit: 2
   failedBuildsHistoryLimit: 2
 ---
@@ -50,7 +50,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: parsec-sdk-oauth
-  labels: {app: parsec-sdk}
+  labels: { app: parsec-sdk }
   annotations:
     serviceaccounts.openshift.io/oauth-redirecturi.primary: >-
       https://parsec-sdk-rh-ace-aiops.apps.ocpv-infra01.dal12.infra.demo.redhat.com
@@ -59,7 +59,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: parsec-sdk-config
-  labels: {app: parsec-sdk}
+  labels: { app: parsec-sdk }
 data:
   # Mirrors parsec-dev's config.yaml. Differences are intentional and limited to
   # the agent block (the runtime flip) and auth (see below).
@@ -137,25 +137,25 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: parsec-sdk
-  labels: {app: parsec-sdk}
+  labels: { app: parsec-sdk }
 spec:
   replicas: 1
   selector:
-    matchLabels: {app: parsec-sdk}
+    matchLabels: { app: parsec-sdk }
   strategy:
     type: RollingUpdate
-    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
   template:
     metadata:
-      labels: {app: parsec-sdk}
+      labels: { app: parsec-sdk }
     spec:
       containers:
         - name: parsec
           image: parsec-sdk:latest
-          ports: [{containerPort: 8000, name: http}]
+          ports: [{ containerPort: 8000, name: http }]
           envFrom:
-            - secretRef: {name: parsec-cloud-credentials, optional: true}
-            - secretRef: {name: parsec-aap2-credentials, optional: true}
+            - secretRef: { name: parsec-cloud-credentials, optional: true }
+            - secretRef: { name: parsec-aap2-credentials, optional: true }
           env:
             # Rollback switch: `oc set env deploy/parsec-sdk PARSEC_AGENT__RUNTIME=legacy`
             - name: PARSEC_AGENT__RUNTIME
@@ -166,15 +166,51 @@ spec:
             - name: PARSEC_ICINGA__MCP_URL
               value: "http://localhost:3000/sse"
             - name: PARSEC_GITHUB__TOKEN
-              valueFrom: {secretKeyRef: {name: parsec-secrets, key: github-token, optional: true}}
+              valueFrom:
+                {
+                  secretKeyRef:
+                    { name: parsec-secrets, key: github-token, optional: true },
+                }
             - name: PARSEC_REPORTING_MCP__TOKEN
-              valueFrom: {secretKeyRef: {name: parsec-secrets, key: reporting-mcp-token, optional: true}}
+              valueFrom:
+                {
+                  secretKeyRef:
+                    {
+                      name: parsec-secrets,
+                      key: reporting-mcp-token,
+                      optional: true,
+                    },
+                }
             - name: PARSEC_ALERT_API_KEY
-              valueFrom: {secretKeyRef: {name: parsec-secrets, key: alert-api-key, optional: true}}
+              valueFrom:
+                {
+                  secretKeyRef:
+                    {
+                      name: parsec-secrets,
+                      key: alert-api-key,
+                      optional: true,
+                    },
+                }
             - name: PARSEC_ANTHROPIC__LITELLM_API_KEY
-              valueFrom: {secretKeyRef: {name: parsec-secrets, key: litellm-api-key, optional: true}}
+              valueFrom:
+                {
+                  secretKeyRef:
+                    {
+                      name: parsec-secrets,
+                      key: litellm-api-key,
+                      optional: true,
+                    },
+                }
             - name: PARSEC_LEARNINGS__LOCAL__API_KEY
-              valueFrom: {secretKeyRef: {name: parsec-secrets, key: litellm-api-key, optional: true}}
+              valueFrom:
+                {
+                  secretKeyRef:
+                    {
+                      name: parsec-secrets,
+                      key: litellm-api-key,
+                      optional: true,
+                    },
+                }
             # --- Vertex for Parsec's own Anthropic client (same as parsec-dev) ---
             - name: PARSEC_ANTHROPIC__BACKEND
               value: "vertex"
@@ -199,45 +235,93 @@ spec:
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: /app/gcp/service-account.json
             - name: ANTHROPIC_VERTEX_PROJECT_ID
-              value: "itpc-gcp-product-all-claude"
+              value: "itpc-gcp-product-all-claude" # pragma: allowlist secret
             - name: CLOUD_ML_REGION
               value: "us-east5"
             - name: CLAUDE_CODE_ACCEPT_TOS
               value: "true"
             # --- Babylon / OCPV cluster kubeconfigs (mounted secrets) ---
-            - {name: PARSEC_BABYLON__CLUSTERS__EAST__KUBECONFIG, value: /app/babylon/east.kubeconfig}
-            - {name: PARSEC_BABYLON__CLUSTERS__WEST__KUBECONFIG, value: /app/babylon/west.kubeconfig}
-            - {name: PARSEC_BABYLON__CLUSTERS__PARTNER0__KUBECONFIG, value: /app/babylon/partner0.kubeconfig}
-            - {name: PARSEC_BABYLON__CLUSTERS__PARTNER1__KUBECONFIG, value: /app/babylon/partner1.kubeconfig}
-            - {name: PARSEC_BABYLON__CLUSTERS__INTEGRATION__KUBECONFIG, value: /app/babylon/integration.kubeconfig}
-            - {name: PARSEC_BABYLON__CLUSTERS__BABYDEV__KUBECONFIG, value: /app/babylon/babydev.kubeconfig}
-            - {name: PARSEC_OCPV__CLUSTERS__OCPV05__KUBECONFIG, value: /app/ocpv/ocpv05.kubeconfig}
-            - {name: PARSEC_OCPV__CLUSTERS__OCPV06__KUBECONFIG, value: /app/ocpv/ocpv06.kubeconfig}
-            - {name: PARSEC_OCPV__CLUSTERS__OCPV07__KUBECONFIG, value: /app/ocpv/ocpv07.kubeconfig}
-            - {name: PARSEC_OCPV__CLUSTERS__OCPV08__KUBECONFIG, value: /app/ocpv/ocpv08.kubeconfig}
-            - {name: PARSEC_OCPV__CLUSTERS__OCPV09__KUBECONFIG, value: /app/ocpv/ocpv09.kubeconfig}
-            - {name: PARSEC_OCPV__CLUSTERS__OCPV10__KUBECONFIG, value: /app/ocpv/ocpv10.kubeconfig}
+            - {
+                name: PARSEC_BABYLON__CLUSTERS__EAST__KUBECONFIG,
+                value: /app/babylon/east.kubeconfig,
+              }
+            - {
+                name: PARSEC_BABYLON__CLUSTERS__WEST__KUBECONFIG,
+                value: /app/babylon/west.kubeconfig,
+              }
+            - {
+                name: PARSEC_BABYLON__CLUSTERS__PARTNER0__KUBECONFIG,
+                value: /app/babylon/partner0.kubeconfig,
+              }
+            - {
+                name: PARSEC_BABYLON__CLUSTERS__PARTNER1__KUBECONFIG,
+                value: /app/babylon/partner1.kubeconfig,
+              }
+            - {
+                name: PARSEC_BABYLON__CLUSTERS__INTEGRATION__KUBECONFIG,
+                value: /app/babylon/integration.kubeconfig,
+              }
+            - {
+                name: PARSEC_BABYLON__CLUSTERS__BABYDEV__KUBECONFIG,
+                value: /app/babylon/babydev.kubeconfig,
+              }
+            - {
+                name: PARSEC_OCPV__CLUSTERS__OCPV05__KUBECONFIG,
+                value: /app/ocpv/ocpv05.kubeconfig,
+              }
+            - {
+                name: PARSEC_OCPV__CLUSTERS__OCPV06__KUBECONFIG,
+                value: /app/ocpv/ocpv06.kubeconfig,
+              }
+            - {
+                name: PARSEC_OCPV__CLUSTERS__OCPV07__KUBECONFIG,
+                value: /app/ocpv/ocpv07.kubeconfig,
+              }
+            - {
+                name: PARSEC_OCPV__CLUSTERS__OCPV08__KUBECONFIG,
+                value: /app/ocpv/ocpv08.kubeconfig,
+              }
+            - {
+                name: PARSEC_OCPV__CLUSTERS__OCPV09__KUBECONFIG,
+                value: /app/ocpv/ocpv09.kubeconfig,
+              }
+            - {
+                name: PARSEC_OCPV__CLUSTERS__OCPV10__KUBECONFIG,
+                value: /app/ocpv/ocpv10.kubeconfig,
+              }
           volumeMounts:
-            - {name: config, mountPath: /app/config/config.yaml, subPath: config.yaml}
-            - {name: vertex-credentials, mountPath: /app/gcp, readOnly: true}
-            - {name: gcp-billing-credentials, mountPath: /app/gcp-billing, readOnly: true}
-            - {name: babylon-kubeconfigs, mountPath: /app/babylon, readOnly: true}
-            - {name: ocpv-kubeconfigs, mountPath: /app/ocpv, readOnly: true}
-            - {name: data, mountPath: /app/data}
+            - {
+                name: config,
+                mountPath: /app/config/config.yaml,
+                subPath: config.yaml,
+              }
+            - { name: vertex-credentials, mountPath: /app/gcp, readOnly: true }
+            - {
+                name: gcp-billing-credentials,
+                mountPath: /app/gcp-billing,
+                readOnly: true,
+              }
+            - {
+                name: babylon-kubeconfigs,
+                mountPath: /app/babylon,
+                readOnly: true,
+              }
+            - { name: ocpv-kubeconfigs, mountPath: /app/ocpv, readOnly: true }
+            - { name: data, mountPath: /app/data }
           resources:
-            requests: {cpu: '500m', memory: 1Gi}
+            requests: { cpu: "500m", memory: 1Gi }
             # CPU, not memory, is the binding constraint: every SDK turn spawns a
             # `claude` subprocess, and under a tight quota concurrent cold starts
             # starve the event loop until the liveness probe restarts the pod.
-            limits: {cpu: '2', memory: 3Gi}
+            limits: { cpu: "2", memory: 3Gi }
           livenessProbe:
-            httpGet: {path: /api/health, port: 8000}
+            httpGet: { path: /api/health, port: 8000 }
             initialDelaySeconds: 30
             periodSeconds: 30
             timeoutSeconds: 10
             failureThreshold: 5
           readinessProbe:
-            httpGet: {path: /api/health/ready, port: 8000}
+            httpGet: { path: /api/health/ready, port: 8000 }
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
@@ -245,26 +329,26 @@ spec:
         # because containers in a pod share a network namespace.
         - name: icinga-mcp
           image: quay.io/rhpds/monitoring-mcp:v0.3.1
-          args: ['--transport', 'sse', '--host', '0.0.0.0', '--port', '3000']
+          args: ["--transport", "sse", "--host", "0.0.0.0", "--port", "3000"]
           envFrom:
-            - secretRef: {name: icinga-credentials, optional: true}
+            - secretRef: { name: icinga-credentials, optional: true }
           env:
             - name: PARSEC_REPORTING_MCP__MCP_URL
               value: "http://reporting-mcp.demo-reporting.svc:8080/mcp/"
           resources:
-            requests: {cpu: '50m', memory: 64Mi}
-            limits: {cpu: '200m', memory: 128Mi}
+            requests: { cpu: "50m", memory: 64Mi }
+            limits: { cpu: "200m", memory: 128Mi }
       volumes:
         - name: config
-          configMap: {name: parsec-sdk-config}
+          configMap: { name: parsec-sdk-config }
         - name: vertex-credentials
-          secret: {secretName: vertex-credentials}
+          secret: { secretName: vertex-credentials } # pragma: allowlist secret
         - name: gcp-billing-credentials
-          secret: {secretName: gcp-billing-credentials}
+          secret: { secretName: gcp-billing-credentials } # pragma: allowlist secret
         - name: babylon-kubeconfigs
-          secret: {secretName: babylon-kubeconfigs}
+          secret: { secretName: babylon-kubeconfigs } # pragma: allowlist secret
         - name: ocpv-kubeconfigs
-          secret: {secretName: ocpv-kubeconfigs}
+          secret: { secretName: ocpv-kubeconfigs } # pragma: allowlist secret
         - name: data
           emptyDir: {}
 ---
@@ -278,28 +362,28 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: parsec-legacy
-  labels: {app: parsec-legacy}
+  labels: { app: parsec-legacy }
   annotations:
     image.openshift.io/triggers: |
       [{"from":{"kind":"ImageStreamTag","name":"parsec-sdk:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"parsec\")].image"}]
 spec:
   replicas: 1
   selector:
-    matchLabels: {app: parsec-legacy}
+    matchLabels: { app: parsec-legacy }
   strategy:
     type: RollingUpdate
-    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
   template:
     metadata:
-      labels: {app: parsec-legacy}
+      labels: { app: parsec-legacy }
     spec:
       containers:
         - name: parsec
           image: parsec-sdk:latest
-          ports: [{containerPort: 8000, name: http}]
+          ports: [{ containerPort: 8000, name: http }]
           envFrom:
-            - secretRef: {name: parsec-cloud-credentials, optional: true}
-            - secretRef: {name: parsec-aap2-credentials, optional: true}
+            - secretRef: { name: parsec-cloud-credentials, optional: true }
+            - secretRef: { name: parsec-aap2-credentials, optional: true }
           env:
             - name: PARSEC_AGENT__RUNTIME
               value: "legacy"
@@ -308,15 +392,51 @@ spec:
             - name: PARSEC_ICINGA__MCP_URL
               value: "http://localhost:3000/sse"
             - name: PARSEC_GITHUB__TOKEN
-              valueFrom: {secretKeyRef: {name: parsec-secrets, key: github-token, optional: true}}
+              valueFrom:
+                {
+                  secretKeyRef:
+                    { name: parsec-secrets, key: github-token, optional: true },
+                }
             - name: PARSEC_REPORTING_MCP__TOKEN
-              valueFrom: {secretKeyRef: {name: parsec-secrets, key: reporting-mcp-token, optional: true}}
+              valueFrom:
+                {
+                  secretKeyRef:
+                    {
+                      name: parsec-secrets,
+                      key: reporting-mcp-token,
+                      optional: true,
+                    },
+                }
             - name: PARSEC_ALERT_API_KEY
-              valueFrom: {secretKeyRef: {name: parsec-secrets, key: alert-api-key, optional: true}}
+              valueFrom:
+                {
+                  secretKeyRef:
+                    {
+                      name: parsec-secrets,
+                      key: alert-api-key,
+                      optional: true,
+                    },
+                }
             - name: PARSEC_ANTHROPIC__LITELLM_API_KEY
-              valueFrom: {secretKeyRef: {name: parsec-secrets, key: litellm-api-key, optional: true}}
+              valueFrom:
+                {
+                  secretKeyRef:
+                    {
+                      name: parsec-secrets,
+                      key: litellm-api-key,
+                      optional: true,
+                    },
+                }
             - name: PARSEC_LEARNINGS__LOCAL__API_KEY
-              valueFrom: {secretKeyRef: {name: parsec-secrets, key: litellm-api-key, optional: true}}
+              valueFrom:
+                {
+                  secretKeyRef:
+                    {
+                      name: parsec-secrets,
+                      key: litellm-api-key,
+                      optional: true,
+                    },
+                }
             # --- Vertex for Parsec's own Anthropic client (same as parsec-dev) ---
             - name: PARSEC_ANTHROPIC__BACKEND
               value: "vertex"
@@ -341,70 +461,118 @@ spec:
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: /app/gcp/service-account.json
             - name: ANTHROPIC_VERTEX_PROJECT_ID
-              value: "itpc-gcp-product-all-claude"
+              value: "itpc-gcp-product-all-claude" # pragma: allowlist secret
             - name: CLOUD_ML_REGION
               value: "us-east5"
             - name: CLAUDE_CODE_ACCEPT_TOS
               value: "true"
             # --- Babylon / OCPV cluster kubeconfigs (mounted secrets) ---
-            - {name: PARSEC_BABYLON__CLUSTERS__EAST__KUBECONFIG, value: /app/babylon/east.kubeconfig}
-            - {name: PARSEC_BABYLON__CLUSTERS__WEST__KUBECONFIG, value: /app/babylon/west.kubeconfig}
-            - {name: PARSEC_BABYLON__CLUSTERS__PARTNER0__KUBECONFIG, value: /app/babylon/partner0.kubeconfig}
-            - {name: PARSEC_BABYLON__CLUSTERS__PARTNER1__KUBECONFIG, value: /app/babylon/partner1.kubeconfig}
-            - {name: PARSEC_BABYLON__CLUSTERS__INTEGRATION__KUBECONFIG, value: /app/babylon/integration.kubeconfig}
-            - {name: PARSEC_BABYLON__CLUSTERS__BABYDEV__KUBECONFIG, value: /app/babylon/babydev.kubeconfig}
-            - {name: PARSEC_OCPV__CLUSTERS__OCPV05__KUBECONFIG, value: /app/ocpv/ocpv05.kubeconfig}
-            - {name: PARSEC_OCPV__CLUSTERS__OCPV06__KUBECONFIG, value: /app/ocpv/ocpv06.kubeconfig}
-            - {name: PARSEC_OCPV__CLUSTERS__OCPV07__KUBECONFIG, value: /app/ocpv/ocpv07.kubeconfig}
-            - {name: PARSEC_OCPV__CLUSTERS__OCPV08__KUBECONFIG, value: /app/ocpv/ocpv08.kubeconfig}
-            - {name: PARSEC_OCPV__CLUSTERS__OCPV09__KUBECONFIG, value: /app/ocpv/ocpv09.kubeconfig}
-            - {name: PARSEC_OCPV__CLUSTERS__OCPV10__KUBECONFIG, value: /app/ocpv/ocpv10.kubeconfig}
+            - {
+                name: PARSEC_BABYLON__CLUSTERS__EAST__KUBECONFIG,
+                value: /app/babylon/east.kubeconfig,
+              }
+            - {
+                name: PARSEC_BABYLON__CLUSTERS__WEST__KUBECONFIG,
+                value: /app/babylon/west.kubeconfig,
+              }
+            - {
+                name: PARSEC_BABYLON__CLUSTERS__PARTNER0__KUBECONFIG,
+                value: /app/babylon/partner0.kubeconfig,
+              }
+            - {
+                name: PARSEC_BABYLON__CLUSTERS__PARTNER1__KUBECONFIG,
+                value: /app/babylon/partner1.kubeconfig,
+              }
+            - {
+                name: PARSEC_BABYLON__CLUSTERS__INTEGRATION__KUBECONFIG,
+                value: /app/babylon/integration.kubeconfig,
+              }
+            - {
+                name: PARSEC_BABYLON__CLUSTERS__BABYDEV__KUBECONFIG,
+                value: /app/babylon/babydev.kubeconfig,
+              }
+            - {
+                name: PARSEC_OCPV__CLUSTERS__OCPV05__KUBECONFIG,
+                value: /app/ocpv/ocpv05.kubeconfig,
+              }
+            - {
+                name: PARSEC_OCPV__CLUSTERS__OCPV06__KUBECONFIG,
+                value: /app/ocpv/ocpv06.kubeconfig,
+              }
+            - {
+                name: PARSEC_OCPV__CLUSTERS__OCPV07__KUBECONFIG,
+                value: /app/ocpv/ocpv07.kubeconfig,
+              }
+            - {
+                name: PARSEC_OCPV__CLUSTERS__OCPV08__KUBECONFIG,
+                value: /app/ocpv/ocpv08.kubeconfig,
+              }
+            - {
+                name: PARSEC_OCPV__CLUSTERS__OCPV09__KUBECONFIG,
+                value: /app/ocpv/ocpv09.kubeconfig,
+              }
+            - {
+                name: PARSEC_OCPV__CLUSTERS__OCPV10__KUBECONFIG,
+                value: /app/ocpv/ocpv10.kubeconfig,
+              }
           volumeMounts:
-            - {name: config, mountPath: /app/config/config.yaml, subPath: config.yaml}
-            - {name: vertex-credentials, mountPath: /app/gcp, readOnly: true}
-            - {name: gcp-billing-credentials, mountPath: /app/gcp-billing, readOnly: true}
-            - {name: babylon-kubeconfigs, mountPath: /app/babylon, readOnly: true}
-            - {name: ocpv-kubeconfigs, mountPath: /app/ocpv, readOnly: true}
-            - {name: data, mountPath: /app/data}
+            - {
+                name: config,
+                mountPath: /app/config/config.yaml,
+                subPath: config.yaml,
+              }
+            - { name: vertex-credentials, mountPath: /app/gcp, readOnly: true }
+            - {
+                name: gcp-billing-credentials,
+                mountPath: /app/gcp-billing,
+                readOnly: true,
+              }
+            - {
+                name: babylon-kubeconfigs,
+                mountPath: /app/babylon,
+                readOnly: true,
+              }
+            - { name: ocpv-kubeconfigs, mountPath: /app/ocpv, readOnly: true }
+            - { name: data, mountPath: /app/data }
           resources:
-            requests: {cpu: '500m', memory: 1Gi}
+            requests: { cpu: "500m", memory: 1Gi }
             # CPU, not memory, is the binding constraint: every SDK turn spawns a
             # `claude` subprocess, and under a tight quota concurrent cold starts
             # starve the event loop until the liveness probe restarts the pod.
-            limits: {cpu: '2', memory: 3Gi}
+            limits: { cpu: "2", memory: 3Gi }
           livenessProbe:
-            httpGet: {path: /api/health, port: 8000}
+            httpGet: { path: /api/health, port: 8000 }
             initialDelaySeconds: 30
             periodSeconds: 30
             timeoutSeconds: 10
             failureThreshold: 5
           readinessProbe:
-            httpGet: {path: /api/health/ready, port: 8000}
+            httpGet: { path: /api/health/ready, port: 8000 }
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
         - name: icinga-mcp
           image: quay.io/rhpds/monitoring-mcp:v0.3.1
-          args: ['--transport', 'sse', '--host', '0.0.0.0', '--port', '3000']
+          args: ["--transport", "sse", "--host", "0.0.0.0", "--port", "3000"]
           envFrom:
-            - secretRef: {name: icinga-credentials, optional: true}
+            - secretRef: { name: icinga-credentials, optional: true }
           env:
             - name: PARSEC_REPORTING_MCP__MCP_URL
               value: "http://reporting-mcp.demo-reporting.svc:8080/mcp/"
           resources:
-            requests: {cpu: '50m', memory: 64Mi}
-            limits: {cpu: '200m', memory: 128Mi}
+            requests: { cpu: "50m", memory: 64Mi }
+            limits: { cpu: "200m", memory: 128Mi }
       volumes:
         - name: config
-          configMap: {name: parsec-sdk-config}
+          configMap: { name: parsec-sdk-config }
         - name: vertex-credentials
-          secret: {secretName: vertex-credentials}
+          secret: { secretName: vertex-credentials } # pragma: allowlist secret
         - name: gcp-billing-credentials
-          secret: {secretName: gcp-billing-credentials}
+          secret: { secretName: gcp-billing-credentials } # pragma: allowlist secret
         - name: babylon-kubeconfigs
-          secret: {secretName: babylon-kubeconfigs}
+          secret: { secretName: babylon-kubeconfigs } # pragma: allowlist secret
         - name: ocpv-kubeconfigs
-          secret: {secretName: ocpv-kubeconfigs}
+          secret: { secretName: ocpv-kubeconfigs } # pragma: allowlist secret
         - name: data
           emptyDir: {}
 ---
@@ -412,10 +580,10 @@ apiVersion: v1
 kind: Service
 metadata:
   name: parsec-legacy
-  labels: {app: parsec-legacy}
+  labels: { app: parsec-legacy }
 spec:
-  selector: {app: parsec-legacy}
-  ports: [{name: http, port: 8000, targetPort: 8000}]
+  selector: { app: parsec-legacy }
+  ports: [{ name: http, port: 8000, targetPort: 8000 }]
 ---
 # OAuth proxy: without it no X-Forwarded-Email ever reaches the app, so every
 # browser request is rejected with "no user identity found in request".
@@ -423,20 +591,20 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: parsec-sdk-oauth
-  labels: {app: parsec-sdk-oauth}
+  labels: { app: parsec-sdk-oauth }
 spec:
   replicas: 1
   selector:
-    matchLabels: {app: parsec-sdk-oauth}
+    matchLabels: { app: parsec-sdk-oauth }
   template:
     metadata:
-      labels: {app: parsec-sdk-oauth}
+      labels: { app: parsec-sdk-oauth }
     spec:
       serviceAccountName: parsec-sdk-oauth
       containers:
         - name: oauth-proxy
           image: registry.redhat.io/openshift4/ose-oauth-proxy-rhel9:latest
-          ports: [{containerPort: 8080, name: public}]
+          ports: [{ containerPort: 8080, name: public }]
           args:
             - -provider=openshift
             - -http-address=:8080
@@ -454,38 +622,42 @@ spec:
             - -upstream-timeout=930s
             - -pass-user-headers=true
           volumeMounts:
-            - {name: oauth-secret, mountPath: /etc/proxy/secrets, readOnly: true}
+            - {
+                name: oauth-secret,
+                mountPath: /etc/proxy/secrets,
+                readOnly: true,
+              }
           resources:
-            requests: {cpu: '20m', memory: 64Mi}
-            limits: {cpu: '200m', memory: 256Mi}
+            requests: { cpu: "20m", memory: 64Mi }
+            limits: { cpu: "200m", memory: 256Mi }
       volumes:
         - name: oauth-secret
-          secret: {secretName: parsec-sdk-oauth-secret}
+          secret: { secretName: parsec-sdk-oauth-secret } # pragma: allowlist secret
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: parsec-sdk
-  labels: {app: parsec-sdk}
+  labels: { app: parsec-sdk }
 spec:
-  selector: {app: parsec-sdk}
-  ports: [{name: http, port: 8000, targetPort: 8000}]
+  selector: { app: parsec-sdk }
+  ports: [{ name: http, port: 8000, targetPort: 8000 }]
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: parsec-sdk-oauth
-  labels: {app: parsec-sdk-oauth}
+  labels: { app: parsec-sdk-oauth }
 spec:
-  selector: {app: parsec-sdk-oauth}
-  ports: [{name: public, port: 8080, targetPort: 8080}]
+  selector: { app: parsec-sdk-oauth }
+  ports: [{ name: public, port: 8080, targetPort: 8080 }]
 ---
 # Route points at the proxy, not the app.
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
   name: parsec-sdk
-  labels: {app: parsec-sdk}
+  labels: { app: parsec-sdk }
   annotations:
     # HAProxy defaults `timeout server` to 30s and drops a connection that goes
     # quiet for longer. An investigation is silent on the wire while tools run
@@ -494,6 +666,6 @@ metadata:
     # (src/agent/streaming.py) — this is the belt to that pair of braces.
     haproxy.router.openshift.io/timeout: 900s
 spec:
-  to: {kind: Service, name: parsec-sdk-oauth}
-  port: {targetPort: public}
-  tls: {termination: edge, insecureEdgeTerminationPolicy: Redirect}
+  to: { kind: Service, name: parsec-sdk-oauth }
+  port: { targetPort: public }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }

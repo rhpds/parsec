@@ -21,7 +21,8 @@ async def test_sdk_streaming_emits_history_event(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(agents, "_should_use_sdk", lambda agent_type, cfg: True)
 
     class _FakeRunner:
-        def __init__(self, *args: Any, **kwargs: Any) -> None: ...
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            ...
 
         async def run_sub_agent(self, *args: Any, **kwargs: Any) -> dict:
             return {"agent": "icinga", "status": "success", "summary": "sdk answer"}
