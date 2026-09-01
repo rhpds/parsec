@@ -1,0 +1,19 @@
+{{- if .Values.deploy -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mlflow-postgres-data
+  namespace: {{ include "mlflow.namespaceName" . }}
+  labels:
+    {{- include "mlflow.labels" . | nindent 4 }}
+    component: postgres
+spec:
+  {{- if .Values.postgres.storage.class }}
+  storageClassName: {{ .Values.postgres.storage.class }}
+  {{- end }}
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.postgres.storage.size }}
+{{- end -}}

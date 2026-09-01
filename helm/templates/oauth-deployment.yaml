@@ -1,0 +1,94 @@
+{{- if and .Values.deploy .Values.oauth.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oauth-proxy
+  namespace: {{ include "parsec.namespaceName" . }}
+  labels:
+    {{- include "parsec.labels" . | nindent 4 }}
+    component: oauth-proxy
+  annotations:
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: {{ .Values.oauth.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: {{ include "parsec.name" . }}-oauth-proxy
+      component: oauth-proxy
+  template:
+    metadata:
+      labels:
+        app: {{ include "parsec.name" . }}-oauth-proxy
+        component: oauth-proxy
+    spec:
+      serviceAccountName: {{ include "parsec.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: oauth-proxy
+          image: {{ .Values.oauth.image.repository }}:{{ .Values.oauth.image.tag }}
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+            - containerPort: 8443
+              name: https
+              protocol: TCP
+          args:
+            - -provider=openshift
+            - -http-address=:8080
+            - -https-address=
+            - -email-domain=*
+            - -upstream=http://{{ include "parsec.name" . }}-service:8000/
+            - -client-id={{ .Values.oauth.clientName }}
+            - -client-secret-file=/etc/proxy/secrets/client-secret
+            - -cookie-secret-file=/etc/proxy/secrets/session_secret
+            - -openshift-service-account={{ include "parsec.serviceAccountName" . }}
+            - -openshift-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            - -skip-auth-regex={{ .Values.oauth.skipAuthRegex }}
+            - -upstream-timeout={{ .Values.oauth.upstreamTimeout }}
+            - -pass-user-headers=true
+          volumeMounts:
+            - name: oauth-proxy-secret
+              mountPath: /etc/proxy/secrets
+              readOnly: true
+            - name: oauth-serving-cert
+              mountPath: /etc/tls/private
+              readOnly: true
+          resources:
+            {{- toYaml .Values.oauth.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /oauth/healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /oauth/healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+      volumes:
+        - name: oauth-proxy-secret
+          secret:
+            secretName: oauth-proxy-secret
+        - name: oauth-serving-cert
+          secret:
+            secretName: oauth-serving-cert
+{{- end -}}

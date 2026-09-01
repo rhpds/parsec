@@ -1,0 +1,13 @@
+{{- if and .Values.deploy .Values.oauth.enabled .Values.oauth.clientSecret -}}
+apiVersion: oauth.openshift.io/v1
+kind: OAuthClient
+metadata:
+  name: {{ .Values.oauth.clientName }}
+  labels:
+    {{- include "mlflow.labels" . | nindent 4 }}
+secret: {{ .Values.oauth.clientSecret }}
+redirectURIs:
+  - https://{{ include "mlflow.externalHostname" . }}/oauth/callback
+grantMethod: auto
+respondWithChallenges: false
+{{- end -}}

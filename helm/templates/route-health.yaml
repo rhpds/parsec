@@ -1,0 +1,25 @@
+{{- if .Values.deploy -}}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "parsec.name" . }}-health
+  namespace: {{ include "parsec.namespaceName" . }}
+  labels:
+    {{- include "parsec.labels" . | nindent 4 }}
+    component: monitoring
+  annotations:
+    haproxy.router.openshift.io/timeout: {{ .Values.healthRoute.timeout | quote }}
+    haproxy.router.openshift.io/ip_whitelist: {{ .Values.healthRoute.ipWhitelist | quote }}
+spec:
+  path: /api/health
+  to:
+    kind: Service
+    name: {{ include "parsec.name" . }}-service
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None
+{{- end -}}

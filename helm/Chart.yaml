@@ -1,0 +1,23 @@
+apiVersion: v2
+name: parsec
+description: Natural language cloud cost investigation tool
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - openshift
+  - cloud-costs
+  - claude
+  - investigation
+home: https://github.com/rhpds/parsec
+sources:
+  - https://github.com/rhpds/parsec
+maintainers:
+  - name: Patrick T. Rutledge III
+    email: rut31337@gmail.com
+  - name: Marcos Amorim
+    email: mamorim@redhat.com
+dependencies:
+  - name: mlflow
+    version: "0.1.0"
+    condition: mlflow.deploy
