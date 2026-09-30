@@ -246,7 +246,9 @@ spec:
                 --backend-store-uri "$(MLFLOW_BACKEND_STORE_URI)" \
                 --default-artifact-root "$(MLFLOW_DEFAULT_ARTIFACT_ROOT)" \
                 --host 0.0.0.0 \
-                --port 5000
+                --port 5000 \
+                --allowed-hosts "mlflow-api.{{ mlflow_cluster_domain }},mlflow-api.{{ mlflow_cluster_domain }}:*,mlflow.{{ mlflow_cluster_domain }},mlflow.{{ mlflow_cluster_domain }}:*,mlflow-tracking,mlflow-tracking:*,mlflow-tracking.{{ mlflow_namespace }}.svc,mlflow-tracking.{{ mlflow_namespace }}.svc:*,mlflow-tracking.{{ mlflow_namespace }}.svc.cluster.local,mlflow-tracking.{{ mlflow_namespace }}.svc.cluster.local:*" \
+                --cors-allowed-origins "https://mlflow.{{ mlflow_cluster_domain }},https://mlflow-api.{{ mlflow_cluster_domain }}"
           readinessProbe:
             httpGet:
               path: /health
@@ -271,10 +273,10 @@ spec:
           resources:
             requests:
               memory: {{ mlflow_server_memory_request }}
-              cpu: "100m"
+              cpu: "{{ mlflow_server_cpu_request }}"
             limits:
               memory: {{ mlflow_server_memory_limit }}
-              cpu: "500m"
+              cpu: "{{ mlflow_server_cpu_limit }}"
 ---
 # MLflow Tracking Service (internal - for Parsec connection)
 apiVersion: v1
