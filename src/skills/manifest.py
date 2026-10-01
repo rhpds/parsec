@@ -64,6 +64,11 @@ class SkillManifest:
     parsec: ParsecExtensions = field(default_factory=ParsecExtensions)
     source: str = "unknown"  # "project" | "plugin" | "user"
     warnings: tuple[str, ...] = ()  # non-fatal validation issues
+    #: The name exactly as the author wrote it, when it differs from ``name``.
+    #: Marketplace bundles namespace their skills (``agnosticv:validator``);
+    #: ``name`` holds the flattened, path-safe spelling and this holds the
+    #: original so the UI can show operators the name they will find upstream.
+    qualified_name: str | None = None
 
     @property
     def is_parsec_native(self) -> bool:

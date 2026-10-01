@@ -15,15 +15,32 @@ RUN /usr/libexec/s2i/assemble
 FROM registry.access.redhat.com/ubi9/python-311:latest
 
 USER 0
+# Runtime contract. Whoever rebases this file onto another base image (the
+# ubi9-minimal hardening in #29 rewrites it wholesale) must keep ALL of:
+#   - git                 POST /api/skills/install
+#   - nodejs + the pinned `claude` CLI   agent.runtime=sdk
+#   - /app/.claude/skills seeded from /app/skills   SDK skill discovery
+#   - a group-0 writable HOME             the CLI's ~/.claude state
+# The verify RUN near the end asserts each one, so dropping any of them fails
+# the image build instead of surfacing as a 501 or an inert SDK on a live pod.
 RUN dnf install -y --nodocs libpq && dnf clean all
+
+# git is for POST /api/skills/install, which clones an external skill bundle at
+# a pinned ref. That endpoint is admin-gated and off by default
+# (skills.install_enabled), so shipping the binary costs nothing when unused —
+# without it the endpoint can only return 501. Kept on its own line so a
+# base-image swap carries it over as one line (`microdnf install -y git` on
+# ubi9-minimal).
+RUN dnf install -y --nodocs git && dnf clean all
 
 # Claude Agent SDK runtime: Node.js + the `claude` CLI that the SDK drives as a
 # subprocess (the Python claude-agent-sdk wrapper comes via requirements.txt).
 # Required for agent.runtime=sdk; harmless for the default legacy runtime.
 # Pin the CLI to the version verified against the bundled claude-agent-sdk so an
 # image rebuild can't silently pull a breaking release.
+ARG CLAUDE_CODE_VERSION=2.1.169
 RUN dnf install -y --nodocs nodejs npm && dnf clean all && \
-    npm install -g @anthropic-ai/claude-code@2.1.169 && npm cache clean --force
+    npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} && npm cache clean --force
 
 COPY --from=builder /opt/app-root /opt/app-root
 
@@ -68,7 +85,10 @@ ENV PYTHONPATH="/app" \
 USER 1001
 
 RUN python3 -c "import dynaconf, fastapi, uvicorn; print('Dependencies OK')" && \
-    node --version && claude --version && \
+    git --version && \
+    test -w "$HOME" && \
+    node --version && \
+    claude --version | grep -F "${CLAUDE_CODE_VERSION}" && \
     python3 -c "import claude_agent_sdk; print('claude-agent-sdk OK')" && \
     python3 /app/scripts/verify_sdk_cli.py && \
     test -f /app/.claude/skills/icinga-triage/SKILL.md && echo "icinga-triage skill baked"

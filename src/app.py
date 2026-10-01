@@ -31,6 +31,7 @@ from src.routes.share import ensure_shares_dir
 from src.routes.share import router as share_router
 from src.routes.skills import router as skills_router
 from src.skills import SkillLoader, sync_sdk_skill_root
+from src.skills.sdk_root import sdk_cwd
 
 logging.basicConfig(
     level=logging.INFO,
@@ -81,7 +82,9 @@ async def lifespan(app: FastAPI):
     # repo shows up in the Skills tab and can never actually run.
     try:
         manifests = SkillLoader.from_config(cfg).load_all()
-        sync_sdk_skill_root(manifests, cwd=cfg.get("agent", {}).get("sdk", {}).get("cwd") or None)
+        # `sdk_cwd`, not a hand-chained cfg.get: startup and reload must resolve
+        # the same root. See the docstring for why the two used to differ.
+        sync_sdk_skill_root(manifests, cwd=sdk_cwd(cfg))
     except Exception:
         logger.exception("Failed to publish skills to the SDK root — SDK skills may be missing")
 

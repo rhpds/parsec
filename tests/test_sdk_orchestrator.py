@@ -384,7 +384,7 @@ def test_preloaded_skills_are_surfaced_on_delegation(tr, monkeypatch):
     """
     monkeypatch.setattr(
         "src.agent.sdk_profiles.skills_for",
-        lambda a: ["icinga-triage"] if a == "icinga" else [],
+        lambda a, _config=None: ["icinga-triage"] if a == "icinga" else [],
     )
     msg = _assistant([ToolUseBlock(id="tu-1", name="Agent", input={"subagent_type": "icinga"})])
     blob = _blob(_events(tr, msg))
@@ -414,7 +414,7 @@ def test_skill_reported_once_per_turn(tr):
 
 
 def test_skill_lookup_failure_does_not_break_delegation(tr, monkeypatch):
-    def _boom(_):
+    def _boom(*_):
         raise RuntimeError("skills root unreadable")
 
     monkeypatch.setattr("src.agent.sdk_profiles.skills_for", _boom)
@@ -612,7 +612,9 @@ def test_unknown_invoked_skill_is_not_surfaced(tr, monkeypatch):
     """The skill name comes from raw model output; don't echo one that isn't real."""
     import src.agent.sdk_stream as mod
 
-    monkeypatch.setattr(mod, "discoverable_skill_names", lambda: frozenset({"icinga-triage"}))
+    monkeypatch.setattr(
+        mod, "discoverable_skill_names", lambda _cwd=None: frozenset({"icinga-triage"})
+    )
     msg = _assistant(
         [ToolUseBlock(id="tu-x", name="Skill", input={"command": "<img src=x onerror=1>"})]
     )

@@ -51,9 +51,14 @@ _CLI_ERROR_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
 class SdkEventTranslator:
     """Stateful translator for one orchestrator turn."""
 
-    def __init__(self, *, question: str, history: list) -> None:
+    def __init__(self, *, question: str, history: list, config: Any = None) -> None:
         self._question = question
         self._history = history or []
+        #: The config this turn runs under (``None`` = the live one). Skill names
+        #: are checked against *its* SDK root and attachment, not ``Path.cwd()``
+        #: and global state — otherwise the badges disagree with the skills the
+        #: orchestrator's AgentDefinitions actually preloaded.
+        self._config = config
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._text_parts: list[str] = []
         self._active_agents: dict[str, str] = {}
@@ -174,7 +179,9 @@ class SdkEventTranslator:
         # and trust the name when it does not (unit tests have no skills root). The
         # client builds these nodes with textContent, so an unverified name is a
         # wrong label rather than an injection.
-        available = discoverable_skill_names()
+        from src.skills.sdk_root import sdk_cwd
+
+        available = discoverable_skill_names(sdk_cwd(self._resolved_config()))
         if available and skill not in available:
             logger.warning("Model invoked unknown skill %r — not surfaced", skill)
             return
@@ -207,10 +214,17 @@ class SdkEventTranslator:
         # from turn one and never produce a Skill tool call, so nothing else
         # would ever reveal them. Surface them at delegation time.
         try:
-            for skill in skills_for(agent_type):
+            for skill in skills_for(agent_type, self._resolved_config()):
                 yield from self._note_skill(skill, source="preloaded", agent_type=agent_type)
         except Exception:
             logger.exception("Could not resolve preloaded skills for %s", agent_type)
+
+    def _resolved_config(self) -> Any:
+        if self._config is not None:
+            return self._config
+        from src.config import get_config
+
+        return get_config()
 
     def _translate_user(self, message: Any) -> Iterator[str]:
         """A UserMessage carries tool_result blocks back from the model."""
