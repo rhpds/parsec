@@ -136,6 +136,27 @@ def test_litellm_backend_authenticates_the_cli(monkeypatch: pytest.MonkeyPatch) 
     assert env["ANTHROPIC_AUTH_TOKEN"] == "sk-gateway"  # pragma: allowlist secret
 
 
+def test_litellm_backend_disables_experimental_betas() -> None:
+    """LiteLLM→Vertex rejects Claude Code's anthropic-beta headers with 400.
+
+    The pinned CLI (and newer ones) send ``advisor-tool-2026-03-01`` /
+    ``thinking-token-count-*``. Vertex's :rawPredict endpoint does not accept
+    those values, so every SDK turn dies with invalid_request_error. Claude
+    Code's ``CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`` suppresses them.
+    """
+    config = {
+        "anthropic": {
+            "backend": "litellm",
+            "litellm_base_url": "https://maas-rhdp.example.io",
+            "litellm_api_key": "sk-gateway",  # pragma: allowlist secret
+        }
+    }
+
+    env = backend_cli_env(config)
+
+    assert env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] == "1"
+
+
 def test_dynaconf_uppercases_env_keys_and_the_backend_still_resolves() -> None:
     """PARSEC_ANTHROPIC__* arrives uppercased, as it does on every deployment."""
     config = {
