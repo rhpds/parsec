@@ -147,7 +147,15 @@ def _litellm_cli_env(anthropic_cfg: dict[str, Any]) -> dict[str, str]:
         return _incomplete("litellm", "anthropic.litellm_base_url + anthropic.litellm_api_key")
     # A bearer token rather than ANTHROPIC_API_KEY's x-api-key header: this
     # is a gateway, not the Anthropic API. LiteLLM accepts either.
-    return {"ANTHROPIC_BASE_URL": base_url, "ANTHROPIC_AUTH_TOKEN": api_key}
+    #
+    # Claude Code sends experimental anthropic-beta values (advisor-tool-*,
+    # thinking-token-count-*) that LiteLLM's Vertex upstream rejects with
+    # 400 invalid_request_error. The CLI's own escape hatch suppresses them.
+    return {
+        "ANTHROPIC_BASE_URL": base_url,
+        "ANTHROPIC_AUTH_TOKEN": api_key,
+        "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
+    }
 
 
 def _vertex_cli_env(anthropic_cfg: dict[str, Any], config: Any) -> dict[str, str]:
