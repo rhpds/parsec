@@ -425,7 +425,7 @@ function renderSkills(skills) {
     const order = { unusable: 0, orphaned: 1, ok: 2 };
     const sorted = skills.slice().sort(function(a, b) {
         const d = (order[a.health?.status] ?? 3) - (order[b.health?.status] ?? 3);
-        return d !== 0 ? d : a.name.localeCompare(b.name);
+        return d === 0 ? a.name.localeCompare(b.name) : d;
     });
 
     sorted.forEach(function(s) {
@@ -501,10 +501,7 @@ function buildAgentRow(s) {
         const on = attached.has(agent);
         const chip = el("button", "skill-chip" + (on ? " skill-chip-on" : ""), agent);
         chip.type = "button";
-        if (!skillsState.is_admin) {
-            chip.disabled = true;
-            chip.title = "Admin access required to change attachment";
-        } else {
+        if (skillsState.is_admin) {
             chip.title = on ? "Detach from " + agent : "Attach to " + agent;
             chip.addEventListener("click", function() {
                 const next = new Set(attached);
@@ -518,16 +515,19 @@ function buildAgentRow(s) {
                     chip.disabled = false;
                 });
             });
+        } else {
+            chip.disabled = true;
+            chip.title = "Admin access required to change attachment";
         }
         row.appendChild(chip);
     });
 
     const foot = el("div", "skill-agents-foot");
     let originText;
-    if (!attached.size) {
-        originText = origin === "override" ? "switched off" : "not attached — declare parsec.domain";
-    } else {
+    if (attached.size) {
         originText = origin === "override" ? "set manually" : "from " + origin;
+    } else {
+        originText = origin === "override" ? "switched off" : "not attached — declare parsec.domain";
     }
     const src = el("span", "skill-origin", originText);
     src.title = origin === "override"

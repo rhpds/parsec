@@ -93,14 +93,33 @@ _GLOB_CONTINUES = re.compile(r"[A-Za-z0-9./\[{<$?]")
 #: ``_`` underscore emphasis (``_run scripts/cli.py_``), which ``\w`` absorbs.
 _TRAILING_PUNCT = ".,);:`'\"?-_"
 
-#: A suffix glued onto a file extension by prose: ``scripts/cli.py-based``,
-#: ``scripts/cli.py--it prints JSON``. Group 1 is the file actually named.
-_EXT_SUFFIX_RE = re.compile(r"^(.*\.[A-Za-z0-9]+)-[^/]*$")
-
 #: A skill telling the model to build or use a Python virtualenv presumes a
 #: shell. Flagged separately from a missing file because the venv legitimately
 #: does not exist in the repo — its absence is not the problem, the assumption is.
 _RUNTIME_RE = re.compile(r"\.venv|python3?\s+-m\s+venv|pip\s+install|npm\s+install")
+
+
+def _file_ref_before_suffix(rel: str) -> str | None:
+    """Strip a prose suffix glued onto a file extension.
+
+    ``scripts/cli.py-based`` → ``scripts/cli.py``. Implemented with string
+    ops rather than a regex so the scanner cannot flag ReDoS (python:S5852).
+    """
+    head, sep, basename = rel.rpartition("/")
+    if "-" not in basename or "." not in basename:
+        return None
+    # Rightmost ``.ext-`` wins so ``foo-bar.py-based`` keeps the full stem.
+    for dot in range(len(basename) - 1, -1, -1):
+        if basename[dot] != ".":
+            continue
+        ext_end = dot + 1
+        while ext_end < len(basename) and basename[ext_end].isalnum():
+            ext_end += 1
+        if ext_end == dot + 1 or ext_end >= len(basename) or basename[ext_end] != "-":
+            continue
+        stem = basename[:ext_end]
+        return f"{head}{sep}{stem}" if sep else stem
+    return None
 
 
 @dataclass(frozen=True)
@@ -267,9 +286,9 @@ def _exact_present(root: Path, rel: str) -> tuple[bool, str]:
         return True, rel
     # `scripts/cli.py-based`: the file is `scripts/cli.py`. This narrows the
     # reference to the file it names; it never widens it to a directory.
-    cut = _EXT_SUFFIX_RE.match(rel)
-    if cut and not _escapes(cut.group(1)):
-        return (root / posixpath.normpath(cut.group(1))).exists(), rel
+    cut = _file_ref_before_suffix(rel)
+    if cut and not _escapes(cut):
+        return (root / posixpath.normpath(cut)).exists(), rel
     return False, rel
 
 
