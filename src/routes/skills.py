@@ -98,6 +98,15 @@ INSTALL_MAX_BYTES = 64 * 1024 * 1024
 _SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _REF_RE = re.compile(r"^[\w][\w./-]{0,100}$")
 _REPO_RE = re.compile(r"^https://([a-zA-Z0-9.-]+)/([\w.-]+/[\w.-]+?)(?:\.git)?$")
+_ERR_INVALID_SKILL_NAME = "Invalid skill name"
+
+_RESP_400 = {"description": "Bad Request"}
+_RESP_403 = {"description": "Forbidden"}
+_RESP_404 = {"description": "Not Found"}
+_RESP_409 = {"description": "Conflict"}
+_RESP_500 = {"description": "Internal Server Error"}
+_RESP_501 = {"description": "Not Implemented"}
+_RESP_504 = {"description": "Gateway Timeout"}
 
 
 # ----------------------------------------------------------------- helpers
@@ -230,7 +239,7 @@ def _read_provenance(skill_path: Path) -> dict[str, Any] | None:
 # ------------------------------------------------------------------ read
 
 
-@router.get("/skills")
+@router.get("/skills", responses={500: _RESP_500})
 async def list_skills(
     request: Request,
     x_forwarded_user: Annotated[str | None, Header()] = None,
@@ -301,7 +310,7 @@ def _known_agents() -> list[str]:
 # ----------------------------------------------------------------- reload
 
 
-@router.post("/skills/reload", responses={403: {"description": "Forbidden"}})
+@router.post("/skills/reload", responses={403: _RESP_403, 500: _RESP_500})
 async def reload_skills(
     request: Request,
     x_forwarded_user: Annotated[str | None, Header()] = None,
@@ -339,7 +348,10 @@ async def reload_skills(
 # ------------------------------------------------------------- attachment
 
 
-@router.put("/skills/{name}/attachment", responses={403: {"description": "Forbidden"}})
+@router.put(
+    "/skills/{name}/attachment",
+    responses={400: _RESP_400, 403: _RESP_403, 500: _RESP_500},
+)
 async def set_attachment(
     request: Request,
     name: str,
@@ -357,7 +369,7 @@ async def set_attachment(
     await _require_admin(user)
 
     if not _SKILL_NAME_RE.match(name):
-        raise HTTPException(status_code=400, detail="Invalid skill name")
+        raise HTTPException(status_code=400, detail=_ERR_INVALID_SKILL_NAME)
 
     known = set(_known_agents())
     raw_agents = payload.get("agents", [])
@@ -389,7 +401,10 @@ async def set_attachment(
     return {"skill": name, "agents": sorted(set(agents)), "enabled": enabled, "origin": "override"}
 
 
-@router.delete("/skills/{name}/attachment", responses={403: {"description": "Forbidden"}})
+@router.delete(
+    "/skills/{name}/attachment",
+    responses={400: _RESP_400, 403: _RESP_403, 500: _RESP_500},
+)
 async def reset_attachment(
     request: Request,
     name: str,
@@ -402,7 +417,7 @@ async def reset_attachment(
     await _require_admin(user)
 
     if not _SKILL_NAME_RE.match(name):
-        raise HTTPException(status_code=400, detail="Invalid skill name")
+        raise HTTPException(status_code=400, detail=_ERR_INVALID_SKILL_NAME)
 
     cfg = get_config()
     try:
@@ -417,7 +432,16 @@ async def reset_attachment(
 # ---------------------------------------------------------------- install
 
 
-@router.post("/skills/install", responses={403: {"description": "Forbidden"}})
+@router.post(
+    "/skills/install",
+    responses={
+        400: _RESP_400,
+        403: _RESP_403,
+        500: _RESP_500,
+        501: _RESP_501,
+        504: _RESP_504,
+    },
+)
 async def install_skills(
     request: Request,
     payload: Annotated[dict[str, Any], Body()],
@@ -448,6 +472,48 @@ async def install_skills(
             detail="Skill install is disabled. Set skills.install_enabled to enable it.",
         )
 
+    root, repo_url, ref, subdir, only, allowed_hosts = _parse_install_request(payload, section)
+
+    try:
+        result = await _clone_and_install(repo_url, ref, subdir, root, only, allowed_hosts)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Skill install failed for %s@%s", repo_url, ref)
+        raise HTTPException(status_code=500, detail=f"Install failed: {e}") from e
+
+    # Republish so the new skills are usable on the next request.
+    try:
+        manifests = SkillLoader.from_config(cfg).load_all()
+        published = sync_sdk_skill_root(manifests, cwd=_sdk_cwd(cfg))
+    except Exception:
+        logger.exception("Installed %s but reload failed", repo_url)
+        published = {}
+
+    logger.info(
+        "Installed %d skills from %s@%s (%s) by %s",
+        len(result.installed),
+        repo_url,
+        ref,
+        result.sha[:8],
+        user,
+    )
+    return {
+        "installed": result.installed,
+        "repo_url": repo_url,
+        "ref": ref,
+        "resolved_sha": result.sha,
+        "skipped_symlinks": result.skipped_symlinks,
+        "skipped_skills": result.skipped_skills,
+        "published": sorted(published),
+        "hint": "Newly installed skills are attached by parsec.domain; set attachment explicitly if they declare none.",
+    }
+
+
+def _parse_install_request(
+    payload: dict[str, Any], section: dict[str, Any]
+) -> tuple[Path, str, str, str, set[str] | None, tuple[str, ...]]:
+    """Validate the install body; return (root, repo_url, ref, subdir, only, hosts)."""
     install_root = section.get("install_root")
     if not install_root:
         raise HTTPException(status_code=500, detail="skills.install_root is not configured")
@@ -494,43 +560,13 @@ async def install_skills(
             detail="git is not installed in this image; install from git is unavailable",
         )
 
-    try:
-        result = await _clone_and_install(repo_url, ref, subdir, root, only, allowed_hosts)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Skill install failed for %s@%s", repo_url, ref)
-        raise HTTPException(status_code=500, detail=f"Install failed: {e}") from e
-
-    # Republish so the new skills are usable on the next request.
-    try:
-        manifests = SkillLoader.from_config(cfg).load_all()
-        published = sync_sdk_skill_root(manifests, cwd=_sdk_cwd(cfg))
-    except Exception:
-        logger.exception("Installed %s but reload failed", repo_url)
-        published = {}
-
-    logger.info(
-        "Installed %d skills from %s@%s (%s) by %s",
-        len(result.installed),
-        repo_url,
-        ref,
-        result.sha[:8],
-        user,
-    )
-    return {
-        "installed": result.installed,
-        "repo_url": repo_url,
-        "ref": ref,
-        "resolved_sha": result.sha,
-        "skipped_symlinks": result.skipped_symlinks,
-        "skipped_skills": result.skipped_skills,
-        "published": sorted(published),
-        "hint": "Newly installed skills are attached by parsec.domain; set attachment explicitly if they declare none.",
-    }
+    return root, repo_url, ref, subdir, only, allowed_hosts
 
 
-@router.delete("/skills/{name}", responses={403: {"description": "Forbidden"}})
+@router.delete(
+    "/skills/{name}",
+    responses={400: _RESP_400, 403: _RESP_403, 404: _RESP_404, 409: _RESP_409},
+)
 async def uninstall_skill(
     request: Request,
     name: str,
@@ -550,7 +586,7 @@ async def uninstall_skill(
     await _require_admin(user)
 
     if not _SKILL_NAME_RE.match(name):
-        raise HTTPException(status_code=400, detail="Invalid skill name")
+        raise HTTPException(status_code=400, detail=_ERR_INVALID_SKILL_NAME)
 
     cfg = get_config()
     install_root = _skills_section(cfg).get("install_root")
@@ -666,27 +702,31 @@ async def _init_submodules(
     declared = submodule_settings(parse_config_z(out)) if rc == 0 else {}
     for name in sorted(settings):
         path = declared.get(name, {}).get("path") or ""
-        rel = Path(path)
-        if not path or rel.is_absolute() or ".." in rel.parts or symlink_on_path(repo, repo / rel):
-            raise HTTPException(
-                status_code=400, detail=f"submodule {name!r} has an unusable path {path!r}"
-            )
-        rc, _, err = await _run(*submodule_update_command(path), cwd=cwd, env=env)
-        if rc != 0:
-            # Not every server serves a shallow fetch of a commit that is not a
-            # branch tip; retry the same, already-validated URL in full. The
-            # retry reuses whatever the shallow attempt cloned, so deepen that
-            # first or it asks for the same commit and is refused the same way.
-            if (repo / rel / ".git").exists():
-                await _run(*submodule_unshallow_command(), cwd=str(repo / rel), env=env)
-            rc, _, err = await _run(
-                *submodule_update_command(path, shallow=False), cwd=cwd, env=env
-            )
-        if rc != 0:
-            raise HTTPException(
-                status_code=400, detail=f"git submodule update failed for {name!r}: {err.strip()}"
-            )
-        await _init_submodules(repo / rel, allowed_hosts, env, depth=depth + 1)
+        await _fetch_submodule(repo, name, path, env)
+        await _init_submodules(repo / Path(path), allowed_hosts, env, depth=depth + 1)
+
+
+async def _fetch_submodule(repo: Path, name: str, path: str, env: Mapping[str, str]) -> None:
+    """Validate path, shallow-update (with full-depth retry), raise on failure."""
+    cwd = str(repo)
+    rel = Path(path)
+    if not path or rel.is_absolute() or ".." in rel.parts or symlink_on_path(repo, repo / rel):
+        raise HTTPException(
+            status_code=400, detail=f"submodule {name!r} has an unusable path {path!r}"
+        )
+    rc, _, err = await _run(*submodule_update_command(path), cwd=cwd, env=env)
+    if rc != 0:
+        # Not every server serves a shallow fetch of a commit that is not a
+        # branch tip; retry the same, already-validated URL in full. The
+        # retry reuses whatever the shallow attempt cloned, so deepen that
+        # first or it asks for the same commit and is refused the same way.
+        if (repo / rel / ".git").exists():
+            await _run(*submodule_unshallow_command(), cwd=str(repo / rel), env=env)
+        rc, _, err = await _run(*submodule_update_command(path, shallow=False), cwd=cwd, env=env)
+    if rc != 0:
+        raise HTTPException(
+            status_code=400, detail=f"git submodule update failed for {name!r}: {err.strip()}"
+        )
 
 
 #: Scratch space for an install, inside install_root so the final swap is a
@@ -833,33 +873,34 @@ async def _clone_and_install(
         )
 
 
-def _install_from_clone(
-    clone_dir: Path,
-    repo_url: str,
-    ref: str,
-    subdir: str,
-    root: Path,
-    only: set[str] | None,
-    sha: str,
-) -> _InstallResult:
-    """Select, size-check, copy and record provenance for a fetched clone."""
+def _resolve_install_source_roots(clone_dir: Path, subdir: str) -> list[Path]:
+    """Resolve which directories under the clone hold installable skills."""
     if subdir:
         source_root = clone_dir / subdir
         if symlink_on_path(clone_dir, source_root) is not None:
             raise HTTPException(status_code=400, detail=f"subdir {subdir!r} is a symlink")
         if not source_root.is_dir():
             raise HTTPException(status_code=400, detail=f"subdir {subdir!r} not found in repo")
-        source_roots = [source_root]
-    else:
-        # A marketplace holds several bundles at once, and the RHDP one keeps
-        # its AIOps bundle behind a submodule. Discovery walks the clone so
-        # an operator pastes a URL rather than reverse-engineering a layout.
-        source_roots = discover_skill_roots(clone_dir)
-        if not source_roots:
-            raise HTTPException(
-                status_code=400, detail="no directories of SKILL.md folders found in repo"
-            )
+        return [source_root]
 
+    # A marketplace holds several bundles at once, and the RHDP one keeps
+    # its AIOps bundle behind a submodule. Discovery walks the clone so
+    # an operator pastes a URL rather than reverse-engineering a layout.
+    source_roots = discover_skill_roots(clone_dir)
+    if not source_roots:
+        raise HTTPException(
+            status_code=400, detail="no directories of SKILL.md folders found in repo"
+        )
+    return source_roots
+
+
+def _select_skills_for_install(
+    clone_dir: Path,
+    source_roots: list[Path],
+    only: set[str] | None,
+    subdir: str,
+) -> tuple[list[SkillManifest], list[dict[str, str]]]:
+    """Load, filter and validate skills from discovered roots."""
     # Load through the real loader rather than walking directories here: it
     # applies the same validation and the same first-root-wins de-duplication
     # that discovery will apply later, so what installs is exactly what would
@@ -900,6 +941,22 @@ def _install_from_clone(
                 f"{s['skill']} ({s['reason']})" for s in skipped_skills
             )
         raise HTTPException(status_code=400, detail=detail)
+
+    return selected, skipped_skills
+
+
+def _install_from_clone(
+    clone_dir: Path,
+    repo_url: str,
+    ref: str,
+    subdir: str,
+    root: Path,
+    only: set[str] | None,
+    sha: str,
+) -> _InstallResult:
+    """Select, size-check, copy and record provenance for a fetched clone."""
+    source_roots = _resolve_install_source_roots(clone_dir, subdir)
+    selected, skipped_skills = _select_skills_for_install(clone_dir, source_roots, only, subdir)
 
     # Measured over exactly what will land: the selected skills only, and
     # only their regular files — the same walk the copy makes.
