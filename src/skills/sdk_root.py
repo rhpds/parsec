@@ -31,6 +31,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 from src.skills.manifest import SkillManifest
 
@@ -45,6 +46,23 @@ def sdk_skills_root(cwd: str | os.PathLike[str] | None = None) -> Path:
     """Return the directory the SDK scans for skills."""
     base = Path(cwd) if cwd else Path.cwd()
     return base / SDK_SKILLS_RELPATH
+
+
+def sdk_cwd(config: Any) -> str | None:
+    """The cwd the SDK subprocess uses, which is also where its skills root lives.
+
+    Read through :func:`~src.llm.config_section.section` rather than by chaining
+    ``config.get``: Dynaconf materialises env-supplied keys UPPERCASE when the
+    YAML does not declare them, so a cwd set via ``PARSEC_AGENT__SDK__CWD``
+    reads as ``None`` from a hand-chained lookup. Startup and reload would then
+    publish into two different roots.
+    """
+    from src.llm.config_section import section
+
+    try:
+        return section(section(config, "agent"), "sdk").get("cwd") or None
+    except Exception:
+        return None
 
 
 def sync_sdk_skill_root(

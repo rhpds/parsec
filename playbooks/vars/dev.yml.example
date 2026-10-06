@@ -11,6 +11,9 @@ cluster_domain: apps.your-cluster.example.com
 git_branch: main
 oauth_enabled: true
 
+# Shared data PVC (Azure billing DB + EC2 pricing). Must match live PVC size.
+pvc_data_size: "25Gi"
+
 # Vertex AI service account key
 vertex_credentials_path: ~/path/to/vertex-sa.json
 

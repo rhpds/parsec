@@ -148,7 +148,11 @@ def test_skills_attached_to_the_agents_that_declare_them(_fake_sdk):
     assert len(cost) > 1, "cost declares several skills; only one was attached"
 
     aap2 = sdk_profile_for("aap2", _cfg())["skills"]
-    assert "root-cause-analysis" in aap2, "the vendored rhdp-rca-plugin skill is orphaned"
+    assert "aap2-job-failure-rca" in aap2
+    assert len(aap2) > 1, "aap2 declares several skills; only one was attached"
+    assert (
+        "root-cause-analysis" not in aap2
+    ), "the vendored copy was removed: it could not run here and shadowed the real bundle"
 
 
 def test_agent_with_no_skills_still_gets_tools(_fake_sdk):

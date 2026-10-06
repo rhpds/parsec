@@ -36,6 +36,10 @@ babylon_kubeconfigs:
   integration: "{{ lookup('env', 'HOME') }}/secrets/babylon-readonly/integration.kubeconfig"
   babydev: "{{ lookup('env', 'HOME') }}/secrets/babylon-readonly/babydev.kubeconfig"
 
+# Shared CephFS PVC for Azure billing DB + EC2 pricing cache (/app/data).
+# Expanded from 10Gi after azure_billing.db grew to ~9.1Gi (2026-09).
+pvc_data_size: "25Gi"
+
 # Reporting MCP (cross-namespace, demo-reporting)
 reporting_mcp_url: "http://reporting-mcp.demo-reporting.svc:8080/mcp/"
 

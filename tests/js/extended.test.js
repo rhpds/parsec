@@ -24,6 +24,7 @@ function resetDOM() {
   document.getElementById('sidebar-list').textContent = '';
   document.getElementById('sidebar-list').style.display = '';
   document.getElementById('skills-list').textContent = '';
+  document.getElementById('skills-toolbar').textContent = '';
   const sidebar = document.getElementById('sidebar');
   sidebar.classList.remove('open');
   const learningsPanel = document.getElementById('learnings-panel');
@@ -383,10 +384,26 @@ describe('renderSkills', () => {
     expect(path.textContent).toBe('/path/to/skill');
   });
 
-  it('omits meta div when no metadata bits', () => {
-    renderSkills()([{ name: 'minimal', description: '' }]);
+  it('omits meta div for a project skill without metadata', () => {
+    renderSkills()([{ name: 'minimal', description: '', source: 'project' }]);
     const card = document.getElementById('skills-list').querySelector('.skill-card');
     expect(card.querySelector('.skill-meta')).toBeNull();
+  });
+
+  it('marks an external skill without provenance as unpinned', () => {
+    renderSkills()([{ name: 'external', description: '', source: 'plugin' }]);
+    expect(document.querySelector('.skill-meta').textContent).toBe('unpinned');
+  });
+
+  it('renders untrusted names and health reasons as text', () => {
+    renderSkills()([{
+      name: '<img src=x onerror=alert(1)>',
+      health: { status: 'unusable', reasons: ['<script>alert(1)</script>'] },
+    }]);
+    const card = document.querySelector('.skill-card');
+    expect(card.querySelector('img, script')).toBeNull();
+    expect(card.querySelector('.skill-name').textContent).toContain('<img');
+    expect(card.querySelector('.skill-reason').textContent).toContain('<script>');
   });
 });
 
@@ -407,6 +424,23 @@ describe('loadSkills', () => {
       const cards = document.getElementById('skills-list').querySelectorAll('.skill-card');
       expect(cards).toHaveLength(1);
     });
+  });
+
+  it.each([
+    [false, true, []],
+    [true, false, ['Reload from disk']],
+    [true, true, ['Reload from disk', 'Add from Git']],
+  ])('gates admin controls (admin=%s, install=%s)', async (admin, install, labels) => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ skills: [], is_admin: admin, install_enabled: install }),
+    });
+    loadSkills()();
+    await vi.waitFor(() => {
+      expect(document.querySelector('.skills-summary')).not.toBeNull();
+    });
+    const buttons = [...document.querySelectorAll('#skills-toolbar button')];
+    expect(buttons.map(button => button.textContent)).toEqual(labels);
   });
 
   it('shows error on fetch failure', async () => {

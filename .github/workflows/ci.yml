@@ -6,12 +6,17 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   quality-gates:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -23,7 +28,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install black ruff mypy bandit types-PyYAML
+          pip install black ruff mypy bandit types-PyYAML pytest pytest-asyncio pytest-mock
 
       - name: Black (formatting)
         run: black --check --line-length=100 src/
@@ -33,6 +38,16 @@ jobs:
 
       - name: MyPy (type checking)
         run: mypy src/ --ignore-missing-imports
+
+      - name: Python tests
+        run: python -m pytest -q --junitxml=pytest-results.xml
+
+      - name: Upload Python test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: python-test-results
+          path: pytest-results.xml
 
       - name: Bandit (security)
         run: bandit -r src/ -s B101 -f json -o bandit-report.json || true
@@ -44,27 +59,44 @@ jobs:
           name: bandit-report
           path: bandit-report.json
 
+  javascript-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
   docker-build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: quality-gates
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Build Docker image
         run: docker build -f dockerfiles/Dockerfile -t parsec:test .
 
       - name: Verify image
-        run: docker run --rm parsec:test python -c "from src.config import get_config; print('OK')"
+        run: docker run --rm parsec:test python -c "from src.app import app; assert app.title == 'Parsec'; print('OK')"
 
   ci-status:
     runs-on: ubuntu-latest
-    needs: [quality-gates, docker-build]
+    needs: [quality-gates, javascript-tests, docker-build]
     if: always()
     steps:
       - name: Check results
         run: |
           if [ "${{ needs.quality-gates.result }}" != "success" ] || \
+             [ "${{ needs.javascript-tests.result }}" != "success" ] || \
              [ "${{ needs.docker-build.result }}" != "success" ]; then
             echo "CI failed"
             exit 1

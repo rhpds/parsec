@@ -30,9 +30,14 @@ NATIVE_SKILLS = {
 #: Vendored from another repo — currently redhat-et/rhdp-rca-plugin. They must
 #: load and describe themselves, but we do not own their frontmatter, so
 #: `parsec.version` is not required of them.
-VENDORED_SKILLS = {
-    "root-cause-analysis",
-}
+#:
+#: Empty on purpose. `root-cause-analysis` used to live here as a SKILL.md with
+#: no payload: it drove `scripts/cli.py`, which was never copied, and requested
+#: Bash/Read/Write, which this runtime does not grant. Worse, `project_root`
+#: wins `SkillLoader._deduplicate`, so the stub shadowed the real bundle
+#: whenever it was mounted. Vendor an external skill only with the files it
+#: actually needs; otherwise mount it via `skills.plugin_paths`.
+VENDORED_SKILLS: set[str] = set()
 
 EXPECTED_SKILLS = NATIVE_SKILLS | VENDORED_SKILLS
 

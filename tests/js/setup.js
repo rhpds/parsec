@@ -80,6 +80,7 @@ export function loadAppJs() {
       <button id="sidebar-tab-debug"></button>
       <div id="learnings-panel" style="display:none"></div>
       <div id="skills-panel" style="display:none"></div>
+      <div id="skills-toolbar"></div>
       <div id="skills-list"></div>
       <div id="learnings-count"></div>
       <button id="learnings-view-btn"></button>
