@@ -19,4 +19,4 @@ mlflow>=2.10.0
 # @anthropic-ai/claude-code@<version>` in dockerfiles/Dockerfile — decides
 # which CLI actually executes with the pod's credentials. Floating it meant
 # every image rebuild could silently change the runtime.
-claude-agent-sdk==0.2.106
+claude-agent-sdk==0.2.121
