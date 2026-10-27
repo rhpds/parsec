@@ -73,6 +73,14 @@ def init_mlflow() -> None:
         )
         _client = None
         mlflow.tracing.disable()
+        return
+
+    try:
+        from src.llm.sdk_tracing import enable_sdk_tracing
+
+        enable_sdk_tracing(cfg)
+    except Exception:
+        logger.warning("MLflow SDK autologging setup failed (non-fatal)", exc_info=True)
 
 
 def get_mlflow_client() -> MlflowClient | None:
