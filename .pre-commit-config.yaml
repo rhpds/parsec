@@ -109,7 +109,7 @@ repos:
             \.secrets\.baseline
           )
 
-  # SonarQube analysis (pre-push only)
+  # SonarQube analysis (pre-push, opt-in via RUN_SONAR=1)
   - repo: local
     hooks:
       - id: sonarqube
