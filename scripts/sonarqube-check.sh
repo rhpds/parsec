@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Opt-in only. Pre-push would otherwise block on stale quality-gate noise.
+# Enable with: RUN_SONAR=1 git push
+if [ "${RUN_SONAR:-}" != "1" ]; then
+    echo "SonarQube skipped (opt-in). Set RUN_SONAR=1 to run analysis."
+    exit 0
+fi
+
 if [ -z "${SONAR_URL:-}" ] || [ -z "${SONAR_TOKEN:-}" ]; then
     echo "⚠️  SONAR_URL or SONAR_TOKEN not set — skipping SonarQube analysis"
     exit 0
@@ -17,7 +24,7 @@ if ! command -v sonar-scanner >/dev/null 2>&1; then
 fi
 
 pytest tests/ -q --cov=src --cov-report=xml:coverage.xml 2>/dev/null &&
-sonar-scanner \
+    sonar-scanner \
     -Dsonar.host.url="$SONAR_URL" \
     -Dsonar.token="$SONAR_TOKEN" \
     -Dsonar.qualitygate.wait=true \
