@@ -68,7 +68,6 @@ from src.tools.icinga import query_icinga
 from src.tools.marketplace_agreements import query_marketplace_agreements
 from src.tools.ocpv import query_ocpv_cluster
 from src.tools.provision_db import execute_query
-from src.tools.splunk import query_splunk
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +252,7 @@ async def _execute_cloud_tool(tool_name: str, tool_input: dict) -> dict:
 
 
 async def _execute_infra_tool(tool_name: str, tool_input: dict) -> dict:
-    """Dispatch infrastructure platform tools (Babylon, OCPV, AAP2, Splunk, Icinga)."""
+    """Dispatch infrastructure platform tools (Babylon, OCPV, AAP2, Icinga)."""
     if tool_name == "query_babylon_catalog":
         return await query_babylon_catalog(
             action=tool_input["action"],
@@ -291,21 +290,6 @@ async def _execute_infra_tool(tool_name: str, tool_input: dict) -> dict:
             created_before=tool_input.get("created_before", ""),
             template_name=tool_input.get("template_name", ""),
             max_results=tool_input.get("max_results", 50),
-        )
-
-    if tool_name == "query_splunk":
-        return await query_splunk(
-            action=tool_input["action"],
-            guid=tool_input.get("guid", ""),
-            namespace=tool_input.get("namespace", ""),
-            cluster_name=tool_input.get("cluster_name", ""),
-            controller=tool_input.get("controller", ""),
-            search_terms=tool_input.get("search_terms", ""),
-            earliest=tool_input.get("earliest", "-24h"),
-            latest=tool_input.get("latest", "now"),
-            errors_only=tool_input.get("errors_only", False),
-            raw_query=tool_input.get("raw_query", ""),
-            max_results=tool_input.get("max_results", 200),
         )
 
     # query_icinga
@@ -385,7 +369,6 @@ _INFRA_TOOLS = frozenset(
         "query_babylon_catalog",
         "query_ocpv_cluster",
         "query_aap2",
-        "query_splunk",
         "query_icinga",
     }
 )

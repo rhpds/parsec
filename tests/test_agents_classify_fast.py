@@ -34,9 +34,6 @@ class TestClassifyFast:
     def test_babylon_workshop(self):
         assert classify_fast("List the workshop deployments") == "babylon"
 
-    def test_babylon_splunk_logs(self):
-        assert classify_fast("Check splunk logs for the deployment") == "babylon"
-
     # --- Cost ---
     def test_cost_keyword(self):
         assert classify_fast("What is the cost of this account?") == "cost"

@@ -46,7 +46,7 @@ def _load_one(root: Path, name: str):
 
 
 def _surface(tools: set[str] | None = None) -> ToolSurface:
-    names = tools or {"mcp__parsec__query_aap2", "mcp__parsec__query_splunk"}
+    names = tools or {"mcp__parsec__query_aap2", "mcp__parsec__query_babylon_catalog"}
     return ToolSurface(per_agent=dict.fromkeys(AGENTS, frozenset(names)))
 
 
