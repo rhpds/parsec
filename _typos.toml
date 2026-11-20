@@ -4,3 +4,6 @@ ND = "ND"
 nd = "nd"
 "mis-routing" = "mis-routing"
 "mis-routed" = "mis-routed"
+# typos tokenizes on hyphens; "pre-empted" is flagged as empted→emptied
+empted = "empted"
+unparseable = "unparseable"
