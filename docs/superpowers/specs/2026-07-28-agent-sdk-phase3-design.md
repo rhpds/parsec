@@ -24,7 +24,7 @@ tools** — it would answer cost questions from the system prompt alone. Icinga 
 because two of its five tools are already real MCP servers (monitoring-mcp SSE, GitHub
 remote MCP) and the other three were dropped from its profile (`src/agent/icinga_sdk.py:38-68`).
 The other five agents run in-process Python against Postgres, boto3, the Azure SDK,
-BigQuery, Splunk and AAP2 REST. None of that is reachable from an SDK subprocess.
+BigQuery and AAP2 REST. None of that is reachable from an SDK subprocess.
 
 ## Decision 1 — One in-process MCP bridge, not a sidecar
 
@@ -43,7 +43,7 @@ sidecar reaches none of them:
 | GitHub secret redaction | `src/tools/github_files.py:30-47` (`_redact_secrets`) |
 | AAP2 log trimming | `src/tools/aap2.py:11, 252` (`trim_ansible_log`) |
 
-A sidecar also duplicates every AWS/Azure/GCP/Splunk/AAP2 credential into a second pod.
+A sidecar also duplicates every AWS/Azure/GCP/AAP2 credential into a second pod.
 
 **Why a loop and not 23 hand-written wrappers.** `_execute_tool(tool_name, tool_input) -> dict`
 (`src/agent/orchestrator.py:401`) is the single dispatch entry point, and the per-tool kwarg

@@ -1,6 +1,6 @@
 ---
 name: aap2-job-failure-triage
-description: Triage a failed Ansible Automation Platform 2 (AAP2) controller job — find the failing task, extract the error from the job output and Splunk logs, and identify the root cause with a recommended fix. Use when an AAP2 job, workflow, or Babylon deployment fails and someone needs to know why.
+description: Triage a failed Ansible Automation Platform 2 (AAP2) controller job — find the failing task, extract the error from the job output, and identify the root cause with a recommended fix. Use when an AAP2 job, workflow, or Babylon deployment fails and someone needs to know why.
 license: MIT
 allowed-tools:
   - mcp__reporting__*
@@ -28,7 +28,7 @@ Explain why an AAP2 controller job failed and how to fix it.
 1. **Locate the job.** Resolve the job id on the right AAP2 controller and read
    its status, the failed task, and the module and return code.
 2. **Get the error.** Pull the relevant stdout for the failed task. If the
-   controller output is truncated, query Splunk for the job's pod logs.
+   controller output is truncated, note that and use available AAP2 event data.
 3. **Classify the failure.** Common buckets: missing or non-existent Galaxy
    collection / git ref, credential or permission error, unreachable host,
    template or variable error, timeout.

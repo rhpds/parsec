@@ -36,7 +36,7 @@ class AgentSdkUnavailableError(RuntimeError):
 # ``parsec-cloud-credentials`` and ``parsec-aap2-credentials``: AWS secret key,
 # Azure client secret, Cosmos key, the AAP2 controller passwords, plus the
 # GitHub and reporting-MCP tokens), and customer-controlled text reaches the
-# model verbatim via Splunk pod logs and AAP2 job stdout. So the subprocess gets
+# model verbatim via AAP2 job stdout. So the subprocess gets
 # an allowlist, not ``os.environ``.
 #
 # Anything an operator genuinely needs beyond this list can be added explicitly

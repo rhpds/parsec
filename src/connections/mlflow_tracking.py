@@ -3,8 +3,7 @@
 Provides a thin wrapper around the MLflow client SDK. The module is
 conditional — when tracking_url is empty, all operations are no-ops.
 
-Pattern follows src/connections/splunk.py: global singleton, init at
-startup, getter for the client.
+Pattern: global singleton, init at startup, getter for the client.
 """
 
 from __future__ import annotations

@@ -267,13 +267,6 @@ class TestExecuteInfraTool:
         assert result == {"jobs": []}
 
     @pytest.mark.asyncio
-    async def test_routes_query_splunk(self, monkeypatch):
-        mock_fn = AsyncMock(return_value={"results": []})
-        monkeypatch.setattr("src.agent.orchestrator.query_splunk", mock_fn)
-        result = await _execute_infra_tool("query_splunk", {"action": "search"})
-        assert result == {"results": []}
-
-    @pytest.mark.asyncio
     async def test_falls_through_to_query_icinga(self, monkeypatch):
         mock_fn = AsyncMock(return_value={"hosts": []})
         monkeypatch.setattr("src.agent.orchestrator.query_icinga", mock_fn)

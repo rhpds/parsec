@@ -4,8 +4,8 @@ The SDK runs the CLI as a child process and the model can read that process's
 environment through its built-in tools, so ``ClaudeAgentOptions(env=...)`` is a
 disclosure boundary. Parsec's pod carries every cloud credential the app needs
 (``envFrom`` on ``parsec-cloud-credentials`` / ``parsec-aap2-credentials``), and
-customer-controlled text reaches the model verbatim via Splunk pod logs and AAP2
-job stdout — so the boundary has to be an allowlist.
+customer-controlled text reaches the model verbatim via AAP2 job stdout — so the
+boundary has to be an allowlist.
 """
 
 from __future__ import annotations

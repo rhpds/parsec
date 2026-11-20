@@ -63,9 +63,9 @@ flowchart TD
     SEAM -->|"sdk (icinga only)"| SDK["AgentRunner → AgentSdkClient.complete<br/>claude CLI subprocess runs its OWN loop<br/>skills=[icinga-triage]"]
     LEG --> TOOLS["src/tools/* wrappers<br/>query_icinga · fetch_github_file · SQL guard"]
     SDK --> MCPRAW["raw MCP tools<br/>mcp__icinga__* · mcp__github__*"]
-    TOOLS --> CONN["src/connections/*<br/>MCP (DB/GitHub/Icinga sidecar)<br/>+ boto3/httpx (AWS/Azure/GCP/Babylon/AAP2/OCPV/Splunk)"]
+    TOOLS --> CONN["src/connections/*<br/>MCP (DB/GitHub/Icinga sidecar)<br/>+ boto3/httpx (AWS/Azure/GCP/Babylon/AAP2/OCPV)"]
     MCPRAW --> CONN
-    CONN --> SVC[("Icinga2 · GitHub repos · Provision DB<br/>clouds · clusters · Splunk")]
+    CONN --> SVC[("Icinga2 · GitHub repos · Provision DB<br/>clouds · clusters")]
     LEG --> MET["MetricsCollector → MLflow<br/>runtime-tagged runs (#34)"]
     SDK --> MET
     SDK -.->|"#31 (separate layer)"| TRACE["claude_code.* subprocess spans → MLflow"]
@@ -130,7 +130,7 @@ Both runtimes assemble the system prompt the **same way**, via `get_agent_prompt
 
 Parsec reaches ~10 systems in **two transport families**:
 - **MCP servers** — reporting/provision DB + GitHub (JSON-RPC over **streamable-HTTP**, shared helper `connections/mcp_common.py`) and the Icinga **sidecar** (**SSE**, `connections/icinga_mcp.py`, from #8).
-- **Direct SDK / REST** — AWS (boto3), Azure (blob), GCP (BigQuery), and hand-rolled `httpx` K8s/REST clients for Babylon / OCPV / AAP2 / Splunk.
+- **Direct SDK / REST** — AWS (boto3), Azure (blob), GCP (BigQuery), and hand-rolled `httpx` K8s/REST clients for Babylon / OCPV / AAP2.
 
 Every connector `init_*()` degrades gracefully when unconfigured, and the dependent tool is **gated** (hidden from the model) — e.g. `_is_icinga_configured()` (`tool_definitions.py:1358`). Per-agent tool groups are assembled by `get_<agent>_tools()`.
 

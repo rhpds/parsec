@@ -19,7 +19,6 @@ from src.connections.icinga_mcp import init_icinga_mcp
 from src.connections.mlflow_tracking import init_mlflow
 from src.connections.ocpv import init_ocpv
 from src.connections.reporting_mcp import fetch_server_instructions, init_reporting_mcp
-from src.connections.splunk import init_splunk
 from src.routes.alert import router as alert_router
 from src.routes.conversations import ensure_conversations_dir
 from src.routes.conversations import router as conversations_router
@@ -57,7 +56,6 @@ async def lifespan(app: FastAPI):
         ("GitHub MCP", init_github_mcp),
         ("Icinga MCP", init_icinga_mcp),
         ("Reporting MCP", init_reporting_mcp),
-        ("Splunk", init_splunk),
         ("MLflow", init_mlflow),
     ]:
         try:

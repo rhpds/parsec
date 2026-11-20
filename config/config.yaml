@@ -129,18 +129,6 @@ icinga:
   # sdk_allow_writes / sdk_allowed_tools keys that used to live here are gone —
   # nothing reads them.
 
-splunk:
-  # Red Hat Corporate Splunk REST API endpoint.
-  # Uses federated search to query Splunk Cloud (rhcorporate.splunkcloud.com)
-  # via the on-prem API host (splunk-api.corp.redhat.com:8089).
-  # Set token via PARSEC_SPLUNK__TOKEN env var or parsec-secrets.
-  # Requires VPN or internal network access (port 8089).
-  host: "https://splunk-api.corp.redhat.com"
-  token: ""
-  # username: ""
-  # password: ""
-  verify_ssl: false  # self-signed cert on internal endpoint
-
 # MLflow tracking server for agent performance metrics.
 # Set tracking_url to enable metrics collection.
 # Leave empty to disable (metrics silently skipped).

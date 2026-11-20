@@ -33,7 +33,6 @@ src/
     babylon.py               # Babylon cluster catalog/deployment queries
     aap2.py                  # AAP2 controller job queries (REST API)
     ocpv.py                  # OCPV cluster inspection (VMs, nodes, pods, PVCs)
-    splunk.py                # Splunk log queries (Babylon pods, AAP2 logs)
     icinga.py                # Icinga2 monitoring queries via MCP sidecar
     github_files.py          # GitHub file/directory fetching via remote MCP server
   connections/
@@ -44,7 +43,6 @@ src/
     babylon.py               # Babylon cluster K8s API clients (httpx-based)
     aap2.py                  # AAP2 controller REST API clients (httpx-based)
     ocpv.py                  # OCPV cluster K8s API clients (httpx-based)
-    splunk.py                # Splunk REST API client
     icinga_mcp.py            # Icinga MCP client (SSE, monitoring sidecar)
     github_mcp.py            # GitHub remote MCP server client (streamable HTTP)
     mlflow_tracking.py       # MLflow tracking server client (conditional, no-op if disabled)
