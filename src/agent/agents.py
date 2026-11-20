@@ -199,8 +199,6 @@ _BABYLON_PATTERNS = re.compile(
     | \bworkshop\b
     | deployment\s+state
     | what.*(?:deploy|provision)s?\b
-    | \bsplunk\b.*\blog
-    | \blog.*\bsplunk\b
     """,
     re.IGNORECASE | re.VERBOSE,
 )
@@ -253,30 +251,45 @@ _ICINGA_PATTERNS = re.compile(
 )
 
 
+#: Every routable domain and its pattern. Order no longer decides anything —
+#: a question must match exactly one to be fast-pathed — but it is kept stable
+#: so the list reads the same way as before.
+_DOMAIN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("aap2", _AAP2_PATTERNS),
+    ("babylon", _BABYLON_PATTERNS),
+    ("cost", _COST_PATTERNS),
+    ("security", _SECURITY_PATTERNS),
+    ("ocpv", _OCPV_PATTERNS),
+    ("icinga", _ICINGA_PATTERNS),
+)
+
+
 def classify_fast(question: str) -> str | None:
     """Regex fast-path: returns agent type or None for orchestrator.
 
     For queries that clearly map to a single domain, this skips the
     orchestrator LLM call entirely. When multiple domains match, falls
     through to the orchestrator for routing.
+
+    "Exactly one domain" is now checked across *all* domains. The previous form
+    tested domains in sequence and only guarded a pair against its counterpart
+    (aap2 vs babylon, cost vs security), so a domain checked later could never
+    win against one checked earlier, however clearly the question belonged to
+    it. Two consequences, both reachable from ordinary questions:
+
+      * ``\\bbabylon\\b`` matches inside a *hostname*, so an Icinga question
+        about ``babylon-ocp-prod-us-east-1`` routed to "babylon" — the Icinga
+        specialist was unreachable for any host named that way.
+      * ``icinga`` was checked last and unguarded, so with no babylon mention
+        at all, "monitoring status of host ocpv05?" routed to "ocpv" on the
+        cluster name alone.
+
+    Returning None on a genuine tie is the documented contract, and is what the
+    two existing ambiguity tests already pin for the guarded pairs. This applies
+    it to all six domains instead of four.
     """
-    aap2 = _AAP2_PATTERNS.search(question)
-    babylon = _BABYLON_PATTERNS.search(question)
-
-    if aap2 and not babylon:
-        return "aap2"
-    if babylon and not aap2:
-        return "babylon"
-
-    if _COST_PATTERNS.search(question) and not _SECURITY_PATTERNS.search(question):
-        return "cost"
-    if _SECURITY_PATTERNS.search(question) and not _COST_PATTERNS.search(question):
-        return "security"
-    if _OCPV_PATTERNS.search(question):
-        return "ocpv"
-    if _ICINGA_PATTERNS.search(question):
-        return "icinga"
-    return None
+    matched = [name for name, pattern in _DOMAIN_PATTERNS if pattern.search(question)]
+    return matched[0] if len(matched) == 1 else None
 
 
 # ---------------------------------------------------------------------------

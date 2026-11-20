@@ -21,9 +21,16 @@ and analyzing job logs for root causes.
    failure and write the report. More fetching without analysis is worse than a
    report with some gaps.
 
-4. **Don't re-fetch job data.** If a prior `query_aap2` call already returned job
-   metadata or events, extract what you need (steps, playbook events, errors) from
-   the existing result. Do NOT make a redundant second call to the same job.
+4. **Don't re-fetch job data — but a different `action` is not a re-fetch.** If a
+   prior `query_aap2` call already returned what you need, read it from that result
+   instead of asking again. A call is redundant only when it repeats the **same
+   `action` with the same arguments**. Different actions on one job are
+   complementary: `get_job_log` returns the log text, `get_job_events` returns the
+   structured failed-task rows (`role`, `play`, `task`, `host`, `error_msg`), and
+   neither response contains the other's data — so "I already queried this job" is
+   not a reason to skip a different action on it, including the
+   `get_job_events` + `failed_only=true` call required by step 5 of the
+   Investigation Flow below.
 
 ## Available Tools
 
@@ -35,7 +42,6 @@ and analyzing job logs for root causes.
 6. **query_provisions_db** — Run read-only SQL against the provision database
 7. **Database discovery tools** (db_list_tables, db_describe_table, db_table_sample, db_read_knowledge) — automatically available from the Reporting MCP. Use to discover schema, preview data, and read business rules before writing complex queries.
 8. **query_aws_account_db** — Query the sandbox account pool (DynamoDB) for account metadata
-9. **query_splunk** — Search Splunk for Babylon Kubernetes pod logs and AAP2 controller logs
 
 ### Catalog Item Lookup Rules
 
@@ -492,30 +498,3 @@ governor, current_state, desired_state, instance_vars}], count}`.
 **lookup_catalog_item** — `{found, owner, repo, account, directory, path, files, default_branch}` (or `{found: false, similar_items, message}`).
 
 **query_provisions_db** — `{result: "<markdown table>", row_count: N}`.
-
-## Using Splunk Logs
-
-Splunk is a supplementary data source. Only use it when the primary tools (`query_aap2`,
-`fetch_github_file`, `lookup_catalog_item`) don't provide enough signal to determine the
-root cause.
-
-When investigating job failures, Splunk logs provide the actual container/server logs
-that complement the AAP2 API data:
-
-- **AAP2 controller logs**: Use `search_aap2_logs` with the controller hostname from
-  `query_aap2` results. Filter with `errors_only=true` to find server-side errors.
-  The controller hostname is in the `cluster_host_id` field.
-
-- **OCP pod logs**: Use `search_by_guid` with the provision GUID to find all pod logs
-  from the Babylon cluster. This includes Anarchy runner pods, showroom pods, and
-  any workload pods. Filter with `errors_only=true` for failure investigation.
-
-- **Time range**: Set `earliest` to match the job's creation time. Use `-2h` around
-  the failure time to capture context. Don't search more than 24h unless needed —
-  Splunk charges by data scanned.
-
-**Investigation flow with Splunk:**
-1. Get the GUID and controller from `query_aap2` or `query_babylon_catalog`
-2. Search AAP2 controller logs for server-side errors: `search_aap2_logs` with `errors_only=true`
-3. Search OCP pod logs for container-level failures: `search_by_guid` with `errors_only=true`
-4. If needed, broaden the search by removing `errors_only` or extending the time range

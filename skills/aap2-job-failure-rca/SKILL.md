@@ -47,8 +47,9 @@ Under the Agent SDK runtime Parsec's own tools are served by the in-process `par
 MCP bridge, so every name below carries the `mcp__parsec__` prefix. The Reporting
 MCP's discovered tools keep their `db_` prefix and are bridged the same way
 (`mcp__parsec__db_describe_table`). Use these **EXACT** names — an unknown tool name
-fails outright. Splunk is **out of scope** for this skill: the interactive path uses
-the AAP2 API and GitHub only. If the cause genuinely needs container logs, say so and
+fails outright. Container log aggregation is **out of scope** for this skill: the
+interactive path uses the AAP2 API and GitHub only. If the cause genuinely needs
+cluster pod logs, say so and
 name it as the gap rather than guessing.
 
 ## Procedure
@@ -114,7 +115,7 @@ name it as the gap rather than guessing.
 - **`aap2-job-failure-triage`** covers the same subject and its description already
   claims a root cause and a recommended fix, so the two genuinely overlap on trigger.
   The discriminator is the **standard of evidence**, not the ambition. Triage reasons
-  from the job output and Splunk and may *name* a likely config; this skill may not
+  from the job output and may *name* a likely config; this skill may not
   assert a configuration or code claim it has not fetched and cited as
   `owner/repo:path:line`, and it must land on exactly one category from the taxonomy
   with a stated confidence. That costs extra rounds, and it is worth them only when the
@@ -128,7 +129,7 @@ name it as the gap rather than guessing.
   "analyse all of yesterday's failures", point at the batch pipeline.
 - Method borrowed from that plugin's root-cause-analysis skill — the mandatory
   `owner/repo:path:line` citation and the fixed category taxonomy — but none of its
-  runtime: no scripts, no SSH or jumpbox, no Splunk client, no artifact directory.
+  runtime: no scripts, no SSH or jumpbox, no artifact directory.
 - For provision or workshop state around the job (AnarchySubject, ResourceClaim,
   MultiWorkshop hierarchy) hand off to the Babylon path; for who owned the sandbox and
   when, use `provision-lookup`.
