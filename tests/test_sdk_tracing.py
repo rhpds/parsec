@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
+import pytest
+
 from src.llm import AgentSdkClient
-from src.llm.sdk_tracing import build_tracing_env
+from src.llm.sdk_tracing import build_tracing_env, enable_sdk_tracing
 
 # ------------------------------------------------------------- build_tracing_env
 
@@ -78,3 +82,14 @@ def test_explicit_sdk_env_overrides_tracing() -> None:
 def test_no_tracing_env_when_mlflow_disabled() -> None:
     client = AgentSdkClient.from_config({"anthropic": {"model": "m"}})
     assert "MLFLOW_CLAUDE_TRACING_ENABLED" not in client._cfg.extra_env
+
+
+@pytest.mark.parametrize(
+    ("runtime", "orchestrator", "calls"),
+    [("legacy", True, 0), ("sdk", False, 0), ("sdk", True, 1)],
+)
+def test_autologging_is_only_enabled_for_full_sdk_runtime(runtime, orchestrator, calls):
+    config = {"agent": {"runtime": runtime, "sdk": {"orchestrator": orchestrator}}}
+    with patch("mlflow.anthropic.autolog") as autolog:
+        enable_sdk_tracing(config)
+        assert autolog.call_count == calls
