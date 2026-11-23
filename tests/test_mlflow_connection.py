@@ -5,13 +5,17 @@ from unittest.mock import MagicMock, patch
 
 def test_init_mlflow_disabled_when_no_url():
     """When tracking_url is empty, init should skip and client should be None."""
-    with patch("src.connections.mlflow_tracking.get_config") as mock_cfg:
+    with (
+        patch("src.connections.mlflow_tracking.get_config") as mock_cfg,
+        patch("src.llm.sdk_tracing.enable_sdk_tracing") as enable_tracing,
+    ):
         mock_cfg.return_value.get.return_value = {}
         from src.connections import mlflow_tracking
 
         mlflow_tracking._client = None
         mlflow_tracking.init_mlflow()
         assert mlflow_tracking._client is None
+        enable_tracing.assert_not_called()
 
 
 def test_init_mlflow_creates_client_with_url():
@@ -29,6 +33,23 @@ def test_init_mlflow_creates_client_with_url():
             mlflow_tracking.init_mlflow()
             assert mlflow_tracking._client is not None
             mock_mlflow.set_tracking_uri.assert_called_once_with("http://localhost:5000")
+
+
+def test_sdk_autolog_setup_failure_preserves_metrics_client():
+    """An optional tracing hook failure must not disable existing metric logging."""
+    with (
+        patch(
+            "src.connections.mlflow_tracking.get_config",
+            return_value={"mlflow": {"tracking_url": "http://localhost:5000"}},
+        ),
+        patch("src.connections.mlflow_tracking.mlflow") as mock_mlflow,
+        patch("src.llm.sdk_tracing.enable_sdk_tracing", side_effect=RuntimeError("hook failed")),
+    ):
+        from src.connections import mlflow_tracking
+
+        mlflow_tracking.init_mlflow()
+        assert mlflow_tracking.get_mlflow_client() is not None
+        mock_mlflow.tracing.disable.assert_not_called()
 
 
 def test_get_mlflow_client_returns_none_when_disabled():
